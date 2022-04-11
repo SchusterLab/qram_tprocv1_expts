@@ -1,0 +1,57 @@
+device:
+    qubit:
+        dac: [0, 1] # index of qubit info in soc dacs
+        # swap: 2 # dac channel for swap drive
+        T1: [130, 45] # us
+        # T2R: [1, 1] # us
+        f_ge: [3672.7788, 4565.7] # MHz
+        f_ef: [3513.592, 4387.126] # MHz
+        f_EgGf: 5245.152 # MHz expect to be ge_1 + ef_1 - ge_0
+        pulses:
+            pi_ge:
+                gain: [20522, 2012]
+                sigma: [0.100, 0.050] # [us]
+                type: gauss
+            pi_ef:
+                gain: [7195, 1590]
+                sigma: [0.300, 0.050] # [us]
+                type: gauss
+            pi_EgGf:
+                gain: 20439
+                sigma: 10.000 # [us]
+                type: gauss
+    
+    readout:
+        dac: [0, 1] # index of readout info in soc dacs
+        adc: [0, 1] # index of readout info in soc adcs
+        lo: [readout, readout] # lo ch
+        trig_offset: 250 # [Clock ticks]
+        frequency: [299.6865, 899.6655] # [MHz] (5.95 GHz, 7.15053 GHz)
+        # frequency: [299.724, 899.5080] # [MHz] readout at the qubit excited state frequency
+        gain: [60, 120] # [DAC units]
+        phase: [0, 0.49892147931760106] # degrees
+        threshold: [0, 0] # adc units
+        readout_length: 10 # [us]
+        relax_delay: [600, 200] # [us]
+    
+hw:
+    lo:
+        readout: {frequency: 6.25e9, power: 16} # mixer wants 10 dBm
+    soc:
+        adcs:
+            readout:
+                ch: [0, 1]
+        dacs:
+            qubit:
+                ch: [4, 5]
+                nyquist: [2, 2]
+            # swap:
+            #     ch: 2
+            #     nyquist: 2
+            readout:
+                ch: [7, 1]
+                nyquist: [1, 1]
+            
+aliases: # for use in instrument manager
+    readout_LO: SC26C3
+    soc: Qick186
