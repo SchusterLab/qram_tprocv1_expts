@@ -12,17 +12,18 @@ class AmplitudeRabiProgram(RAveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
         
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[cfg.device.readout.dac]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[cfg.device.qubit.dac]
+        q_ind = self.cfg.expt.qubit
+        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[cfg.device.readout.dac])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[cfg.device.qubit.dac])
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
     
         self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
         self.r_gain = self.sreg(self.qubit_ch, "gain") # get gain register for qubit_ch    
         
-        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge)
-        self.f_res=self.freq2reg(cfg.device.readout.frequency) # conver f_res to dac register value
+        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
+        self.f_res=self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch) # conver f_res to dac register value
         self.readout_length=self.us2cycles(cfg.device.readout.readout_length)
         for ch in [0,1]: # configure the readout lengths and downconversion frequencies
             self.declare_readout(ch=ch, length=self.readout_length,
@@ -114,7 +115,7 @@ class AmplitudeRabiExperiment(Experiment):
             self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma
         
         amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         
         xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)
 
@@ -221,7 +222,7 @@ class AmplitudeRabiChevronExperiment(Experiment):
 
         freqpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
         data={"xpts":[], "freqpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
 
         self.cfg.expt.start = self.cfg.expt.start_gain
         self.cfg.expt.step = self.cfg.expt.step_gain

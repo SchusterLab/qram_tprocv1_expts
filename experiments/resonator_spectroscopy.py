@@ -19,15 +19,16 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
         
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[cfg.device.readout.dac]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[cfg.device.qubit.dac]
+        q_ind = self.cfg.expt.qubit
+        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[cfg.device.readout.dac])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[cfg.device.qubit.dac])
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
 
         self.frequency = cfg.device.readout.frequency
         self.freqreg = self.freq2reg(self.frequency, gen_ch=self.res_ch, ro_ch=None)
-        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge)
+        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
         self.res_gain = cfg.device.readout.gain
         self.readout_length = self.us2cycles(cfg.device.readout.readout_length)
 
@@ -103,7 +104,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
                             value2.update({key3: value3[q_ind]})                                
         
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         for f in tqdm(xpts, disable=not progress):
             self.cfg.device.readout.frequency = f
             rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
@@ -214,7 +215,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
                             value2.update({key3: value3[q_ind]})                                
         
         data={"xpts":[], "gainpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         for gain in tqdm(gainpts, disable=not progress):
             self.cfg.device.readout.gain = gain
             data["avgi"].append([])
@@ -342,7 +343,7 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
                             value2.update({key3: value3[q_ind]})                                
         
         data={"xpts":[], "voltpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
 
         self.dc_instr.set_mode('CURR')
         self.dc_instr.set_current_limit(max(abs(voltpts)*5))

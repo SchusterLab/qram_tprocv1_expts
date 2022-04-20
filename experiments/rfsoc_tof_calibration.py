@@ -15,8 +15,9 @@ class ToFCalibrationProgram(AveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
 
-        self.dac_ch = cfg.hw.soc.dacs.readout.ch[cfg.device.readout.dac]
-        self.declare_gen(ch=self.dac_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[cfg.device.readout.dac])
+        q_ind = self.cfg.expt.qubit
+        self.dac_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
+        self.declare_gen(ch=self.dac_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
 
         self.frequency = cfg.expt.frequency
         self.freqreg = self.freq2reg(self.frequency) # convert frequency to dac frequency (ensuring it is an available adc frequency)
@@ -69,13 +70,13 @@ class ToFCalibrationExperiment(Experiment):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
     def acquire(self, progress=False):
-        q_ind = self.cfg.expt.qubit_i
+        q_ind = self.cfg.expt.qubit
         for key, value in self.cfg.device.readout.items():
             if isinstance(value, list):
                 self.cfg.device.readout.update({key: value[q_ind]})
         
         data={"i":[], "q":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         tof = ToFCalibrationProgram(soccfg=self.soccfg, cfg=self.cfg)
         self.prog = tof 
         iq = tof.acquire_decimated(self.im[self.cfg.aliases.soc], load_pulses=True, progress=True)

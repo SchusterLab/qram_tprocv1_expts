@@ -14,14 +14,15 @@ class LengthRabiProgram(AveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
         
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[cfg.device.readout.dac]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[cfg.device.qubit.dac]
+        q_ind = self.cfg.expt.qubit
+        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[cfg.device.readout.dac])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[cfg.device.qubit.dac])
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
         
-        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge)
-        self.f_res=self.freq2reg(cfg.device.readout.frequency) # convert f_res to dac register value
+        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
+        self.f_res=self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch) # convert f_res to dac register value
         self.readout_length=self.us2cycles(cfg.device.readout.readout_length)
 
         for ch in [0,1]: # configure the readout lengths and downconversion frequencies
@@ -112,7 +113,7 @@ class LengthRabiExperiment(Experiment):
         
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
         
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         for length in tqdm(lengths, disable=not progress):
             self.cfg.expt.length_placeholder = float(length)
             lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=self.cfg)

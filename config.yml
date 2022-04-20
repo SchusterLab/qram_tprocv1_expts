@@ -1,6 +1,5 @@
 device:
     qubit:
-        dac: [0, 1] # index of qubit info in soc dacs
         # swap: 2 # dac channel for swap drive
         T1: [130, 45] # us
         # T2R: [1, 1] # us
@@ -22,8 +21,6 @@ device:
                 type: gauss
     
     readout:
-        dac: [0, 1] # index of readout info in soc dacs
-        adc: [0, 1] # index of readout info in soc adcs
         lo: [readout, readout] # lo ch
         trig_offset: 250 # [Clock ticks]
         frequency: [299.6865, 899.6655] # [MHz] (5.95 GHz, 7.15053 GHz)
@@ -54,4 +51,4 @@ hw:
             
 aliases: # for use in instrument manager
     readout_LO: SC26C3
-    soc: Qick186
+    soc: Qick187

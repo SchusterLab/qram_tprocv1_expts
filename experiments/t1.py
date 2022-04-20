@@ -12,18 +12,19 @@ class T1Program(RAveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
         
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[cfg.device.readout.dac]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[cfg.device.qubit.dac]
+        q_ind = self.cfg.expt.qubit
+        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[cfg.device.readout.dac])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[cfg.device.qubit.dac])
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
         
         self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
         self.r_wait = 3
         self.safe_regwi(self.q_rp, self.r_wait, self.us2cycles(cfg.expt.start))
         
-        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge)
-        self.f_res=self.freq2reg(cfg.device.readout.frequency) # convert f_res to dac register value
+        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
+        self.f_res=self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch) # convert f_res to dac register value
         self.readout_length=self.us2cycles(cfg.device.readout.readout_length)
         for ch in [0,1]: # configure the readout lengths and downconversion frequencies
             self.declare_readout(ch=ch, length=self.readout_length,
@@ -109,7 +110,7 @@ class T1Experiment(Experiment):
                     for key3, value3 in value2.items():
                         if isinstance(value3, list):
                             value2.update({key3: value3[q_ind]})                
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         
         t1 = T1Program(soccfg=self.soccfg, cfg=self.cfg)
         x_pts, avgi, avgq = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        

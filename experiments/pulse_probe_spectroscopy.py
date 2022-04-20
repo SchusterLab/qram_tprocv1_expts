@@ -15,15 +15,16 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         cfg=AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
 
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[cfg.device.readout.dac]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[cfg.device.qubit.dac]
+        q_ind = self.cfg.expt.qubit
+        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[cfg.device.readout.dac])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[cfg.device.qubit.dac])
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
         
         self.q_rp=self.ch_page(self.qubit_ch) # get register page for qubit_ch
         self.r_freq=self.sreg(self.qubit_ch, "freq") # get frequency register for qubit_ch    
-        self.f_res = self.freq2reg(cfg.device.readout.frequency) # convert f_res to dac register value
+        self.f_res = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch) # convert f_res to dac register value
         
         self.readout_length = self.us2cycles(cfg.device.readout.readout_length)
         for ch in [0,1]: # configure the readout lengths and downconversion frequencies
@@ -33,8 +34,8 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         
-        self.f_start = self.freq2reg(cfg.expt.start) # get start/step frequencies
-        self.f_step = self.freq2reg(cfg.expt.step)
+        self.f_start = self.freq2reg(cfg.expt.start, gen_ch=self.qubit_ch) # get start/step frequencies
+        self.f_step = self.freq2reg(cfg.expt.step, gen_ch=self.qubit_ch)
 
         # add qubit and readout pulses to respective channels
         self.set_pulse_registers(
@@ -102,7 +103,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         
         qspec=PulseProbeSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
         self.prog = qspec
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
         avgi = avgi[adc_ch][0]
         avgq = avgq[adc_ch][0]
@@ -152,89 +153,6 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         super().save_data(data=data)
 
 # ====================================================== #
-
-class PulseProbe_CD(Experiment):
-    """
-    PulseProbe Spectroscopy Experiment
-    Experimental Config:
-        start: Qubit frequency [MHz]
-        step
-        expts: Number of experiments stepping from start
-        reps: Number of averages per point
-        rounds: Number of start to finish sweeps to average over
-        length: Qubit probe constant pulse length [us]
-        gain: Qubit pulse gain [DAC units]
-    """
-
-    def __init__(self, soccfg=None, path='', prefix='PulseProbeSpectroscopy', config_file=None, progress=None):
-        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
-
-    def acquire(self, progress=False, debug=False):
-        q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-
-        self.cfg.device.readout.frequency = self.cfg.expt.r_freq
-        self.cfg.device.readout.gain = self.cfg.expt.r_gain  
-
-        qspec=PulseProbeSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-        self.prog = qspec
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
-        xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
-        avgi = avgi[adc_ch][0]
-        avgq = avgq[adc_ch][0]
-        amps = np.abs(avgi+1j*avgq)
-        phases = np.angle(avgi+1j*avgq) # Calculating the phase        
-        
-        data={'xpts':xpts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases}
-        self.data=data
-        return data
-
-    def analyze(self, data=None, fit=True, **kwargs):
-        if data is None:
-            data=self.data
-        if fit:
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], -data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], -data['avgq'][1:-1])
-        return data
-
-    def display(self, data=None, fit=True, **kwargs):
-        if data is None:
-            data=self.data 
-        plt.figure(figsize=(10,8))
-        plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
-        plt.plot(data["xpts"][:], data["avgi"][:],'o-')
-        # plt.axvline(4236)
-
-        # adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
-        # print(self.prog.di_buf[adc_ch])
-        # plt.plot(self.prog.di_buf[adc_ch])
-        # plt.plot(self.prog.dq_buf[adc_ch])
-        # plt.xlim(0, len(self.prog.di_buf[adc_ch]))
-
-        if fit:
-            plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
-            print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
-        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
-        plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
-        if fit:
-            plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            # plt.axvline(3593.2, c='k', ls='--')
-            print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
-        plt.tight_layout()
-        plt.show()
-                
-    def save_data(self, data=None):
-        print(f'Saving {self.fname}')
-        super().save_data(data=data)
-
-# ====================================================== #
-
-
 
 from experiments.resonator_spectroscopy import ResonatorSpectroscopyExperiment
 class PulseProbeVoltSweepSpectroscopyExperiment(Experiment):
@@ -291,7 +209,7 @@ class PulseProbeVoltSweepSpectroscopyExperiment(Experiment):
             rspec_phases=[],
             rspec_fits=[]
         )
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
 
         self.cfg.expt.start = self.cfg.expt.start_qf
         self.cfg.expt.step = self.cfg.expt.step_qf
