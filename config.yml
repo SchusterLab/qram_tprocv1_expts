@@ -17,7 +17,7 @@ device:
                 type: gauss
             pi_EgGf:
                 gain: 20439
-                sigma: 10.000 # [us]
+                sigma: 1 # [us]
                 type: gauss
     
     readout:
@@ -28,7 +28,7 @@ device:
         gain: [60, 120] # [DAC units]
         phase: [0, 0.49892147931760106] # degrees
         threshold: [0, 0] # adc units
-        readout_length: 10 # [us]
+        readout_length: [10, 10] # [us]
         relax_delay: [600, 200] # [us]
     
 hw:
@@ -46,7 +46,7 @@ hw:
             #     ch: 2
             #     nyquist: 2
             readout:
-                ch: [7, 1]
+                ch: [1, 2]
                 nyquist: [1, 1]
             
 aliases: # for use in instrument manager

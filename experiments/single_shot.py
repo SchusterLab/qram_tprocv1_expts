@@ -82,8 +82,7 @@ class HistogramProgram(RAveragerProgram):
         shots_i1 = self.di_buf[1].reshape((cfg.expts, cfg.expt.reps)) / self.readout_length
         shots_q1 = self.dq_buf[1].reshape((cfg.expts, cfg.expt.reps)) / self.readout_length
         return shots_i0, shots_q0, shots_i1, shots_q1
-        
-        
+
 class HistogramExperiment(Experiment):
     """
     Histogram Experiment
