@@ -1,8 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from qick import *
+import json
 
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, NpEncoder
 from tqdm import tqdm_notebook as tqdm
 
 from experiments.clifford_averager_program import CliffordAveragerProgram
@@ -163,27 +164,29 @@ class EgGfStateTomographyExperiment(Experiment):
         qubits = self.cfg.expt.qubits
         adc_chs = [self.cfg.hw.soc.adcs.readout.ch[q] for q in qubits]
         
-        meas_order = np.array(['ZZ', 'ZX', 'ZY', 'XZ', 'XX', 'XY', 'YZ', 'YX', 'YY'])
-        calib_order = np.array(['gg', 'ge', 'eg', 'ee']) # should match with order of counts for each tomography measurement 
-        data={'counts_tomo':[], 'counts_calib':[], 'meas_order':meas_order, 'calib_order':calib_order}
+        self.meas_order = ['ZZ', 'ZX', 'ZY', 'XZ', 'XX', 'XY', 'YZ', 'YX', 'YY']
+        self.calib_order = ['gg', 'ge', 'eg', 'ee'] # should match with order of counts for each tomography measurement 
+        data={'counts_tomo':[], 'counts_calib':[]}
+        self.pulse_dict = dict()
         
         threshold = self.cfg.device.readout.threshold
         phase = self.cfg.device.readout.phase
 
         # Tomography measurements
-        for basis in tqdm(meas_order):
+        for basis in tqdm(self.meas_order):
             self.cfg.expt.basis = basis
             tomo = EgGfStateTomo2QProgram(soccfg=self.soccfg, cfg=self.cfg)
             counts = tomo.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=phase, load_pulses=True, progress=False, debug=debug)
             data['counts_tomo'].append(counts)
+            self.pulse_dict.update({basis:tomo.pulse_dict})
         
         # Error mitigation measurements: prep in gg, ge, eg, ee and measure confusion matrix
-        for prep_state in tqdm(calib_order):
+        for prep_state in tqdm(self.calib_order):
             self.cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=self.cfg)
             counts = err_tomo.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=phase, load_pulses=True, progress=False, debug=debug)
             data['counts_calib'].append(counts)
-
+        
         self.data=data
         return data
 
@@ -199,3 +202,7 @@ class EgGfStateTomographyExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        with self.datafile() as f:
+            f.attrs['pulse_dict'] = json.dumps(self.pulse_dict, cls=NpEncoder)
+            f.attrs['meas_order'] = json.dumps(self.meas_order, cls=NpEncoder)
+            f.attrs['calib_order'] = json.dumps(self.calib_order, cls=NpEncoder)

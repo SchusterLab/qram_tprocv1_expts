@@ -27,7 +27,7 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         if not play:
             assert None not in [name, ch]
-            self.pulse_dict.update({name:dict(ch=ch, name=name, length=length, freq=freq, phase=phase, gain=gain)})
+            self.pulse_dict.update({name:dict(ch=ch, name=name, type='const', length=length, freq=freq, phase=phase, gain=gain)})
         if play or set_reg:
             # if not (ch == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
@@ -44,7 +44,7 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         if not play:
             assert None not in [name, ch, sigma]
-            self.pulse_dict.update({name:dict(ch=ch, name=name, sigma=sigma, freq=freq, phase=phase, gain=gain)})
+            self.pulse_dict.update({name:dict(ch=ch, name=name, type='gauss', sigma=sigma, freq=freq, phase=phase, gain=gain)})
             self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*4)
         if play or set_reg:
             # if not (ch == sigma == None):
@@ -63,7 +63,7 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         if not play:
             assert None not in [ch, name, sigma, flat_length]
-            self.pulse_dict.update({name:dict(ch=ch, name=name, sigma=sigma, flat_length=flat_length, freq=freq, phase=phase, gain=gain)})
+            self.pulse_dict.update({name:dict(ch=ch, name=name, type='flat_top', sigma=sigma, flat_length=flat_length, freq=freq, phase=phase, gain=gain)})
             self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*5)
         if play or set_reg:
             # if not (ch == name == sigma == flat_length == None):
