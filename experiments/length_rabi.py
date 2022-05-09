@@ -45,7 +45,7 @@ class LengthRabiProgram(AveragerProgram):
                 style="arb",
                 freq=self.f_ge,
                 phase=0,
-                gain=cfg.device.qubit.pulses.pi_ge.gain,
+                gain=cfg.expt.gain,
                 waveform="qubit")
         elif self.pi_sigma > 0:
             self.set_pulse_registers(
@@ -53,7 +53,7 @@ class LengthRabiProgram(AveragerProgram):
                 style="const",
                 freq=self.f_ge,
                 phase=0,
-                gain=cfg.device.qubit.pulses.pi_ge.gain,
+                gain=cfg.expt.gain,
                 length=self.pi_sigma)
             
         self.set_pulse_registers(
@@ -160,10 +160,20 @@ class LengthRabiExperiment(Experiment):
         plt.plot(xpts_ns[1:-1], data["avgi"][1:-1],'o-')
         if fit:
             plt.plot(xpts_ns[1:-1], dsfit.decaysin(data["fit_avgi"], data["xpts"][1:-1]))
+            pi_len = 1/data['fit_avgi'][1]/2
+            print(f'Pi length from avgi data [us]: {pi_len}')
+            print(f'Pi/2 length from avgi data [dac units]: {pi_len/2}')
+            plt.axvline(pi_len*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi_len*1e3/2, color='0.2', linestyle='--')
         plt.subplot(212, xlabel="Pulse length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[1:-1], data["avgq"][1:-1],'o-')
         if fit:
             plt.plot(xpts_ns[1:-1], dsfit.decaysin(data["fit_avgq"], data["xpts"][1:-1]))
+            pi_len = 1/data['fit_avgq'][1]/2
+            print(f'Pi length from avgq data [us]: {pi_len}')
+            print(f'Pi/2 length from avgq data [dac units]: {pi_len/2}')
+            plt.axvline(pi_len*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi_len*1e3/2, color='0.2', linestyle='--')
         plt.tight_layout()
         plt.show()
     

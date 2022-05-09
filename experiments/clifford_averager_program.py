@@ -9,7 +9,6 @@ from tqdm import tqdm_notebook as tqdm
 Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2 pulses.
 """
 class CliffordAveragerProgram(AveragerProgram):
-    pulse_dict = dict()
 
     """
     Wrappers to load and play pulses.
@@ -25,10 +24,11 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         Load/play a constant pulse of given length.
         """
-        if not play:
-            assert None not in [name, ch]
+        if name is not None and name not in self.pulse_dict.keys():
+            assert ch is not None
             self.pulse_dict.update({name:dict(ch=ch, name=name, type='const', length=length, freq=freq, phase=phase, gain=gain)})
         if play or set_reg:
+            assert name in self.pulse_dict.keys()
             # if not (ch == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
             params = self.pulse_dict[name].copy()
@@ -42,11 +42,14 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         Load/play a gaussian pulse of length 4 sigma on channel ch
         """
-        if not play:
-            assert None not in [name, ch, sigma]
+        if name is not None and name not in self.pulse_dict.keys():
+            assert ch is not None
+            assert sigma is not None
             self.pulse_dict.update({name:dict(ch=ch, name=name, type='gauss', sigma=sigma, freq=freq, phase=phase, gain=gain)})
             self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*4)
+            # print('added gauss pulse', name, 'on ch', ch)
         if play or set_reg:
+            assert name in self.pulse_dict.keys()
             # if not (ch == sigma == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
             params = self.pulse_dict[name].copy()
@@ -54,20 +57,23 @@ class CliffordAveragerProgram(AveragerProgram):
             if phase is not None: params['phase'] = phase
             if gain is not None: params['gain'] = gain
             self.set_pulse_registers(ch=params['ch'], style='arb', freq=params['freq'], phase=params['phase'], gain=params['gain'], waveform=params['name'])
-            if play: self.pulse(ch=params['ch'])
+            if play:
+                # print('playing gauss pulse', params['name'], 'on ch', params['ch'])
+                self.pulse(ch=params['ch'])
             
     def handle_flat_top_pulse(self, ch=None, name=None, sigma=None, flat_length=None, freq=None, phase=None, gain=None, play=False, set_reg=False):
         """
         Plays a gaussian ramp up (2.5*sigma), a constant pulse of length flat_length,
         gaussian ramp down (2.5*sigma) on channel ch
         """
-        if not play:
-            assert None not in [ch, name, sigma, flat_length]
+        if name is not None and name not in self.pulse_dict.keys():
+            assert None not in [ch, sigma, flat_length]
             self.pulse_dict.update({name:dict(ch=ch, name=name, type='flat_top', sigma=sigma, flat_length=flat_length, freq=freq, phase=phase, gain=gain)})
             self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*5)
         if play or set_reg:
             # if not (ch == name == sigma == flat_length == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
+            assert name in self.pulse_dict.keys()
             params = self.pulse_dict[name].copy()
             if freq is not None: params['freq'] = freq
             if phase is not None: params['phase'] = phase
@@ -111,16 +117,19 @@ class CliffordAveragerProgram(AveragerProgram):
         self.cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
         qubits = self.cfg.expt.qubits
-        self.res_chs = [self.cfg.hw.soc.dacs.readout.ch[q] for q in qubits]
-        self.qubit_chs = [self.cfg.hw.soc.dacs.readout.ch[q] for q in qubits]
-        self.adc_chs = [self.cfg.hw.soc.adcs.readout.ch[q] for q in qubits]
+        self.pulse_dict = dict()
+
+        # all of these saved self.whatever instance variables should be indexed by the actual qubit number. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
+        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
+        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
+        self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
 
         self.overall_phase = [0]*len(qubits)
 
-        self.q_rps = [self.ch_page(self.qubit_chs[q]) for q in qubits] # get register page for qubit_ch
-        self.f_res = [self.freq2reg(self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q]) for q in qubits]
+        self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_ch
+        self.f_res = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
 
-        self.readout_length = [self.us2cycles(self.cfg.device.readout.readout_length[q]) for q in qubits]
+        self.readout_length = [self.us2cycles(len) for len in self.cfg.device.readout.readout_length]
 
         # copy over parameters for the acquire method
         self.cfg.reps = self.cfg.expt.reps
@@ -128,6 +137,6 @@ class CliffordAveragerProgram(AveragerProgram):
         for q in qubits:
             self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q])
             self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q])
-            self.declare_readout(ch=self.adc_chs[q], length=self.readout_length[q], freq=self.f_res[q], gen_ch=self.res_chs[q])
+            self.declare_readout(ch=self.adc_chs[q], length=self.readout_length[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
             self.X_pulse(q=q, play=False)
             self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq=self.f_res[q], phase=self.deg2reg(self.cfg.device.readout.phase[q]), gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)

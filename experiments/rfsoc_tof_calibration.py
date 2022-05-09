@@ -20,7 +20,7 @@ class ToFCalibrationProgram(AveragerProgram):
         self.declare_gen(ch=self.dac_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
 
         self.frequency = cfg.expt.frequency
-        self.freqreg = self.freq2reg(self.frequency) # convert frequency to dac frequency (ensuring it is an available adc frequency)
+        self.freqreg = self.freq2reg(self.frequency, gen_ch=self.dac_ch) # convert frequency to dac frequency (ensuring it is an available adc frequency)
         self.gain = cfg.expt.gain
         
         self.pulse_length = self.us2cycles(cfg.expt.pulse_length)
@@ -34,22 +34,12 @@ class ToFCalibrationProgram(AveragerProgram):
         self.cfg.soft_avgs = cfg.expt.reps # same as reps
         self.cfg.reps = 1 # not used for acquire_decimated
 
-        self.set_pulse_registers(
-            ch=self.dac_ch,
-            style="const",
-            freq=self.freqreg,
-            phase=0,
-            gain=self.gain,
-            length=self.pulse_length)
-        self.synci(self.us2cycles(500)) # give processor some time to configure pulses
+        self.set_pulse_registers(ch=self.dac_ch, style="const", freq=self.freqreg, phase=0, gain=self.gain, length=self.pulse_length)
+        self.synci(200) # give processor some time to configure pulses
     
     def body(self):
         cfg=AttrDict(self.cfg)
-        self.measure(pulse_ch=self.dac_ch, 
-             adcs=[0,1],
-             adc_trig_offset=cfg.device.readout.trig_offset,
-             wait=True,
-             syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
+        self.measure(pulse_ch=self.dac_ch, adcs=[0,1], adc_trig_offset=0, wait=True, syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
 
 # ====================================================== #
 
@@ -106,13 +96,15 @@ class ToFCalibrationExperiment(Experiment):
         if data is None:
             data=self.data 
         
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
-        dac_ch = self.cfg.hw.soc.dacs.readout.ch[self.cfg.device.readout.dac]
+        q_ind = self.cfg.expt.qubit
+        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
+        dac_ch = self.cfg.hw.soc.dacs.readout.ch[q_ind]
         plt.subplot(111, title=f"Time of flight calibration: dac ch {dac_ch} to adc ch {adc_ch}", xlabel="Clock ticks", ylabel="Transmission (adc level)")
         
         plt.plot(data["i"], label='I')
         plt.plot(data["q"], label='Q')
         plt.axvline(adc_trig_offset, c='k', ls='--')
+        # plt.ylim(-100, 100)
         plt.legend()
         plt.show()
         

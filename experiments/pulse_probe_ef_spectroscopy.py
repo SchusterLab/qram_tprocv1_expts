@@ -50,19 +50,13 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
             gain=cfg.device.readout.gain,
             length=self.readout_length)
            
-        self.synci(self.us2cycles(1)) # give processor some time to configure pulses
+        self.synci(self.us2cycles(0.2)) # give processor some time to configure pulses
     
     def body(self):
         cfg=AttrDict(self.cfg)
 
-        self.set_pulse_registers(
-            ch=self.qubit_ch,
-            style="arb",
-            freq=self.f_ge,
-            phase=0,
-            gain=cfg.device.qubit.pulses.pi_ge.gain,
-            waveform="pi_qubit")
-        self.pulse(ch=self.qubit_ch)
+        # init to qubit excited state
+        self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
 
         # setup and play ef probe pulse
         self.set_pulse_registers(
@@ -76,14 +70,7 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
         self.pulse(ch=self.qubit_ch)
 
         # go back to ground state if in e
-        self.set_pulse_registers(
-            ch=self.qubit_ch,
-            style="arb",
-            freq=self.f_ge,
-            phase=0,
-            gain=cfg.device.qubit.pulses.pi_ge.gain,
-            waveform="pi_qubit")
-        self.pulse(ch=self.qubit_ch)
+        self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
 
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
         self.measure(pulse_ch=self.res_ch, 
@@ -145,8 +132,8 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data
         if fit:
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], -data['avgq'][1:-1])
+            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], -data['avgi'][1:-1])
+            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], data['avgq'][1:-1])
         return data
 
     def display(self, data=None, fit=True, **kwargs):
@@ -156,12 +143,12 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
         plt.subplot(211, title="Pulse Probe EF Spectroscopy", ylabel="I [adc level]")
         plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+            plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
             print(f'Found peak in avgi at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
         plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [adc level]")
         plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
+            plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
             # plt.axvline(3593.2, c='k', ls='--')
             print(f'Found peak in avgq at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
         plt.show()

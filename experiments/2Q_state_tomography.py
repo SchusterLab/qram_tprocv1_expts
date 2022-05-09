@@ -3,7 +3,7 @@ import numpy as np
 from qick import *
 import json
 
-from slab import Experiment, NpEncoder
+from slab import Experiment, NpEncoder, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
 from experiments.clifford_averager_program import CliffordAveragerProgram
@@ -21,7 +21,7 @@ class AbstractStateTomo2QProgram(CliffordAveragerProgram):
     )
     """
 
-    def setup_measure(self, qubit, basis:str, play=False):
+    def setup_basis_measure(self, qubit, basis:str, play=False):
         """
         Convert string indicating the measurement basis into the appropriate single qubit pulse (pre-measurement pulse)
         """
@@ -53,28 +53,45 @@ class AbstractStateTomo2QProgram(CliffordAveragerProgram):
         kwargs = self.cfg.expt.state_prep_kwargs
         if kwargs is None: kwargs = dict()
         self.state_prep_pulse(qubits, **kwargs)
+        self.sync_all(self.us2cycles(0.01)) # align channels and wait 10ns
 
-        # Execute tomography measurement
-        self.setup_measure(qubit=qubits[0], basis=self.basis[0], play=True)
-        self.setup_measure(qubit=qubits[1], basis=self.basis[1], play=True)
-        self.sync_all()
-        # need sho to update measure so it can do simultaneous readout!
-        self.measure(pulse_ch=self.res_chs, adcs=[0,1], adc_trig_offset=self.cfg.device.readout.trig_offset, wait=True, syncdelay=syncdelay) # trigger simultaneous measurement
+        # Go to the basis for the tomography measurement
+        self.setup_basis_measure(qubit=qubits[0], basis=self.basis[0], play=True)
+        self.sync_all() # necessary for ZZ?
+        self.setup_basis_measure(qubit=qubits[1], basis=self.basis[1], play=True)
+        self.sync_all(self.us2cycles(0.01)) # align channels and wait 10ns
 
-    def collect_counts(self):
-        # collect shots for 2 adcs (indexed by qubit order) and I and Q channels
-        # data is returned as n00, n01, n10, n11 measured for the two qubits
+        # Simultaneous measurement
+        self.measure(pulse_ch=self.res_chs, adcs=[0,1], adc_trig_offset=self.cfg.device.readout.trig_offset, wait=True, syncdelay=syncdelay) 
+
+    def collect_counts(self, threshold=None, shot_avg=1):
+        # collect shots for 2 adcs (indexed by qubit order) in the I channel, then sorts into e, g based on >/< threshold - assumes readout phase already takes into account IQ plane rotation
+        bufi = np.array([self.di_buf[i] for i, ch in enumerate(self.ro_chs)])
+        avgi = []
+        for bufi_ch in bufi:
+            # drop extra shots that aren't divisible into averages
+            new_bufi_ch = bufi_ch[:len(bufi_ch) - (len(bufi_ch) % shot_avg)]
+            # average over shots_avg number of consecutive shots
+            new_bufi_ch = np.reshape(new_bufi_ch, (len(new_bufi_ch)//shot_avg, shot_avg))
+            new_bufi_ch = np.average(new_bufi_ch, axis=1)
+            avgi.append(new_bufi_ch)
+        avgi = np.array(avgi)
+        shots = np.array([np.heaviside(avgi[i]/self.ro_chs[ch].length-threshold[i], 0) for i, ch in enumerate(self.ro_chs)])
+
         qubits = self.cfg.expt.qubits
-        shots = np.array([self.shots[[self.adc_chs[q]]] for q in qubits])
+        # get the shots for the qubits we care about
+        shots = np.array([shots[self.adc_chs[q]] for q in qubits])
+
+        # data is returned as n00, n01, n10, n11 measured for the two qubits
         n00 = np.sum(np.logical_and(np.logical_not(shots[0]), np.logical_not(shots[1])))
         n01 = np.sum(np.logical_and(np.logical_not(shots[0]), shots[1]))
         n10 = np.sum(np.logical_and(shots[0], np.logical_not(shots[1])))
         n11 = np.sum(np.logical_and(shots[0], shots[1]))
         return np.array([n00, n01, n10, n11])
 
-    def acquire(self, soc, threshold, angle, load_pulses=True, progress=False, debug=False):
-        super().acquire(soc, threshold=threshold, angle=angle, load_pulses=load_pulses, progress=progress, debug=debug)
-        return self.collect_counts()
+    def acquire(self, soc, threshold, shot_avg=1, load_pulses=True, progress=False, debug=False):
+        super().acquire(soc, threshold=threshold, load_pulses=load_pulses, progress=progress, debug=debug)
+        return self.collect_counts(threshold=threshold, shot_avg=shot_avg)
 
 # ===================================================================== #
 
@@ -91,10 +108,19 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
     def state_prep_pulse(self, qubits, **kwargs):
         # pass in kwargs via cfg.expt.state_prep_kwargs
         prep_state = kwargs['prep_state'] # should be gg, ge, eg, or ee
-        if prep_state[0] == 'e': self.X_pulse(q=qubits[0], play=True)
-        else: assert prep_state[0] == 'g'
-        if prep_state[1] == 'e': self.X_pulse(q=qubits[1], play=True)
-        else: assert prep_state[1] == 'g'
+        if prep_state[0] == 'e':
+            # print('q0: e')
+            self.X_pulse(q=qubits[0], play=True)
+            self.sync_all() # necessary for ZZ?
+        else:
+            # print('q0: g')
+            assert prep_state[0] == 'g'
+        if prep_state[1] == 'e':
+            # print('q1: e')
+            self.X_pulse(q=qubits[1], play=True)
+        else:
+            # print('q1: g')
+            assert prep_state[1] == 'g'
             
     def initialize(self):
         self.cfg.expt.basis = 'ZZ'
@@ -114,18 +140,34 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
     """
     def state_prep_pulse(self, qubits, **kwargs):
         # pass in kwargs via cfg.expt.state_prep_kwargs
-        self.X_pulse(q=qubits[0], play=True) # initialize to Eg
-        type = self.cfg.device.qubit.pulses.pi_EgGf.type
-        pulse = self.handle_const_pulse
-        if type == 'gauss': pulse = self.handle_gauss_pulse
-        elif type == 'flat_top': pulse = self.flat_top
-        pulse(name=f'pi_EgGf_{qubits[0]}{qubits[1]}', play=True)
-        self.X_pulse(q=qubits[1], play=True) # measure as gE
+
+        # # initialize to Eg
+        # self.X_pulse(q=qubits[0], play=True)
+
+        self.X_pulse(q=qubits[0], pihalf=False, play=True)
+        self.sync_all()
+        self.X_pulse(q=qubits[1], pihalf=False, play=True)
+        # # apply Eg -> Gf pulse on B: expect to end in Gf
+        # type = self.cfg.device.qubit.pulses.pi_EgGf.type
+        # pulse = self.handle_const_pulse
+        # if type == 'gauss': pulse = self.handle_gauss_pulse
+        # elif type == 'flat_top': pulse = self.flat_top
+        # pulse(name=f'pi_EgGf_{qubits[0]}{qubits[1]}', play=True)
+        # self.sync_all()
+
+        # # measure as Ee
+        # self.X_pulse(q=qubits[0], play=True) # G->E on qubits[0]
+        # self.sync_all() # necessary for ZZ?
+        # self.handle_gauss_pulse(f'ef_qubit{qubits[1]}', play=True) # f->e on qubits[1]
     
     def initialize(self):
         super().initialize()
         qubits = self.cfg.expt.qubits
         self.cfg.expt.state_prep_kwargs = None
+
+        # initialize ef pulse on qubits[1]
+        qB = qubits[1]
+        self.handle_gauss_pulse(ch=self.qubit_chs[qubits[1]], name=f"ef_qubit{qB}", sigma=self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[qB]), freq=self.freq2reg(self.cfg.device.qubit.f_ef[qB], gen_ch=self.qubit_chs[qB]), phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[qB], play=False)
 
         # initialize EgGf pulse
         # apply the sideband drive on qubits[1]
@@ -153,6 +195,7 @@ class EgGfStateTomographyExperiment(Experiment):
     Experimental Config:
     expt = dict(
         reps: number averages per measurement basis iteration
+        shot_avg: number of shots to average over before sorting via threshold
         qubits: the qubits to perform the two qubit tomography on (drive applied to the second qubit)
     )
     """
@@ -170,21 +213,25 @@ class EgGfStateTomographyExperiment(Experiment):
         self.pulse_dict = dict()
         
         threshold = self.cfg.device.readout.threshold
-        phase = self.cfg.device.readout.phase
+        # phase = self.cfg.device.readout.phase
 
         # Tomography measurements
         for basis in tqdm(self.meas_order):
-            self.cfg.expt.basis = basis
-            tomo = EgGfStateTomo2QProgram(soccfg=self.soccfg, cfg=self.cfg)
-            counts = tomo.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=phase, load_pulses=True, progress=False, debug=debug)
+            # print(basis)
+            cfg = AttrDict(self.cfg.copy())
+            cfg.expt.basis = basis
+            tomo = EgGfStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
+            counts = tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, threshold=threshold, load_pulses=True, progress=False, debug=debug)
             data['counts_tomo'].append(counts)
             self.pulse_dict.update({basis:tomo.pulse_dict})
         
         # Error mitigation measurements: prep in gg, ge, eg, ee and measure confusion matrix
         for prep_state in tqdm(self.calib_order):
-            self.cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
-            err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=self.cfg)
-            counts = err_tomo.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=phase, load_pulses=True, progress=False, debug=debug)
+            # print(prep_state)
+            cfg = AttrDict(self.cfg.copy())
+            cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+            err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
+            counts = err_tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, threshold=threshold, load_pulses=True, progress=False, debug=debug)
             data['counts_calib'].append(counts)
         
         self.data=data

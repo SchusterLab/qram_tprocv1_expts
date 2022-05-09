@@ -1,1 +1,53 @@
-{"device": {"qubit": {"T1": [130, 45], "f_ge": [3672.7788, 4565.7], "f_ef": [3513.592, 4387.126], "f_EgGf": 5245.152, "pulses": {"pi_ge": {"gain": [20522, 2012], "sigma": [0.1, 0.05], "type": "gauss"}, "pi_ef": {"gain": [7195, 1590], "sigma": [0.3, 0.05], "type": "gauss"}, "pi_EgGf": {"gain": 20439, "sigma": 1, "type": "gauss"}}}, "readout": {"lo": ["readout", "readout"], "trig_offset": 250, "frequency": [299.6865, 899.6655], "gain": [60, 120], "phase": [0, 0.49892147931760106], "threshold": [0, 0], "readout_length": [10, 10], "relax_delay": [600, 200]}}, "hw": {"lo": {"readout": {"frequency": "6.25e9", "power": 16}}, "soc": {"adcs": {"readout": {"ch": [0, 1]}}, "dacs": {"qubit": {"ch": [4, 5], "nyquist": [2, 2]}, "readout": {"ch": [1, 2], "nyquist": [1, 1]}}}}, "aliases": {"readout_LO": "SC26C3", "soc": "Qick187"}, "expt": {"reps": 10, "qubits": [0, 1], "basis": "ZZ", "state_prep_kwargs": {"prep_state": "ee"}}}
+device:
+    qubit:
+        T1: [50, 35] # us
+        T2R: [13, 20] # us
+        f_ge: [3646.7584779001595, 4536.33065792081] # MHz
+        f_ef: [3487.35, 4354.3124984175265] # MHz
+        # f_EgGf: 5254.152 # MHz expect to be ge_1 + ef_1 - ge_0
+        f_EgGf: 5243.181945338396 # MHz expect to be ge_1 + ef_1 - ge_0
+        pulses:
+            pi_ge:
+                gain: [29284, 2154]
+                sigma: [0.300, 0.04] # [us]
+                type: gauss
+            pi_ef:
+                gain: [24292, 3586]
+                sigma: [0.500, 0.02] # [us]
+                type: gauss
+            pi_EgGf:
+                gain: 15170
+                sigma: 0.400 # [us]
+                type: gauss
+    
+    readout:
+        trig_offset: 180 # [Clock ticks]
+        # frequency: [552.2, 1750.7753727591987] # [MHz] (5.95 GHz, 7.15053 GHz)
+        frequency: [552.2, 1751.5253727591987] # [MHz] (5.95 GHz, 7.15053 GHz)
+        gain: [94, 255] # [DAC units]
+        phase: [15.764565242734866, -104.67511778851885] # degrees 
+        threshold: [71.52376783928284 , 3.331430018068307] # adc units
+        readout_length: [13, 22] # [us]
+        relax_delay: [200, 150] # [us]
+    
+hw:
+    lo:
+        readout: {frequency: 5.4e9, power: 13} # mixer wants 7 dBm
+    soc:
+        adcs:
+            readout:
+                ch: [0, 1]
+        dacs:
+            qubit:
+                ch: [3, 1]
+                nyquist: [2, 2]
+            swap:
+                ch: 1
+                nyquist: 2
+            readout:
+                ch: [0, 4]
+                nyquist: [1, 1]
+            
+aliases: # for use in instrument manager
+    readout_LO: SC26C3
+    soc: Qick186

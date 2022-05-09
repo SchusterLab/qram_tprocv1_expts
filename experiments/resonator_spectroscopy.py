@@ -29,6 +29,8 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
         self.frequency = cfg.device.readout.frequency
         self.freqreg = self.freq2reg(self.frequency, gen_ch=self.res_ch, ro_ch=None)
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
+        if self.cfg.expt.pulse_f: 
+            self.f_ef = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
         self.res_gain = cfg.device.readout.gain
         self.readout_length = self.us2cycles(cfg.device.readout.readout_length)
 
@@ -37,18 +39,18 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
                                  freq=self.frequency, gen_ch=self.res_ch)
 
         self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma)
+        self.pi_gain = cfg.device.qubit.pulses.pi_ge.gain
+        if self.cfg.expt.pulse_f:
+            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma)
+            self.pi_ef_gain = cfg.device.qubit.pulses.pi_ef.gain
         
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         
-        if self.cfg.expt.pi_pulse:
+        if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
-            self.set_pulse_registers(
-                ch=self.qubit_ch,
-                style="arb",
-                freq=self.f_ge,
-                phase=0,
-                gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+        if self.cfg.expt.pulse_f:
+            self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
         self.set_pulse_registers(
             ch=self.res_ch,
             style="const",
@@ -56,18 +58,22 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
             phase=self.deg2reg(cfg.device.readout.phase, gen_ch=self.res_ch),
             gain=self.res_gain,
             length=self.readout_length)
-        self.synci(self.us2cycles(500)) # give processor some time to configure pulses
+        self.synci(200) # give processor some time to configure pulses
     
     def body(self):
         cfg=AttrDict(self.cfg)
-        if self.cfg.expt.pi_pulse:
-            self.pulse(ch=self.qubit_ch) # play probe pulse
-            self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
-        self.measure(pulse_ch=self.res_ch, 
-             adcs=[0,1],
-             adc_trig_offset=cfg.device.readout.trig_offset,
-             wait=True,
-             syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
+        if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
+            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
+            # self.sync_all() # align channels
+        if self.cfg.expt.pulse_f:
+            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
+            # self.sync_all() # align channels
+        self.measure(
+            pulse_ch=self.res_ch,
+            adcs=[0,1],
+            adc_trig_offset=cfg.device.readout.trig_offset,
+            wait=True,
+            syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
 
 # ====================================================== #
 
@@ -79,7 +85,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
         start: start frequency (MHz), 
         step: frequency step (MHz), 
         expts: number of experiments, 
-        pi_pulse: boolean to add pi pulse prior to measurement
+        pulse_e: boolean to add pi pulse prior to measurement
         reps: number of reps
         )
     """

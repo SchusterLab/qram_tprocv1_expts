@@ -128,14 +128,6 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         plt.figure(figsize=(10,8))
         plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
         plt.plot(data["xpts"][:], data["avgi"][:],'o-')
-        # plt.axvline(4236)
-
-        # adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.cfg.device.readout.adc]
-        # print(self.prog.di_buf[adc_ch])
-        # plt.plot(self.prog.di_buf[adc_ch])
-        # plt.plot(self.prog.dq_buf[adc_ch])
-        # plt.xlim(0, len(self.prog.di_buf[adc_ch]))
-
         if fit:
             plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
             print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
