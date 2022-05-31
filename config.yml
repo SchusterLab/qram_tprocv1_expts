@@ -4,7 +4,6 @@ device:
         T2R: [13, 20] # us
         f_ge: [3646.7584779001595, 4536.33065792081] # MHz
         f_ef: [3487.35, 4354.3124984175265] # MHz
-        # f_EgGf: 5254.152 # MHz expect to be ge_1 + ef_1 - ge_0
         f_EgGf: 5243.181945338396 # MHz expect to be ge_1 + ef_1 - ge_0
         pulses:
             pi_ge:
@@ -50,4 +49,5 @@ hw:
             
 aliases: # for use in instrument manager
     readout_LO: SC26C3
+    # soc: Qick187
     soc: Qick186

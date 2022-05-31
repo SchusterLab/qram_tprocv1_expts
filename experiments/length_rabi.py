@@ -6,6 +6,8 @@ from qick import *
 from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 
+import experiments.fitting as fitter
+
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
 """
@@ -142,38 +144,53 @@ class LengthRabiExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
-            p_avgi = dsfit.fitdecaysin(data['xpts'][1:-1], data["avgi"][1:-1], fitparams=None, showfit=False)
-            p_avgq = dsfit.fitdecaysin(data['xpts'][1:-1], data["avgq"][1:-1], fitparams=None, showfit=False)
-            # adding this due to extra parameter in decaysin that is not in fitdecaysin
-            p_avgi = np.append(p_avgi, data['xpts'][0])
-            p_avgq = np.append(p_avgq, data['xpts'][0])
+            # fitparams = [None, 1/max(data['xpts']), None, None]
+            fitparams = None
+            p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
+            p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
+            p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
+            data['fit_amps'] = p_amps
+            data['fit_err_avgi'] = pCov_avgi   
+            data['fit_err_avgq'] = pCov_avgq
+            data['fit_err_amps'] = pCov_amps
         return data
 
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data 
+
         xpts_ns = data['xpts']*1e3
+
+        # plt.figure(figsize=(12, 8))
+        # plt.subplot(111, title=f"Length Rabi", xlabel="Length [ns]", ylabel="Amplitude [ADC units]")
+        # plt.plot(xpts_ns[1:-1], data["amps"][1:-1],'o-')
+        # if fit:
+        #     p = data['fit_amps']
+        #     plt.plot(xpts_ns[1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
+
         plt.figure(figsize=(10,8))
         plt.subplot(211, title=f"Length Rabi (Qubit Gain {self.cfg.expt.gain})", ylabel="I [adc level]")
         plt.plot(xpts_ns[1:-1], data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(xpts_ns[1:-1], dsfit.decaysin(data["fit_avgi"], data["xpts"][1:-1]))
-            pi_len = 1/data['fit_avgi'][1]/2
-            print(f'Pi length from avgi data [us]: {pi_len}')
-            print(f'Pi/2 length from avgi data [dac units]: {pi_len/2}')
-            plt.axvline(pi_len*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi_len*1e3/2, color='0.2', linestyle='--')
+            p = data['fit_avgi']
+            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            pi_length = 1/p[1]/2
+            print(f'Pi length from avgi data [us]: {pi_length}')
+            print(f'Pi/2 length from avgi data [dac units]: {pi_length/2}')
+            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
         plt.subplot(212, xlabel="Pulse length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[1:-1], data["avgq"][1:-1],'o-')
         if fit:
-            plt.plot(xpts_ns[1:-1], dsfit.decaysin(data["fit_avgq"], data["xpts"][1:-1]))
-            pi_len = 1/data['fit_avgq'][1]/2
-            print(f'Pi length from avgq data [us]: {pi_len}')
-            print(f'Pi/2 length from avgq data [dac units]: {pi_len/2}')
-            plt.axvline(pi_len*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi_len*1e3/2, color='0.2', linestyle='--')
+            p = data['fit_avgq']
+            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            pi_length = 1/p[1]/2
+            print(f'Pi length from avgq data [us]: {pi_length}')
+            print(f'Pi/2 length from avgq data [dac units]: {pi_length/2}')
+            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
         plt.tight_layout()
         plt.show()
     

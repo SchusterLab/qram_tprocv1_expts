@@ -118,6 +118,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data
         if fit:
+            data['fit_amps']=dsfit.fitlor(data["xpts"][1:-1], data['amps'][1:-1])
             data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], -data['avgi'][1:-1])
             data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], data['avgq'][1:-1])
         return data
@@ -125,18 +126,26 @@ class PulseProbeSpectroscopyExperiment(Experiment):
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data 
-        plt.figure(figsize=(10,8))
-        plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
-        plt.plot(data["xpts"][:], data["avgi"][:],'o-')
+
+        plt.figure(figsize=(12, 8))
+        plt.subplot(111, title=f"Qubit Spectroscopy", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
+        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
-            print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
-        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
-        plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
-        if fit:
-            plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            # plt.axvline(3593.2, c='k', ls='--')
-            print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
+            plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_amps"], data["xpts"][1:-1]))
+
+        # plt.figure(figsize=(10,8))
+        # plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
+        # plt.plot(data["xpts"][:], data["avgi"][:],'o-')
+        # if fit:
+        #     plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+        #     print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
+        # plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
+        # plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
+        # if fit:
+        #     plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
+        #     # plt.axvline(3593.2, c='k', ls='--')
+        #     print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
+
         plt.tight_layout()
         plt.show()
                 

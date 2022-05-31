@@ -6,6 +6,7 @@ from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
+import experiments.fitting as fitter
 
 class AmplitudeRabiEFProgram(RAveragerProgram):
     def initialize(self):
@@ -159,40 +160,49 @@ class AmplitudeRabiEFExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
-            p = dsfit.fitdecaysin(data['xpts'][1:-1], data["amps"][1:-1], fitparams=None, showfit=False)
-            # add due to extra parameter in decaysin that is not in fitdecaysin
-            p = np.append(p, data['xpts'][0])
-            data['fit_amps'] = p       
-
-            p = dsfit.fitdecaysin(data['xpts'][1:-1], data["phases"][1:-1], fitparams=None, showfit=False)
-            # add due to extra parameter in decaysin that is not in fitdecaysin
-            p = np.append(p, data['xpts'][0])
-            data['fit_phases'] = p    
+            fitparams = [None, 1/max(data['xpts']), None, None]
+            # fitparams = None
+            p_avgi, pCov_avgi = fitter.fitsin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
+            p_avgq, pCov_avgq = fitter.fitsin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
+            p_amps, pCov_amps = fitter.fitsin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
+            data['fit_avgi'] = p_avgi   
+            data['fit_avgq'] = p_avgq
+            data['fit_amps'] = p_amps
+            data['fit_err_avgi'] = pCov_avgi   
+            data['fit_err_avgq'] = pCov_avgq
+            data['fit_err_amps'] = pCov_amps
         return data
 
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data
 
+        # plt.figure(figsize=(12, 8))
+        # plt.subplot(111, title=f"Amplitude Rabi EF", xlabel="Gain [DAC units]", ylabel="Amplitude [ADC units]")
+        # plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
+        # if fit:
+        #     p = data['fit_amps']
+        #     plt.plot(data["xpts"][1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
+
         plt.figure(figsize=(10,10))
-        plt.subplot(211, title="Amplitude Rabi EF", ylabel="Amps [adc level]")
-        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
+        plt.subplot(211, title="Amplitude Rabi EF", ylabel="I [ADC levels]")
+        plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], dsfit.decaysin(data["fit_amps"], data["xpts"][1:-1]))
-            pi_gain = 1/data['fit_amps'][1]/2
-            print(f'Pi gain from amp [dac units]: {int(pi_gain)}')
-            print(f'Pi/2 gain from amp [dac units]: {int(pi_gain/2)}')
-            print()
+            p = data['fit_avgi']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            pi_gain = 1/p[1]/2
+            print(f'Pi gain from avgi data [dac units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from avgi data [dac units]: {int(pi_gain/2)}')
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        plt.subplot(212, xlabel="Gain [dac units]", ylabel="Phases [radians]")
-        plt.plot(data["xpts"][1:-1], data["phases"][1:-1],'o-')
+        plt.subplot(212, xlabel="Gain [dac units]", ylabel="Q [ADC levels]")
+        plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], dsfit.decaysin(data["fit_phases"], data["xpts"][1:-1]))
-            pi_gain = 1/data['fit_phases'][1]/2
-            print(f'Pi gain from phase [dac units]: {int(pi_gain)}')
-            print(f'Pi/2 gain from phase [dac units]: {int(pi_gain/2)}')
-            print()
+            p = data['fit_avgq']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            pi_gain = 1/p[1]/2
+            print(f'Pi gain from avgq data [dac units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from avgq data [dac units]: {int(pi_gain/2)}')
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi_gain/2, color='0.2', linestyle='--')
         plt.show()

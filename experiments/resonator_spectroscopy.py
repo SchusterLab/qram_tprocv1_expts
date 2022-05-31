@@ -140,9 +140,15 @@ class ResonatorSpectroscopyExperiment(Experiment):
             
         if fit:
             # fitparams = [f0,Qi,Qc,df,scale]
-            fit=dsfit.fithanger(data["xpts"][1:-1], data["amps"][1:-1], printresult=verbose)
+            xdata = data["xpts"][1:-1]
+            ydata = data["amps"][1:-1]
+            fitparams=None
+            print(max(ydata)-min(ydata))
+            # fitparams = [552.2, 1000, 1000, 0, max(ydata)-min(ydata)]
+            fit=dsfit.fithanger(xdata, ydata, printresult=verbose, fitparams=fitparams)
             f0, Qi, Qe = (fit[0], fit[1], fit[2])
             if verbose:
+                print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
                 print(f'Q: {1/(1/Qi+1/Qe)}')
                 print(f'kappa [MHz]: {f0*(1/Qi+1/Qe)}')
             data["fit"]=fit
@@ -162,13 +168,12 @@ class ResonatorSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data 
         plt.figure(figsize=(18,6))
-        plt.subplot(111, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}", xlabel="Resonator Frequency (MHz)", ylabel="Amps (adc level)")
+        plt.subplot(111, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}", xlabel="Resonator Frequency [MHz]", ylabel="Amps [ADC units]")
         
         plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
         
         if fit:
             plt.plot(data["xpts"][1:-1], dsfit.hangerfunc(data["fit"], data["xpts"][1:-1]))
-            # plt.plot(data["xpts"][1:-1], dsfit.decaysin(data["fit"], data["xpts"][1:-1]))
             # print(data['fit'][1])
             
         if findpeaks:
@@ -281,10 +286,12 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         for amps_gain in amps:
             amps_gain -= np.average(amps_gain)
         
+        plt.figure(figsize=(12, 8))
+        lo_freq = float(self.cfg.hw.lo.readout.frequency)*1e-6
         plt.imshow(
             np.flip(amps, 0),
             cmap='viridis',
-            extent=[x_sweep[0], x_sweep[-1], y_sweep[0], y_sweep[-1]],
+            extent=[x_sweep[0]+lo_freq, x_sweep[-1]+lo_freq, y_sweep[0], y_sweep[-1]],
             aspect='auto')
         
         if fit:
@@ -298,9 +305,9 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
             print(f'Low power peak [MHz]: {fit_lowpow[2]}')
             print(f'Lamb shift [MHz]: {data["lamb_shift"]}')
             
-        plt.title(f"Resonator spectroscopy power sweep")
-        plt.xlabel("Resonator frequency")
-        plt.ylabel("Resonator gain [DAC level]")
+        plt.title(f"Resonator Spectroscopy Power Sweep")
+        plt.xlabel("Resonator Frequency [MHz]")
+        plt.ylabel("Resonator Gain [DAC level]")
         # plt.clim(vmin=-0.2, vmax=0.2)
         plt.clim(vmin=None, vmax=None)
         plt.colorbar(label='Amps-Avg [ADC level]')
@@ -405,6 +412,7 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data 
         
+        plt.figure(figsize=(12, 8))
         x_sweep = 1e3*data['voltpts']
         y_sweep = data['xpts']
         amps = data['amps']

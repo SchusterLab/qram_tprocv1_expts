@@ -6,6 +6,8 @@ from qick import *
 from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 
+import experiments.fitting as fitter
+
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
 """
@@ -142,15 +144,25 @@ class LengthRabiEgGfExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
-            pA_I = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgi"][0][0:-1], fitparams=None, showfit=False)
-            pA_Q = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgq"][0][0:-1], fitparams=None, showfit=False)
-            pB_I = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgi"][1][0:-1], fitparams=None, showfit=False)
-            pB_Q = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgq"][1][0:-1], fitparams=None, showfit=False)
-            # adding this due to extra parameter in decaysin that is not in fitdecaysin
-            data['fitA_avgi'] = np.append(pA_I, data['xpts'][0])
-            data['fitA_avgq'] = np.append(pA_Q, data['xpts'][0])
-            data['fitB_avgi'] = np.append(pB_I, data['xpts'][0])
-            data['fitB_avgq'] = np.append(pB_Q, data['xpts'][0])
+            pA_avgi, pCovA_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][0][:-1], fitparams=None)
+            pA_avgq, pCovA_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][0][:-1], fitparams=None)
+            pA_amps, pCovA_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][0][:-1], fitparams=None)
+            data['fitA_avgi'] = pA_avgi   
+            data['fitA_avgq'] = pA_avgq
+            data['fitA_amps'] = pA_amps
+            data['fitA_err_avgi'] = pCovA_avgi   
+            data['fitA_err_avgq'] = pCovA_avgq
+            data['fitA_err_amps'] = pCovA_amps
+
+            pB_avgi, pCovB_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][1][:-1], fitparams=None)
+            pB_avgq, pCovB_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][1][:-1], fitparams=None)
+            pB_amps, pCovB_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][1][:-1], fitparams=None)
+            data['fitB_avgi'] = pB_avgi   
+            data['fitB_avgq'] = pB_avgq
+            data['fitB_amps'] = pB_amps
+            data['fitB_err_avgi'] = pCovB_avgi   
+            data['fitB_err_avgq'] = pCovB_avgq
+            data['fitB_err_amps'] = pCovB_amps
         return data
 
     def display(self, data=None, fit=True, **kwargs):
@@ -158,14 +170,39 @@ class LengthRabiEgGfExperiment(Experiment):
             data=self.data 
 
         xpts_ns = data['xpts']*1e3
-        plt.figure(figsize=(14,8))
-        plt.suptitle(f"Length Rabi Eg-Gf (Drive Gain {self.cfg.expt.gain})")
 
+        # plt.figure(figsize=(18,6))
+        # plt.suptitle(f"Length Rabi Eg-Gf") # (Drive Gain {self.cfg.expt.gain})")
+        # plt.subplot(121, title="Qubit A", ylabel="Amplitude [adc level]", xlabel='Length [ns]')
+        # plt.plot(xpts_ns[0:-1], data["amps"][0][0:-1],'o-')
+        # if fit:
+        #     p = data['fitA_amps']
+        #     plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+        #     pi_length = 1/p[1]/2
+        #     print(f'Pi length from amps data (qubit A) [us]: {int(pi_length)}')
+        #     print(f'\tPi/2 length from amps data (qubit A) [us]: {int(pi_length/2)}')
+        #     plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+        #     plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
+        # plt.subplot(122, title="Qubit B", xlabel='Length[ns]')
+        # plt.plot(xpts_ns[0:-1], data["amps"][1][0:-1],'o-')
+        # if fit:
+        #     p = data['fitB_amps']
+        #     plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+        #     pi_length = 1/p[1]/2
+        #     print()
+        #     print(f'Pi length from amps data (qubit B) [us]: {int(pi_length)}')
+        #     print(f'\tPi/2 length from amps data (qubit B) [us]: {int(pi_length/2)}')
+        #     plt.axvline(pi_length, color='0.2', linestyle='--')
+        #     plt.axvline(pi_length/2, color='0.2', linestyle='--')
+
+        plt.figure(figsize=(14,8))
+        plt.suptitle(f"Length Rabi Eg-Gf") # (Drive Gain {self.cfg.expt.gain})")
         plt.subplot(221, title="Qubit A", ylabel="I [adc level]")
         plt.plot(xpts_ns[0:-1], data["avgi"][0][0:-1],'o-')
         if fit:
-            plt.plot(xpts_ns[0:-1], dsfit.decaysin(data["fitA_avgi"], data["xpts"][0:-1]))
-            pi_length = 1/data['fitA_avgi'][1]/2
+            p = data['fitA_avgi']
+            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            pi_length = 1/p[1]/2
             print(f'Pi length from avgi data (qubit A) [us]: {int(pi_length)}')
             print(f'\tPi/2 length from avgi data (qubit A) [us]: {int(pi_length/2)}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
@@ -173,7 +210,9 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.subplot(223, xlabel="Length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[0:-1], data["avgq"][0][0:-1],'o-')
         if fit:
-            plt.plot(xpts_ns[0:-1], dsfit.decaysin(data["fitA_avgq"], data["xpts"][0:-1]))
+            p = data['fitA_avgq']
+            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            pi_length = 1/p[1]/2
             pi_length = 1/data['fitA_avgq'][1]/2
             print(f'Pi length from avgq data (qubit A) [us]: {int(pi_length)}')
             print(f'\tPi/2 length from avgq data (qubit A) [us]: {int(pi_length/2)}')
@@ -183,8 +222,9 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.subplot(222, title="Qubit B")
         plt.plot(xpts_ns[0:-1], data["avgi"][1][0:-1],'o-')
         if fit:
-            plt.plot(xpts_ns[0:-1], dsfit.decaysin(data["fitB_avgi"], data["xpts"][0:-1]))
-            pi_length = 1/data['fitB_avgi'][1]/2
+            p = data['fitB_avgi']
+            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            pi_length = 1/p[1]/2
             print()
             print(f'Pi length from avgi data (qubit B) [us]: {int(pi_length)}')
             print(f'\tPi/2 length from avgi data (qubit B) [us]: {int(pi_length/2)}')
@@ -193,15 +233,17 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.subplot(224, xlabel="Length [ns]")
         plt.plot(xpts_ns[0:-1], data["avgq"][1][0:-1],'o-')
         if fit:
-            plt.plot(xpts_ns[0:-1], dsfit.decaysin(data["fitB_avgq"], data["xpts"][0:-1]))
-            pi_length = 1/data['fitB_avgq'][1]/2
+            p = data['fitB_avgq']
+            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            pi_length = 1/p[1]/2
             print(f'Pi length from avgq data (qubit B) [us]: {int(pi_length)}')
             print(f'\tPi/2 length from avgq data (qubit B) [us]: {int(pi_length/2)}')
             plt.axvline(pi_length, color='0.2', linestyle='--')
             plt.axvline(pi_length/2, color='0.2', linestyle='--')
+
         plt.tight_layout()
         plt.show()
-    
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)

@@ -6,6 +6,7 @@ from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
+import experiments.fitting as fitter
 
 class AmplitudeRabiEgGfProgram(RAveragerProgram):
     def initialize(self):
@@ -109,8 +110,8 @@ class AmplitudeRabiEgGfExperiment(Experiment):
     Amplitude Rabi Eg<->Gf Experiment
     Experimental Config:
     expt = dict(
-        start: qubit gain [dac level]
-        step: gain step [dac level]
+        start: qubit gain [dac units]
+        step: gain step [dac units]
         expts: number steps
         reps: number averages per expt
         rounds: number repetitions of experiment sweep
@@ -159,88 +160,107 @@ class AmplitudeRabiEgGfExperiment(Experiment):
             data=self.data
         
         if fit:
-            # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
+            # fitparams=[amp, freq (non-angular), phase (deg), amp offset]
             # Remove the first and last point from fit in case weird edge measurements
-            pA_I = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgi"][0][0:-1], fitparams=None, showfit=False)
-            pA_Q = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgq"][0][0:-1], fitparams=None, showfit=False)
-            pB_I = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgi"][1][0:-1], fitparams=None, showfit=False)
-            pB_Q = dsfit.fitdecaysin(data['xpts'][0:-1], data["avgq"][1][0:-1], fitparams=None, showfit=False)
-            # adding this due to extra parameter in decaysin that is not in fitdecaysin
-            data['fitA_avgi'] = np.append(pA_I, data['xpts'][0])
-            data['fitA_avgq'] = np.append(pA_Q, data['xpts'][0])
-            data['fitB_avgi'] = np.append(pB_I, data['xpts'][0])
-            data['fitB_avgq'] = np.append(pB_Q, data['xpts'][0])
+            fitparams = [None, 1/max(data['xpts']), None, None]
+            # fitparams = None
+            pA_avgi, pCovA_avgi = fitter.fitsin(data['xpts'][:-1], data["avgi"][0][:-1], fitparams=fitparams)
+            pA_avgq, pCovA_avgq = fitter.fitsin(data['xpts'][:-1], data["avgq"][0][:-1], fitparams=fitparams)
+            pA_amps, pCovA_amps = fitter.fitsin(data['xpts'][:-1], data["amps"][0][:-1], fitparams=fitparams)
+            data['fitA_avgi'] = pA_avgi   
+            data['fitA_avgq'] = pA_avgq
+            data['fitA_amps'] = pA_amps
+            data['fitA_err_avgi'] = pCovA_avgi   
+            data['fitA_err_avgq'] = pCovA_avgq
+            data['fitA_err_amps'] = pCovA_amps
+
+            pB_avgi, pCovB_avgi = fitter.fitsin(data['xpts'][:-1], data["avgi"][1][:-1], fitparams=fitparams)
+            pB_avgq, pCovB_avgq = fitter.fitsin(data['xpts'][:-1], data["avgq"][1][:-1], fitparams=fitparams)
+            pB_amps, pCovB_amps = fitter.fitsin(data['xpts'][:-1], data["amps"][1][:-1], fitparams=fitparams)
+            data['fitB_avgi'] = pB_avgi   
+            data['fitB_avgq'] = pB_avgq
+            data['fitB_amps'] = pB_amps
+            data['fitB_err_avgi'] = pCovB_avgi   
+            data['fitB_err_avgq'] = pCovB_avgq
+            data['fitB_err_amps'] = pCovB_amps
         return data
 
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data 
 
-        plt.figure(figsize=(14,8))
+        plt.figure(figsize=(20,6))
         plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.sigma_test} us)")
-
-        if self.cfg.expt.singleshot: plt.subplot(221, title='Qubit A', ylabel=r"Probability of $|e\rangle$")
-        else: plt.subplot(221, title='Qubit A', ylabel="I [adc level]")
-        plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
+        plt.subplot(121, title="Qubit A", ylabel="Amplitude [adc units]", xlabel='Gain [DAC units]')
+        plt.plot(data["xpts"][0:-1], data["amps"][0][0:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][0:-1], dsfit.decaysin(data["fitA_avgi"], data["xpts"][0:-1]))
-            pi_gain = 1/data['fitA_avgi'][1]/2
-            print(f'Pi gain from avgi data (qubit A) [dac units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from avgi data (qubit A) [dac units]: {int(pi_gain/2)}')
-            plt.axvline(pi_gain, color='0.2', linestyle='--')
-            plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        plt.subplot(223, xlabel="Gain [dac units]", ylabel="Q [adc levels]")
-        plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
+            p = data['fitA_amps']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            pi_gain = 1/p[1]/2
+            print(f'Pi gain from amps data (qubit A) [DAC units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from amps data (qubit A) [DAC units]: {int(pi_gain/2)}')
+            # plt.axvline(pi_gain, color='0.2', linestyle='--')
+            # plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+        plt.subplot(122, title="Qubit B", xlabel='Gain [DAC units]')
+        plt.plot(data["xpts"][0:-1], data["amps"][1][0:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][0:-1], dsfit.decaysin(data["fitA_avgq"], data["xpts"][0:-1]))
-            pi_gain = 1/data['fitA_avgq'][1]/2
-            print(f'Pi gain from avgq data (qubit A) [dac units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from avgq data (qubit A) [dac units]: {int(pi_gain/2)}')
-            plt.axvline(pi_gain, color='0.2', linestyle='--')
-            plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-
-        plt.subplot(222, title='Qubit B')
-        plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
-        if fit:
-            plt.plot(data["xpts"][0:-1], dsfit.decaysin(data["fitB_avgi"], data["xpts"][0:-1]))
-            pi_gain = 1/data['fitB_avgi'][1]/2
+            p = data['fitB_amps']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            pi_gain = 1/p[1]/2
             print()
-            print(f'Pi gain from avgi data (qubit B) [dac units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from avgi data (qubit B) [dac units]: {int(pi_gain/2)}')
-            plt.axvline(pi_gain, color='0.2', linestyle='--')
-            plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        plt.subplot(224, xlabel="Gain [dac units]")
-        plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
-        if fit:
-            plt.plot(data["xpts"][0:-1], dsfit.decaysin(data["fitB_avgq"], data["xpts"][0:-1]))
-            pi_gain = 1/data['fitB_avgq'][1]/2
-            print(f'Pi gain from avgq data (qubit B) [dac units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from avgq data (qubit B) [dac units]: {int(pi_gain/2)}')
-            plt.axvline(pi_gain, color='0.2', linestyle='--')
-            plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        plt.tight_layout()
-        plt.show()
-        
-        # plt.figure(figsize=(10,8))
-        # plt.subplot(211,title="Amplitude Rabi Eg-Gf", ylabel="Amp Qubit A [adc level]")
-        # plt.plot(data["xpts"][1:-1], data["amps"][0][1:-1], 'o-')
-        
+            print(f'Pi gain from amps data (qubit A) [DAC units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from amps data (qubit A) [DAC units]: {int(pi_gain/2)}')
+            # plt.axvline(pi_gain, color='0.2', linestyle='--')
+            # plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+
+        # plt.figure(figsize=(14,8))
+        # plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.sigma_test} us)")
+        # if self.cfg.expt.singleshot: plt.subplot(221, title='Qubit A', ylabel=r"Probability of $|e\rangle$")
+        # else: plt.subplot(221, title='Qubit A', ylabel="I [ADC units]")
+        # plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
         # if fit:
-        #     plt.plot(data["xpts"][1:-1], dsfit.decaysin(data["fitA"], data["xpts"][1:-1]))
-        #     pi_gain = 1/data['fitA'][1]/2
-        #     print(f'Pi gain [dac units]: {int(pi_gain)}')
-        #     print(f'Pi/2 gain [dac units]: {int(pi_gain/2)}')
+        #     p = data['fitA_avgi']
+        #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+        #     pi_gain = 1/p[1]/2
+        #     print(f'Pi gain from avgi data (qubit A) [DAC units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from avgi data (qubit A) [DAC units]: {int(pi_gain/2)}')
         #     plt.axvline(pi_gain, color='0.2', linestyle='--')
         #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-            
-        # plt.subplot(212, xlabel='Gain [dac units]', ylabel='Amp Qubit B [adc level]' )
-        # plt.plot(data["xpts"][1:-1], data["amps"][1][1:-1], 'o-')
-        
+        # plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
+        # plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
         # if fit:
-        #     plt.plot(data["xpts"][1:-1], dsfit.decaysin(data["fitB"], data["xpts"][1:-1]))
+        #     p = data['fitA_avgq']
+        #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+        #     pi_gain = 1/p[1]/2
+        #     print(f'Pi gain from avgq data (qubit A) [DAC units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from avgq data (qubit A) [DAC units]: {int(pi_gain/2)}')
+        #     plt.axvline(pi_gain, color='0.2', linestyle='--')
+        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+
+        # plt.subplot(222, title='Qubit B')
+        # plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
+        # if fit:
+        #     p = data['fitB_avgi']
+        #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+        #     pi_gain = 1/p[1]/2
+        #     print()
+        #     print(f'Pi gain from avgi data (qubit B) [DAC units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from avgi data (qubit B) [DAC units]: {int(pi_gain/2)}')
+        #     plt.axvline(pi_gain, color='0.2', linestyle='--')
+        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+        # plt.subplot(224, xlabel="Gain [DAC units]")
+        # plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
+        # if fit:
+        #     p = data['fitB_avgq']
+        #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+        #     pi_gain = 1/p[1]/2
+        #     print(f'Pi gain from avgq data (qubit B) [DAC units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from avgq data (qubit B) [DAC units]: {int(pi_gain/2)}')
+        #     plt.axvline(pi_gain, color='0.2', linestyle='--')
+        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
         # plt.tight_layout()
         # plt.show()
-    
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)

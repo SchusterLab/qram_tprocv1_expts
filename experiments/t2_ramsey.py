@@ -6,6 +6,7 @@ from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
+import experiments.fitting as fitter
 
 class RamseyProgram(RAveragerProgram):
     def initialize(self):
@@ -142,56 +143,80 @@ class RamseyExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
-            fitparams=[2, 1, 0, 10, 0]
-            p_avgi = dsfit.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams, showfit=False)
-            p_avgq = dsfit.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=None, showfit=False)
-            # adding this due to extra parameter in decaysin that is not in fitdecaysin
-            p_avgi = np.append(p_avgi, data['xpts'][0])
-            p_avgq = np.append(p_avgq, data['xpts'][0])
+            # fitparams=[2, 1, 0, 10, 0]
+            p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=None)
+            p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=None)
+            p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][:-1], fitparams=None)
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
+            data['fit_amps'] = p_amps
+            data['fit_err_avgi'] = pCov_avgi   
+            data['fit_err_avgq'] = pCov_avgq
+            data['fit_err_amps'] = pCov_amps
             data['f_ge_adjust_ramsey_avgi'] = self.cfg.expt.ramsey_freq - p_avgi[1]
             data['f_ge_adjust_ramsey_avgq'] = self.cfg.expt.ramsey_freq - p_avgq[1]
+            data['f_ge_adjust_ramsey_amps'] = self.cfg.expt.ramsey_freq - p_amps[1]
         return data
 
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data
         
+        q_ind = self.cfg.expt.qubit
         for key, value in self.cfg.device.qubit.items():
             if isinstance(value, list):
                 self.cfg.device.qubit.update({key: value[q_ind]})
-        
-        if data is None:
-            data=self.data 
-        plt.figure(figsize=(10,9))
-        plt.subplot(211, 
-            title=f"Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
-            ylabel="I [adc level]")
-        plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
+
+        plt.figure(figsize=(10, 6))
+        plt.subplot(111,title=f"Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
+                    xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
+        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
         if fit:
-            p = data['fit_avgi']
-            plt.plot(data["xpts"][:-1], dsfit.decaysin(p, data["xpts"][:-1]))
-            plt.plot(data["xpts"][:-1], dsfit.expfunc([p[4], p[0], p[5], p[3]], data['xpts'][:-1]), color='0.2', linestyle='--')
-            plt.plot(data["xpts"][:-1], dsfit.expfunc([p[4], -p[0], p[5], p[3]], data['xpts'][:-1]), color='0.2', linestyle='--')
-            print(f'Fit frequency from I [MHz]: {data["fit_avgi"][1]}')
-            print('Suggested new qubit frequency from fit I [MHz]:',
-                  f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgi"]}')
-            print(f'T2 Ramsey from fit I [us]: {p[3]}')
-        plt.subplot(212, xlabel="Delay time [us]", ylabel="Q [adc levels]")
-        plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
-        if fit:
-            p = data['fit_avgq']
-            plt.plot(data["xpts"][:-1], dsfit.decaysin(p, data["xpts"][:-1]))
-            plt.plot(data["xpts"][:-1], dsfit.expfunc([p[4], p[0], p[5], p[3]], data['xpts'][:-1]), color='0.2', linestyle='--')
-            plt.plot(data["xpts"][:-1], dsfit.expfunc([p[4], -p[0], p[5], p[3]], data['xpts'][:-1]), color='0.2', linestyle='--')
-            print(f'Fit frequency from Q [MHz]: {data["fit_avgq"][1]}')
-            print('Suggested new qubit frequency from fit Q [MHz]:',
-                  f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"]}')
-            print(f'T2 Ramsey from fit Q [us]: {p[3]}')
+            p = data['fit_amps']
+            pCov = data['fit_err_amps']
+            plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p))
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
+            captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+            xmin = data['xpts'][0]
+            xmax = data['xpts'][-1]
+            ymin = np.min(data['amps'])
+            ymax = np.max(data['amps'])
+            plt.text(xmin+0.6*(xmax-xmin), ymin+1*(ymax-ymin), captionStr, fontsize=14, verticalalignment='top')
+            print(f'Fit frequency from amps [MHz]: {p[1]}')
+            print('Suggested new qubit frequency from fit amps [MHz]:',
+                  f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_amps"]}')
+            print(f'T2 Ramsey from fit amps [us]: {p[3]}')
+
+        # plt.figure(figsize=(10,9))
+        # plt.subplot(211, 
+        #     title=f"Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
+        #     ylabel="I [ADC level]")
+        # plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
+        # if fit:
+        #     p = data['fit_avgi']
+        #     plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p))
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
+        #     print(f'Fit frequency from I [MHz]: {p[1]}')
+        #     print('Suggested new qubit frequency from fit I [MHz]:',
+        #           f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgi"]}')
+        #     print(f'T2 Ramsey from fit I [us]: {p[3]}')
+        # plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
+        # plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
+        # if fit:
+        #     p = data['fit_avgq']
+        #     plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p))
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
+        #     print(f'Fit frequency from Q [MHz]: {p[1]}')
+        #     print('Suggested new qubit frequency from fit Q [MHz]:',
+        #           f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"]}')
+        #     print(f'T2 Ramsey from fit Q [us]: {p[3]}')
+
         plt.tight_layout()
         plt.show()
-        
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)

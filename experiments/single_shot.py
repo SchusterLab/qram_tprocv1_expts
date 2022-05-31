@@ -33,7 +33,7 @@ def hist(data, plot=True, span=None, verbose=True):
         if verbose: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)}')
 
     if plot:
-        fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(16, 4))
+        fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(20, 5))
         fig.tight_layout()
 
         axs[0].scatter(Ig, Qg, label='g', color='b', marker='.')
@@ -43,8 +43,8 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[0].scatter(xe, ye, color='k', marker='o')
         if plot_f: axs[0].scatter(xf, yf, color='k', marker='o')
 
-        axs[0].set_xlabel('I (a.u.)')
-        axs[0].set_ylabel('Q (a.u.)')
+        axs[0].set_xlabel('I [ADC levels]')
+        axs[0].set_ylabel('Q [ADC levels]')
         axs[0].legend(loc='upper right')
         axs[0].set_title('Unrotated')
         axs[0].axis('equal')
@@ -80,8 +80,8 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[1].scatter(xe, ye, color='k', marker='o')    
         if plot_f: axs[1].scatter(xf, yf, color='k', marker='o')    
 
-        axs[1].set_xlabel('I (a.u.)')
-        axs[1].legend(loc='lower right')
+        axs[1].set_xlabel('I [ADC levels]')
+        axs[1].legend(loc='upper right')
         axs[1].set_title('Rotated')
         axs[1].axis('equal')
 
@@ -90,7 +90,8 @@ def hist(data, plot=True, span=None, verbose=True):
         ng, binsg, pg = axs[2].hist(Ig_new, bins=numbins, range = xlims, color='b', label='g', alpha=0.5)
         ne, binse, pe = axs[2].hist(Ie_new, bins=numbins, range = xlims, color='r', label='e', alpha=0.5)
         if plot_f: nf, binsf, pf = axs[2].hist(If_new, bins=numbins, range = xlims, color='g', label='f', alpha=0.5)
-        axs[2].set_xlabel('I(a.u.)')       
+        axs[2].set_xlabel('I [ADC levels]')       
+        axs[2].legend(loc='upper right')
 
     else:        
         ng, binsg = np.histogram(Ig_new, bins=numbins, range = xlims)
