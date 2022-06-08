@@ -1,0 +1,66 @@
+device:
+    qubit:
+        T1: [50, 50, 50, 50] # us
+        f_ge: [200, 200, 200, 200] # MHz
+        f_ef: [200, 200, 200, 200] # MHz
+        f_EgGf: [2000, 0, 2000, 2000]# MHz expect to be ge_1 + ef_1 - ge_0
+        pulses:
+            pi_ge:
+                gain: [10000, 10000, 10000, 10000]
+                sigma: [0.100, 0.100, 0.100, 0.100] # [us]
+                type: gauss
+            pi_ef:
+                gain: [10000, 10000, 10000, 10000]
+                sigma: [0.100, 0.100, 0.100, 0.100] # [us]
+                type: gauss
+            pi_EgGf:
+                gain: [10000, 0, 10000, 10000]
+                sigma: [0.100, 0, 0.100, 0.100] # [us]
+                type: gauss
+    
+    readout:
+        trig_offset: 100 # [Clock ticks]
+        frequency: [200, 400, 200, 200] # [MHz] (5.95 GHz, 7.15053 GHz)
+        gain: [-0.8, -0.8, -0.8, -0.8] # [MUX units: range -1 to 1]
+        # gain: 10000
+        phase: [0, 0, 0, 0] # degrees 
+        threshold: [0, 0, 0, 0] # adc units
+        readout_length: [20, 20, 20, 20] # [us]
+        relax_delay: [100, 100, 100, 100] # [us]
+    
+hw:
+    lo:
+        readout: {frequency: 5.3e9, power: 13} # mixer wants 7 dBm
+    soc:
+        dacs:
+        # dac types: full (full gen - all gens in standard firmware) or int4, mux4 (q3diamond)
+        # For mux4, all 4 readouts are on the same DAC (ch 6). Need to make sure the
+        # 4 muxed readout freqs are not in the same bin, which are fs/16 wide
+            qubit:
+                ch: [0, 1, 2, 3]
+                type: ['int4', 'int4', 'int4', 'int4']
+                mixer_freq: [5300, 3800, 4500, 4900]
+                nyquist: [2, 2, 2, 2]
+            swap:
+                ch: [4, -1, 4, 4]
+                type: ['full', None, 'full', 'full']
+                nyquist: [1, 0, 1, 1]
+            readout:
+                # ch: 1
+                # type: 'full'
+                # nyquist: 1
+                # ch: 0
+                # type: 'int4'
+                # mixer_freq: 2000 # [MHz] freq to mix up
+                # nyquist: 1
+                ch: 6
+                type: 'mux4'
+                mixer_freq: 2000 # [MHz] freq to mix up
+                nyquist: 1
+        adcs:
+            readout:
+                ch: [0, 1, 2, 3]
+            
+aliases: # for use in instrument manager
+    readout_LO: SC26C1
+    soc: Qick187

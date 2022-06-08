@@ -12,49 +12,69 @@ class RamseyEchoProgram(RAveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
-        
-        q_ind = self.cfg.expt.qubit
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
-        
+        self.adc_ch = cfg.hw.soc.adcs.readout.ch
+        self.res_ch = cfg.hw.soc.dacs.readout.ch
+        self.res_ch_type = cfg.hw.soc.dacs.readout.type
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
+
         self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
         self.r_wait = 3 # total wait time for each experiment
         self.r_phase2 = 4 # phase for the 2nd pi/2 pulse for each experiment
-        self.r_phase=self.sreg(self.qubit_ch, "phase")
+        self.r_phase = self.sreg(self.qubit_ch, "phase")
         self.safe_regwi(self.q_rp, self.r_wait, self.us2cycles(cfg.expt.start/2/cfg.expt.num_pi))
         self.safe_regwi(self.q_rp, self.r_phase2, 0) 
-        
+
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
-        self.f_res=self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch)  # convert f_res to dac register value
-        self.readout_length=self.us2cycles(cfg.device.readout.readout_length)
-        for ch in [0,1]: # configure the readout lengths and downconversion frequencies
-            self.declare_readout(ch=ch, length=self.readout_length,
-                                 freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
-        
+        self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
+        self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
+        self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
+        self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
+
+        # declare res dacs
+        mask = None
+        mixer_freq = 0 # MHz
+        mux_freqs = None # MHz
+        mux_gains = None
+        ro_ch = None
+        if self.res_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+        elif self.res_ch_type == 'mux4':
+            assert self.res_ch == 6
+            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
+            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            ro_ch=self.adc_ch
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+
+        # declare qubit dacs
+        mixer_freq = 0
+        if self.qubit_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
+
+        # declare adcs
+        self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
+
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
-        
-        self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma/2)
-        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma)
-        
+
+        self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma/2, gen_ch=self.qubit_ch)
+        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma, gen_ch=self.qubit_ch)
+
         # add qubit and readout pulses to respective channels
         if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi2_qubit", sigma=self.pi2sigma, length=self.pi2sigma*4)
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
 
-        self.set_pulse_registers(
-            ch=self.res_ch,
-            style="const",
-            freq=self.f_res,
-            phase=self.deg2reg(cfg.device.readout.phase, gen_ch=self.res_ch),
-            gain=cfg.device.readout.gain,
-            length=self.readout_length)
-        
-        self.sync_all(self.us2cycles(0.2))
+        if self.res_ch_type == 'mux4':
+            self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
+
+        self.sync_all(200)
     
     def body(self):
         cfg=AttrDict(self.cfg)
@@ -144,7 +164,7 @@ class RamseyEchoProgram(RAveragerProgram):
         # measure
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
         self.measure(pulse_ch=self.res_ch, 
-             adcs=[0,1],
+             adcs=[self.adc_ch],
              adc_trig_offset=cfg.device.readout.trig_offset,
              wait=True,
              syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
@@ -153,7 +173,7 @@ class RamseyEchoProgram(RAveragerProgram):
         # Update the wait time between each the pi pulses
         self.mathi(self.q_rp, self.r_wait, self.r_wait, '+', self.us2cycles(self.cfg.expt.step/2/self.cfg.expt.num_pi))
         # Update the phase for the 2nd pi/2 pulse
-        phase_step = self.deg2reg(360 * self.cfg.expt.ramsey_freq * self.cfg.expt.step, ) # phase step [deg] = 360 * f_Ramsey [MHz] * tau_step [us]
+        phase_step = self.deg2reg(360 * self.cfg.expt.ramsey_freq * self.cfg.expt.step, gen_ch=self.qubit_ch) # phase step [deg] = 360 * f_Ramsey [MHz] * tau_step [us]
         self.mathi(self.q_rp, self.r_phase2, self.r_phase2, '+', phase_step)
                       
                       
@@ -181,27 +201,24 @@ class RamseyEchoExperiment(Experiment):
         assert self.cfg.expt.cp != self.cfg.expt.cpmg, 'Must select either CP or CPMG experiment!'
 
         q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-            elif isinstance(value, dict):
-                for key2, value2 in value.items():
-                    for key3, value3 in value2.items():
-                        if isinstance(value3, list):
-                            value2.update({key3: value3[q_ind]})                        
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
-        
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
+
         echo = RamseyEchoProgram(soccfg=self.soccfg, cfg=self.cfg)
-        x_pts, avgi, avgq = echo.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
-        
-        avgi = avgi[adc_ch][0]
-        avgq = avgq[adc_ch][0]
+        x_pts, avgi, avgq = echo.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)
+
+        avgi = avgi[0][0]
+        avgq = avgq[0][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
         phases = np.angle(avgi+1j*avgq) # Calculating the phase        
-        
+
         data={'xpts': x_pts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases}
         self.data=data
         return data
@@ -209,7 +226,7 @@ class RamseyEchoExperiment(Experiment):
     def analyze(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data
-        
+
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
@@ -230,11 +247,6 @@ class RamseyEchoExperiment(Experiment):
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data
-        
-        q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
 
         plt.figure(figsize=(10, 6))
         plt.subplot(111,title=f"Ramsey Echo (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",

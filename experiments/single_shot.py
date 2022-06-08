@@ -118,28 +118,50 @@ class HistogramProgram(AveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
         
-        q_ind = self.cfg.expt.qubit
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
-
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
-        
-        self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
+        self.adc_ch = cfg.hw.soc.adcs.readout.ch
+        self.res_ch = cfg.hw.soc.dacs.readout.ch
+        self.res_ch_type = cfg.hw.soc.dacs.readout.type
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
         
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
         if self.cfg.expt.pulse_f: 
             self.f_ef = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
-        self.f_res=self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch) # convert f_res to dac register value
-        self.readout_length=self.us2cycles(cfg.device.readout.readout_length)
-        for ch in [0,1]: # configure the readout lengths and downconversion frequencies
-            self.declare_readout(ch=ch, length=self.readout_length,
-                                 freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
+        self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
+        self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
+        self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
+        self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
+        print(self.readout_length_adc)
 
-        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma)
+        # declare dacs
+        mask = None
+        mixer_freq = 0 # MHz
+        mux_freqs = None # MHz
+        mux_gains = None
+        ro_ch = None
+        if self.res_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+        elif self.res_ch_type == 'mux4':
+            assert self.res_ch == 6
+            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
+            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            ro_ch=self.adc_ch
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+
+        mixer_freq = 0
+        if self.qubit_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
+
+        # declare adcs
+        self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
+
+        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma, gen_ch=self.qubit_ch)
         self.pi_gain = cfg.device.qubit.pulses.pi_ge.gain
         if self.cfg.expt.pulse_f:
-            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma)
+            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
             self.pi_ef_gain = cfg.device.qubit.pulses.pi_ef.gain
         
         # copy over parameters for the acquire method
@@ -151,16 +173,11 @@ class HistogramProgram(AveragerProgram):
         if self.cfg.expt.pulse_f:
             self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
 
-        self.set_pulse_registers(
-            ch=self.res_ch,
-            style="const",
-            freq=self.f_res,
-            phase=self.deg2reg(cfg.device.readout.phase, gen_ch=self.res_ch),
-            # phase=0,
-            gain=cfg.device.readout.gain,
-            length=self.readout_length)
+        if self.res_ch_type == 'mux4':
+            self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
 
-        self.sync_all(self.us2cycles(0.2))
+        self.sync_all(200)
     
     def body(self):
         cfg=AttrDict(self.cfg)
@@ -172,19 +189,18 @@ class HistogramProgram(AveragerProgram):
             self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
             self.sync_all()
         self.measure(pulse_ch=self.res_ch, 
-             adcs=[0,1],
+             adcs=[self.adc_ch],
              adc_trig_offset=cfg.device.readout.trig_offset,
              wait=True,
-             syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
+             syncdelay=self.us2cycles(cfg.device.readout.relax_delay)
+             )
 
     def collect_shots(self):
-        # collect shots for 2 adcs (0 and 1 indexed) and I and Q channels
+        # collect shots for the relevant adc and I and Q channels
         cfg=AttrDict(self.cfg)
-        shots_i0 = self.di_buf[0] / self.readout_length
-        shots_q0 = self.dq_buf[0] / self.readout_length
-        shots_i1 = self.di_buf[1] / self.readout_length
-        shots_q1 = self.dq_buf[1] / self.readout_length
-        return shots_i0, shots_q0, shots_i1, shots_q1
+        shots_i0 = self.di_buf[0] / self.readout_length_adc
+        shots_q0 = self.dq_buf[0] / self.readout_length_adc
+        return shots_i0, shots_q0
 
 
 class HistogramExperiment(Experiment):
@@ -201,20 +217,16 @@ class HistogramExperiment(Experiment):
 
     def acquire(self, progress=False, debug=False):
         q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-            elif isinstance(value, dict):
-                for key2, value2 in value.items():
-                    for key3, value3 in value2.items():
-                        if isinstance(value3, list):
-                            value2.update({key3: value3[q_ind]})
-            
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
 
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind] 
 
         # rounds = 100
         # Ig = np.zeros(self.cfg.expt.reps)
@@ -225,7 +237,7 @@ class HistogramExperiment(Experiment):
         #     x_pts, avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None,load_pulses=True,progress=False, debug=debug)
         #     i0, q0, i1, q1 = histpro.collect_shots()
         #     iq = ([i0, q0], [i1, q1])
-        #     i, q = iq[adc_ch] # i/q[0]: ground state i/q, i/q[1]: excited state i/q
+        #     i, q = iq[0] # i/q[0]: ground state i/q, i/q[1]: excited state i/q
         #     Ig += i[0]
         #     Qg += q[0]
         #     Ie += i[1]
@@ -239,10 +251,7 @@ class HistogramExperiment(Experiment):
         cfg.expt.pulse_f = False
         histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
         avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
-        i0, q0, i1, q1 = histpro.collect_shots()
-        iq = ([i0, q0], [i1, q1])
-        i, q = iq[adc_ch]
-        data['Ig'], data['Qg'] = iq[adc_ch]
+        data['Ig'], data['Qg'] = histpro.collect_shots()
 
         # Excited state shots
         cfg = AttrDict(self.cfg.copy())
@@ -250,10 +259,7 @@ class HistogramExperiment(Experiment):
         cfg.expt.pulse_f = False
         histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
         avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
-        i0, q0, i1, q1 = histpro.collect_shots()
-        iq = ([i0, q0], [i1, q1])
-        i, q = iq[adc_ch]
-        data['Ie'], data['Qe'] = iq[adc_ch]
+        data['Ie'], data['Qe'] = histpro.collect_shots()
 
         # Excited state shots
         self.check_f = self.cfg.expt.check_f
@@ -263,10 +269,7 @@ class HistogramExperiment(Experiment):
             cfg.expt.pulse_f = True
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
-            i0, q0, i1, q1 = histpro.collect_shots()
-            iq = ([i0, q0], [i1, q1])
-            i, q = iq[adc_ch]
-            data['If'], data['Qf'] = iq[adc_ch]
+            data['If'], data['Qf'] = histpro.collect_shots()
 
         self.data = data
         return data

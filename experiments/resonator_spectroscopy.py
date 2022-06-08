@@ -19,29 +19,49 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
         
-        q_ind = self.cfg.expt.qubit
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
-
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
+        self.adc_ch = cfg.hw.soc.adcs.readout.ch
+        self.res_ch = cfg.hw.soc.dacs.readout.ch
+        self.res_ch_type = cfg.hw.soc.dacs.readout.type
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
 
         self.frequency = cfg.device.readout.frequency
-        self.freqreg = self.freq2reg(self.frequency, gen_ch=self.res_ch, ro_ch=None)
+        self.freqreg = self.freq2reg(self.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
         if self.cfg.expt.pulse_f: 
             self.f_ef = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
         self.res_gain = cfg.device.readout.gain
-        self.readout_length = self.us2cycles(cfg.device.readout.readout_length)
+        self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
+        self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
+        self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
 
-        for ch in [0,1]: # configure the readout lengths and downconversion frequencies
-            self.declare_readout(ch=ch, length=self.readout_length,
-                                 freq=self.frequency, gen_ch=self.res_ch)
+        mask = None
+        mixer_freq = 0 # MHz
+        mux_freqs = None # MHz
+        mux_gains = None
+        ro_ch = None
+        if self.res_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+        elif self.res_ch_type == 'mux4':
+            assert self.res_ch == 6
+            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
+            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            ro_ch=self.adc_ch
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
-        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma)
+        mixer_freq = 0
+        if self.qubit_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
+
+        self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=self.frequency, gen_ch=self.res_ch)
+
+        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma, gen_ch=self.qubit_ch)
         self.pi_gain = cfg.device.qubit.pulses.pi_ge.gain
         if self.cfg.expt.pulse_f:
-            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma)
+            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
             self.pi_ef_gain = cfg.device.qubit.pulses.pi_ef.gain
         
         # copy over parameters for the acquire method
@@ -51,26 +71,24 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
         if self.cfg.expt.pulse_f:
             self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
-        self.set_pulse_registers(
-            ch=self.res_ch,
-            style="const",
-            freq=self.freqreg,
-            phase=self.deg2reg(cfg.device.readout.phase, gen_ch=self.res_ch),
-            gain=self.res_gain,
-            length=self.readout_length)
+
+        if self.res_ch_type == 'mux4':
+            self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.freqreg, phase=0, gain=self.res_gain, length=self.readout_length_dac)
         self.synci(200) # give processor some time to configure pulses
-    
+
     def body(self):
+        # pass
         cfg=AttrDict(self.cfg)
         if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
             self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
-            # self.sync_all() # align channels
+            self.sync_all() # align channels
         if self.cfg.expt.pulse_f:
             self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
-            # self.sync_all() # align channels
+            self.sync_all() # align channels
         self.measure(
             pulse_ch=self.res_ch,
-            adcs=[0,1],
+            adcs=[self.adc_ch],
             adc_trig_offset=cfg.device.readout.trig_offset,
             wait=True,
             syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
@@ -95,29 +113,25 @@ class ResonatorSpectroscopyExperiment(Experiment):
 
     def acquire(self, progress=False):
         xpts=self.cfg.expt["start"] + self.cfg.expt["step"]*np.arange(self.cfg.expt["expts"])
-        
         q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-            elif isinstance(value, dict):
-                for key2, value2 in value.items():
-                    for key3, value3 in value2.items():
-                        if isinstance(value3, list):
-                            value2.update({key3: value3[q_ind]})                                
-        
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
+
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         for f in tqdm(xpts, disable=not progress):
             self.cfg.device.readout.frequency = f
             rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-            self.prog = rspec
+            # print(rspec)
             avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-            avgi = avgi[adc_ch][0]
-            avgq = avgq[adc_ch][0]
+            avgi = avgi[0][0]
+            avgq = avgq[0][0]
             amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
             phase = np.angle(avgi+1j*avgq) # Calculating the phase
 
@@ -211,39 +225,35 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
     def acquire(self, progress=False):
         xpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
         gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"]*np.arange(self.cfg.expt["expts_gain"])
-        
+
         q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-            elif isinstance(value, dict):
-                for key2, value2 in value.items():
-                    for key3, value3 in value2.items():
-                        if isinstance(value3, list):
-                            value2.update({key3: value3[q_ind]})                                
-        
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
+
         data={"xpts":[], "gainpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         for gain in tqdm(gainpts, disable=not progress):
             self.cfg.device.readout.gain = gain
             data["avgi"].append([])
             data["avgq"].append([])
             data["amps"].append([])
             data["phases"].append([])
-            
+
             for f in tqdm(xpts, disable=True):
                 self.cfg.device.readout.frequency = f
                 rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = rspec
                 avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-                avgi = avgi[adc_ch][0]
-                avgq = avgq[adc_ch][0]
+                avgi = avgi[0][0]
+                avgq = avgq[0][0]
                 amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
                 phase = np.angle(avgi+1j*avgq) # Calculating the phase
-                
                 data["avgi"][-1].append(avgi)
                 data["avgq"][-1].append(avgq)
                 data["amps"][-1].append(amp)
@@ -343,20 +353,17 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
         voltpts = self.cfg.expt["start_volt"] + self.cfg.expt["step_volt"]*np.arange(self.cfg.expt["expts_volt"])
         
         q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-            elif isinstance(value, dict):
-                for key2, value2 in value.items():
-                    for key3, value3 in value2.items():
-                        if isinstance(value3, list):
-                            value2.update({key3: value3[q_ind]})                                
-        
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
+
         data={"xpts":[], "voltpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
 
         self.dc_instr.set_mode('CURR')
         self.dc_instr.set_current_limit(max(abs(voltpts)*5))
@@ -378,8 +385,8 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
                 rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = rspec
                 avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-                avgi = avgi[adc_ch][0]
-                avgq = avgq[adc_ch][0]
+                avgi = avgi[0][0]
+                avgq = avgq[0][0]
                 amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
                 phase = np.angle(avgi+1j*avgq) # Calculating the phase
                 

@@ -13,33 +13,57 @@ class RamseyProgram(RAveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
         
-        q_ind = self.cfg.expt.qubit
-        self.res_ch = cfg.hw.soc.dacs.readout.ch[q_ind]
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch[q_ind]
+        self.adc_ch = cfg.hw.soc.adcs.readout.ch
+        self.res_ch = cfg.hw.soc.dacs.readout.ch
+        self.res_ch_type = cfg.hw.soc.dacs.readout.type
+        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
 
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist[q_ind])
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist[q_ind])
-    
         self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
         self.r_wait = 3
         self.r_phase2 = 4
-        self.r_phase=self.sreg(self.qubit_ch, "phase")
+        self.r_phase = self.sreg(self.qubit_ch, "phase")
         self.safe_regwi(self.q_rp, self.r_wait, self.us2cycles(cfg.expt.start))
         self.safe_regwi(self.q_rp, self.r_phase2, 0) 
-        
+
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
-        self.f_res=self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch) # convert f_res to dac register value
-        self.readout_length=self.us2cycles(cfg.device.readout.readout_length)
-        for ch in [0,1]: # configure the readout lengths and downconversion frequencies
-            self.declare_readout(ch=ch, length=self.readout_length,
-                                 freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
-        
+        self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
+        self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
+        self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
+        self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
+
+        # declare res dacs
+        mask = None
+        mixer_freq = 0 # MHz
+        mux_freqs = None # MHz
+        mux_gains = None
+        ro_ch = None
+        if self.res_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+        elif self.res_ch_type == 'mux4':
+            assert self.res_ch == 6
+            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
+            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
+            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
+            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            ro_ch=self.adc_ch
+        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+
+        # declare qubit dacs
+        mixer_freq = 0
+        if self.qubit_ch_type == 'int4':
+            mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
+        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
+
+        # declare adcs
+        self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
+
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
-        
-        self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma/2)
-        
+
+        self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma/2, gen_ch=self.qubit_ch)
+
         # add qubit and readout pulses to respective channels
         if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi2_qubit", sigma=self.pi2sigma, length=self.pi2sigma*4)
@@ -58,16 +82,13 @@ class RamseyProgram(RAveragerProgram):
                 phase=0, # updated in raverager loop
                 gain=cfg.device.qubit.pulses.pi_ge.gain, 
                 length=self.pi2sigma)
-        self.set_pulse_registers(
-            ch=self.res_ch,
-            style="const",
-            freq=self.f_res,
-            phase=self.deg2reg(cfg.device.readout.phase, gen_ch=self.res_ch),
-            gain=cfg.device.readout.gain,
-            length=self.readout_length)
-        
-        self.sync_all(self.us2cycles(0.2))
-    
+
+        if self.res_ch_type == 'mux4':
+            self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
+
+        self.sync_all(200)
+
     def body(self):
         cfg=AttrDict(self.cfg)
         # play pi/2 pulse
@@ -81,11 +102,11 @@ class RamseyProgram(RAveragerProgram):
         self.pulse(ch=self.qubit_ch)
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
         self.measure(pulse_ch=self.res_ch, 
-             adcs=[0,1],
+             adcs=[self.adc_ch],
              adc_trig_offset=cfg.device.readout.trig_offset,
              wait=True,
              syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
-    
+
     def update(self):
         phase_step = self.deg2reg(360 * self.cfg.expt.ramsey_freq * self.cfg.expt.step, gen_ch=self.qubit_ch) # phase step [deg] = 360 * f_Ramsey [MHz] * tau_step [us]
         self.mathi(self.q_rp, self.r_wait, self.r_wait, '+', self.us2cycles(self.cfg.expt.step)) # update the time between two π/2 pulses
@@ -111,24 +132,21 @@ class RamseyExperiment(Experiment):
 
     def acquire(self, progress=False, debug=False):
         q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.readout.items():
-            if isinstance(value, list):
-                self.cfg.device.readout.update({key: value[q_ind]})
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
-            elif isinstance(value, dict):
-                for key2, value2 in value.items():
-                    for key3, value3 in value2.items():
-                        if isinstance(value3, list):
-                            value2.update({key3: value3[q_ind]})                
-        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
-        
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
+
         ramsey = RamseyProgram(soccfg=self.soccfg, cfg=self.cfg)
         x_pts, avgi, avgq = ramsey.acquire(self.im[self.cfg.aliases.soc], threshold=None,load_pulses=True,progress=progress, debug=debug)        
         
-        avgi = avgi[adc_ch][0]
-        avgq = avgq[adc_ch][0]
+        avgi = avgi[0][0]
+        avgq = avgq[0][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
         phases = np.angle(avgi+1j*avgq) # Calculating the phase        
         
@@ -153,19 +171,14 @@ class RamseyExperiment(Experiment):
             data['fit_err_avgi'] = pCov_avgi   
             data['fit_err_avgq'] = pCov_avgq
             data['fit_err_amps'] = pCov_amps
-            data['f_ge_adjust_ramsey_avgi'] = self.cfg.expt.ramsey_freq - p_avgi[1]
-            data['f_ge_adjust_ramsey_avgq'] = self.cfg.expt.ramsey_freq - p_avgq[1]
-            data['f_ge_adjust_ramsey_amps'] = self.cfg.expt.ramsey_freq - p_amps[1]
+            data['f_ge_adjust_ramsey_avgi'] = (self.cfg.expt.ramsey_freq - p_avgi[1], -self.cfg.expt.ramsey_freq - p_avgi[1])
+            data['f_ge_adjust_ramsey_avgq'] = (self.cfg.expt.ramsey_freq - p_avgq[1], -self.cfg.expt.ramsey_freq - p_avgq[1])
+            data['f_ge_adjust_ramsey_amps'] = (self.cfg.expt.ramsey_freq - p_amps[1], -self.cfg.expt.ramsey_freq - p_amps[1])
         return data
 
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data
-        
-        q_ind = self.cfg.expt.qubit
-        for key, value in self.cfg.device.qubit.items():
-            if isinstance(value, list):
-                self.cfg.device.qubit.update({key: value[q_ind]})
 
         plt.figure(figsize=(10, 6))
         plt.subplot(111,title=f"Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
@@ -184,8 +197,9 @@ class RamseyExperiment(Experiment):
             ymax = np.max(data['amps'])
             plt.text(xmin+0.6*(xmax-xmin), ymin+1*(ymax-ymin), captionStr, fontsize=14, verticalalignment='top')
             print(f'Fit frequency from amps [MHz]: {p[1]}')
-            print('Suggested new qubit frequency from fit amps [MHz]:',
-                  f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_amps"]}')
+            print('Suggested new qubit frequencies from fit amps [MHz]:\n',
+                  f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_amps"][0]}\n',
+                  f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_amps"][1]}')
             print(f'T2 Ramsey from fit amps [us]: {p[3]}')
 
         # plt.figure(figsize=(10,9))
@@ -199,8 +213,9 @@ class RamseyExperiment(Experiment):
         #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
         #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
         #     print(f'Fit frequency from I [MHz]: {p[1]}')
-        #     print('Suggested new qubit frequency from fit I [MHz]:',
-        #           f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgi"]}')
+        #     print('Suggested new qubit frequency from fit I [MHz]:\n',
+        #           f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgi"][0]}\n',
+        #           f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgi"][1]}')
         #     print(f'T2 Ramsey from fit I [us]: {p[3]}')
         # plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
         # plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
@@ -210,8 +225,9 @@ class RamseyExperiment(Experiment):
         #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
         #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
         #     print(f'Fit frequency from Q [MHz]: {p[1]}')
-        #     print('Suggested new qubit frequency from fit Q [MHz]:',
-        #           f'{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"]}')
+        #     print('Suggested new qubit frequencies from fit Q [MHz]:\n',
+        #           f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"][0]}\n',
+        #           f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"][1]}')
         #     print(f'T2 Ramsey from fit Q [us]: {p[3]}')
 
         plt.tight_layout()
