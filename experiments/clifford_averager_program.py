@@ -80,6 +80,22 @@ class CliffordAveragerProgram(AveragerProgram):
             if gain is not None: params['gain'] = gain
             self.set_pulse_registers(ch=params['ch'], style='flat_top', freq=params['freq'], phase=params['phase'], gain=params['gain'], waveform=params['name'], length=params['flat_length'])
             if play: self.pulse(ch=params['ch'])
+    
+    def handle_mux4_pulse(self, name, ch=None, mask=None, length=None, play=False, set_reg=False):
+        """
+        Load/play a constant pulse of given length on the mux4 channel.
+        """
+        if name is not None and name not in self.pulse_dict.keys():
+            assert ch is not None
+            assert ch == 6, 'Only ch 6 on q3diamond supports mux4 currently!'
+            self.pulse_dict.update({name:dict(ch=ch, name=name, type='mux4', mask=mask, length=length)})
+        if play or set_reg:
+            assert name in self.pulse_dict.keys()
+            params = self.pulse_dict[name].copy()
+            if mask is not None: params['mask'] = mask
+            if length is not None: params['length'] = length
+            self.set_pulse_registers(ch=params['ch'], style='const', length=length, mask=mask)
+            if play: self.pulse(ch=params['ch'])
 
     """
     Clifford pulse defns
@@ -94,7 +110,7 @@ class CliffordAveragerProgram(AveragerProgram):
         sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
         if pihalf: gain = gain//2
         if neg: phase += 180
-        type = self.cfg.device.qubit.pulses.pi_ge.type
+        type = self.cfg.device.qubit.pulses.pi_ge.type[q]
         if type == 'const':
             self.handle_const_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], length=sigma, freq=f_ge, phase=phase, gain=gain, play=play) 
         elif type == 'gauss':
@@ -108,6 +124,8 @@ class CliffordAveragerProgram(AveragerProgram):
         self.X_pulse(q, pihalf=pihalf, neg=neg, extra_phase=90+extra_phase, play=play)
 
     def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
+        dac_type = self.qubit_ch_types[q]
+        assert not dac_type == 'mux4', "Currently cannot set phase for mux4!"
         phase_adjust = 180 # NOT SURE ABOUT SIGN
         if pihalf: phase_adjust = 90
         if neg: phase_adjust *= -1
@@ -116,27 +134,52 @@ class CliffordAveragerProgram(AveragerProgram):
     def initialize(self):
         self.cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
-        qubits = self.cfg.expt.qubits
+        self.qubits = self.cfg.expt.qubits
         self.pulse_dict = dict()
+        self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
 
-        # all of these saved self.whatever instance variables should be indexed by the actual qubit number. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
-        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
-        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
+        # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
         self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
+        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
+        self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
+        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
 
-        self.overall_phase = [0]*len(qubits)
+        self.overall_phase = [0]*self.num_qubits_sample
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_ch
-        self.f_res = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
+        self.f_res_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
 
-        self.readout_length = [self.us2cycles(len) for len in self.cfg.device.readout.readout_length]
+        self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
+        self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
         # copy over parameters for the acquire method
         self.cfg.reps = self.cfg.expt.reps
 
-        for q in qubits:
-            self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q])
-            self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q])
-            self.declare_readout(ch=self.adc_chs[q], length=self.readout_length[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+        # declare res dacs
+        if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
+            assert np.all([ch == 6 for ch in self.res_chs])
+            mask = range(4) # indices of mux_freqs, mux_gains list to play
+            mux_freqs = [0 if i in self.qubits else self.cfg.device.readout.frequency[i] for i in range(4)]
+            mux_gains = [0 if i in self.qubits else self.cfg.device.readout.gain[i] for i in range(4)]
+            self.declare_gen(ch=6, nqz=self.cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=self.cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
+            self.handle_mux4_pulse(name=f'measure', ch=self.res_chs[0], length=max(self.readout_lengths_dac), mask=mask, play=False, set_reg=True)
+        else:
+            for q in self.qubits:
+                mixer_freq = 0
+                if self.res_ch_types[q] == 'int4':
+                    mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[q]
+                self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
+                self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq=self.f_res_reg[q], phase=0, gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)
+
+        # declare qubit dacs
+        for q in self.qubits:
+            mixer_freq = 0
+            if self.qubit_ch_types[q] == 'int4':
+                mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
+            self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
             self.X_pulse(q=q, play=False)
-            self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq=self.f_res[q], phase=self.deg2reg(self.cfg.device.readout.phase[q]), gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)
+
+        # declare adcs - readout for all qubits every time
+        for q in range(self.num_qubits_sample):
+            self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])

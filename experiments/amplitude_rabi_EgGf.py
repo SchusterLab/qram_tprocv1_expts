@@ -18,7 +18,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         qA, qB = self.qubits
 
         # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
-        self.adc_chs = cfg.hw.soc.adcs.readout.ch
+        self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
         self.res_chs = self.cfg.hw.soc.dacs.readout.ch
         self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
         self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
@@ -33,7 +33,6 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         self.f_EgGf_reg = self.freq2reg(cfg.device.qubit.f_EgGf[qA], gen_ch=self.swap_chs[qA])
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
-        self.readout_length = [self.us2cycles(len) for len in self.cfg.device.readout.readout_length]
 
         # declare res dacs
         mask = None
@@ -135,10 +134,11 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", freq=self.f_ef_reg[qB], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qB], waveform="pi_ef_qubitB")
         
         self.sync_all(5)
+        measure_chs = self.res_chs
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
             pulse_ch=measure_chs, 
-            adcs=[0,1],
+            adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
             syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in self.qubits])))

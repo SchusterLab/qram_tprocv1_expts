@@ -131,7 +131,6 @@ class HistogramProgram(AveragerProgram):
         self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
         self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
         self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
-        print(self.readout_length_adc)
 
         # declare dacs
         mask = None
@@ -285,7 +284,6 @@ class HistogramExperiment(Experiment):
         
         return data
 
-    
     def display(self, data=None, span=None, **kwargs):
         if data is None:
             data=self.data 
@@ -294,7 +292,7 @@ class HistogramExperiment(Experiment):
             
         print(f'fidelity: {fid}')
         print(f'rotation angle (deg): {angle}')
-        print(f'set angle to (deg): {self.cfg.device.readout.phase - angle}')
+        # print(f'set angle to (deg): {self.cfg.device.readout.phase - angle}')
         print(f'threshold: {threshold}')
     
     def save_data(self, data=None):

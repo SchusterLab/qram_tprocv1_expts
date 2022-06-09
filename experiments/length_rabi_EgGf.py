@@ -116,6 +116,7 @@ class LengthRabiEgGfProgram(AveragerProgram):
         self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", freq=self.f_ef_reg[qB], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qB], waveform="pi_ef_qubitB")
         
         self.sync_all(5)
+        measure_chs = self.res_chs
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
             pulse_ch=measure_chs, 
