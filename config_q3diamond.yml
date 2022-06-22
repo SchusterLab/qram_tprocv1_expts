@@ -20,8 +20,8 @@ device:
     
     readout:
         trig_offset: 100 # [Clock ticks]
-        frequency: [200, 400, 200, 200] # [MHz] (5.95 GHz, 7.15053 GHz)
-        gain: [-0.8, -0.8, -0.8, -0.8] # [MUX units: range -1 to 1]
+        frequency: [10, 10, 10, 10] # [MHz] (5.95 GHz, 7.15053 GHz)
+        gain: [0.1, 0.1, 0.1, 0.1] # [MUX units: range -1 to 1, signed amplitude]
         # gain: 10000
         phase: [0, 0, 0, 0] # degrees 
         threshold: [0, 0, 0, 0] # adc units
@@ -55,7 +55,7 @@ hw:
                 # nyquist: 1
                 ch: 6
                 type: 'mux4'
-                mixer_freq: 2000 # [MHz] freq to mix up
+                mixer_freq: 1000 # [MHz] freq to mix up
                 nyquist: 1
         adcs:
             readout:

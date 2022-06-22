@@ -21,7 +21,7 @@ device:
     readout:
         trig_offset: 200 # [Clock ticks]
         frequency: [200, 400, 200, 200] # [MHz] (5.95 GHz, 7.15053 GHz)
-        gain: 10000
+        gain: 20000
         phase: [0, 0, 0, 0] # degrees 
         threshold: [0, 0, 0, 0] # adc units
         readout_length: [20, 20, 20, 20] # [us]

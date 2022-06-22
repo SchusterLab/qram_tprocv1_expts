@@ -107,12 +107,6 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[2].axvline(threshold, color='0.2', linestyle='--')
 
     return fid, threshold, theta*180/np.pi
-
-"""
-Measures the single shot readout fidelity of the system. We acquire single shot (I, Q) readout values by first preparing the qubit in its ground (blue dots) a certain number of times (in the below demo we take 5000 shots) and then preparing the qubit in its excited state (red dots) the same number of times. We then extract two parameters which are used to optimize the associated readout fidelity: the rotation angle of the IQ blobs and the threshold that classifies the two qubit states (ground and excited). We store these two parameters here <code>cfg.device.readouti.phase</code> and <code>cfg.device.readouti.threshold</code>.
-
-Note that this experiment already assumes that you have found your qubit frequency and $\pi$ pulse amplitude. Every time you reset the QICK firmware the single shot angle and threshold changes. So, this experiment is used to calibrate any experiment below that uses single shot data (such as the Active Reset experiment).
-"""
 class HistogramProgram(AveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -184,9 +178,11 @@ class HistogramProgram(AveragerProgram):
         if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
             self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
             self.sync_all()
+
         if self.cfg.expt.pulse_f:
             self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
             self.sync_all()
+
         self.measure(pulse_ch=self.res_ch, 
              adcs=[self.adc_ch],
              adc_trig_offset=cfg.device.readout.trig_offset,
@@ -200,6 +196,7 @@ class HistogramProgram(AveragerProgram):
         shots_i0 = self.di_buf[0] / self.readout_length_adc
         shots_q0 = self.dq_buf[0] / self.readout_length_adc
         return shots_i0, shots_q0
+        # return shots_i0[:5000], shots_q0[:5000]
 
 
 class HistogramExperiment(Experiment):

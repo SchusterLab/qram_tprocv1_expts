@@ -165,7 +165,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
 
 # ====================================================== #
 
-from experiments.resonator_spectroscopy import ResonatorSpectroscopyExperiment
+from experiments.single_qubit.resonator_spectroscopy import ResonatorSpectroscopyExperiment
 class PulseProbeVoltSweepSpectroscopyExperiment(Experiment):
     """
     PulseProbe Spectroscopy Experiment Sweep Voltage
