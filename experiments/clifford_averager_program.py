@@ -182,7 +182,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits every time
         for q in range(self.num_qubits_sample):
-            print('freq', self.cfg.device.readout.frequency[q])
+            # print('freq', self.cfg.device.readout.frequency[q])
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
 

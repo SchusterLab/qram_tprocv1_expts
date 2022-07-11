@@ -1,9 +1,10 @@
 device:
     qubit:
-        T1: [35, 80, 50, 44] # us
-        f_ge: [845.00, 3478.17, 168.08, 465.8] # MHz
-        f_ef: [658, 3377, -55, 293] # MHz
-        f_EgGf: [2000, 0, 2000, 2000] # MHz expect to be ge_1 + ef_1 - ge_0
+        T1: [35, 80, 50, 44] # [us]
+        f_ge: [845.00, 3478.17, 168.08, 465.8] # [MHz]
+        f_ef: [658, 3377, -55, 293] # [MHz]
+        f_EgGf: [2000, 0, 2000, 2000] # [MHz] expect to be ge_1 + ef_1 - ge_0
+        gs: [43, 54, 40] # [MHz] from theoretical comparison for ZZ shift
         pulses:
             pi_ge:
                 gain: [10585, 13251, 13657, 12683]
@@ -20,7 +21,7 @@ device:
     
     readout:
         trig_offset: 120 # [Clock ticks]
-        frequency: [600.9, -665.3, -292.1, -130.4] # [MHz] max: 800 MHz, must be in separate bins = fs/16 (hi/lo power: 7.681/7.686, 5.775/5.781, 6.787/6.793, 6.949/6.955)
+        frequency: [811, -806, -82, 80] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 7.681/7.686, 5.775/5.781, 6.787/6.793, 6.949/6.955)
         gain: [0.085, 0.03, 0.025, 0.07] # [MUX units: range -1 to 1, signed amplitude]
         phase: [0, 0, 0, 0] # degrees 
         threshold_ge: [0, 0, 0, 0] # adc units
@@ -31,7 +32,7 @@ device:
 hw:
     lo:
         readout:
-            frequency: 6.1e9
+            frequency: 5925e6
             power: 10 # mixer wants 7 dBm
     soc:
         dacs:
@@ -57,8 +58,7 @@ hw:
                 # nyquist: 1
                 ch: 6
                 type: 'mux4'
-                mixer_freq: 985 # [MHz] freq to mix up
-                # mixer_freq: 850 
+                mixer_freq: 950 # [MHz] freq to mix up
                 nyquist: 1
         adcs:
             readout:

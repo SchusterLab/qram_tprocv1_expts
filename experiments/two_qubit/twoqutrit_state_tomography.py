@@ -107,7 +107,7 @@ class AbstractStateTomo2qutritProgram(QutritAveragerProgram):
         ind = 0
         for i in range(3):
             for j in range(3):
-                nij[ind] = np.sum(np.logical_and(shots_q0[shots_q0 == i], shots_q1[shots_q1 == j]))
+                nij[ind] = np.sum(np.logical_and(shots_q0 == i, shots_q1 == j))
                 ind += 1
         return nij
 
@@ -149,7 +149,7 @@ class ErrorMitigationStateTomo2qutritProgram(AbstractStateTomo2qutritProgram):
                 assert prep_state[q] == 'g'
             
     def initialize(self):
-        self.cfg.expt.prep = 'ZZ'
+        self.cfg.expt.prep = ('I', 'I')
         super().initialize()
         self.sync_all(self.us2cycles(0.2))
 
@@ -265,7 +265,7 @@ class EgGfStateTomographyQutritExperiment(Experiment):
                 tomo = EgGfStateTomo2qutritProgram(soccfg=self.soccfg, cfg=cfg)
                 counts = tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, angle=angle, threshold_ge=threshold_ge, threshold_ef=threshold_ef, load_pulses=True, progress=False, debug=debug)
                 data['counts_tomo'].append(counts)
-                self.pulse_dict.update({prep:tomo.pulse_dict})
+                self.pulse_dict.update({prep0+'-'+prep1:tomo.pulse_dict})
 
         # Error mitigation measurements: prep in gg, ge, gf, eg, ee, ef, fg, fe, ff and measure confusion matrix
         for prep_state in tqdm(self.calib_order):
