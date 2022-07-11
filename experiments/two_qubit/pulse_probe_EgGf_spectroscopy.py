@@ -36,33 +36,40 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
+        gen_chs = []
+        
         # declare res dacs
         mask = None
         if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
             assert np.all([ch == 6 for ch in self.res_chs])
             mask = range(4) # indices of mux_freqs, mux_gains list to play
-            mux_freqs = [0 if i in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
-            mux_gains = [0 if i in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
+            mux_freqs = [0 if i not in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
+            mux_gains = [0 if i not in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
             self.declare_gen(ch=6, nqz=cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
+            gen_chs.append(6)
         else:
             for q in self.qubits:
                 mixer_freq = 0
                 if self.res_ch_types[q] == 'int4':
                     mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
                 self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
+                gen_chs.append(self.res_chs[q])
 
         # declare qubit dacs
         for q in self.qubits:
             mixer_freq = 0
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
+            if self.qubit_chs[q] not in gen_chs:
+                self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
+                gen_chs.append(self.qubit_chs[q])
 
         # declare swap dac indexed by qA (since the the drive is always applied to qB)
         mixer_freq = 0
         if self.swap_ch_types[qA] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.swap.mixer_freq[qA]
         self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        gen_chs.append(self.swap_chs[qA])
 
         # declare adcs - readout for all qubits everytime
         for q in range(self.num_qubits_sample):
@@ -77,7 +84,7 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         self.cfg.rounds = cfg.expt.rounds
 
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
-        self.pi_ef_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qB], self.qubit_chs[qB])
+        self.pi_ef_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qB], gen_ch=self.qubit_chs[qB])
 
         self.f_start = self.freq2reg(cfg.expt.start, gen_ch=self.swap_chs[qA])
         self.f_step = self.freq2reg(cfg.expt.step, gen_ch=self.swap_chs[qA])
@@ -175,12 +182,12 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
         adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
         adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
 
-        qspec_ef=PulseProbeEgGfSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-        x_pts, avgi, avgq = qspec_ef.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        qspec_EgGf = PulseProbeEgGfSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
+        xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
         print(np.shape(avgi))
         
         data=dict(
-            xpts=x_pts,
+            xpts=xpts,
             avgi=(avgi[adcA_ch][0], avgi[adcB_ch][0]),
             avgq=(avgq[adcA_ch][0], avgq[adcB_ch][0]),
             amps=(np.abs(avgi[adcA_ch][0]+1j*avgq[adcA_ch][0]),

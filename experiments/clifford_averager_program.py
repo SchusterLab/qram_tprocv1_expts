@@ -182,4 +182,37 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits every time
         for q in range(self.num_qubits_sample):
+            print('freq', self.cfg.device.readout.frequency[q])
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+
+
+"""
+Take care of extra clifford pulses for qutrits.
+"""
+class QutritAveragerProgram(CliffordAveragerProgram):
+    def Xef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
+        # q: qubit number in config
+        f_ef = self.freq2reg(self.cfg.device.qubit.f_ef[q], gen_ch=self.qubit_chs[q])
+        gain = self.cfg.device.qubit.pulses.pi_ef.gain[q]
+        phase = self.overall_phase[q] + extra_phase
+        sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q])
+        if pihalf: gain = gain//2
+        if neg: phase += 180
+        type = self.cfg.device.qubit.pulses.pi_ef.type[q]
+        if type == 'const':
+            self.handle_const_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], length=sigma, freq=f_ef, phase=phase, gain=gain, play=play) 
+        elif type == 'gauss':
+            self.handle_gauss_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, freq=f_ef, phase=phase, gain=gain, play=play) 
+        elif type == 'flat_top':
+            flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.flat_length[q], gen_ch=self.qubit_chs[q])
+            self.handle_flat_top_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, flat_length=flat_length, freq=f_ef, phase=phase, gain=gain, play=play) 
+        else: assert False, f'Pulse type {type} not supported.'
+    
+    def Yef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
+        self.Xef_pulse(q, pihalf=pihalf, neg=neg, extra_phase=90+extra_phase, play=play)
+
+    def initialize(self):
+        super().initialize()
+        # declare qubit ef pulses 
+        for q in self.qubits:
+            self.Xef_pulse(q=q, play=False)

@@ -165,8 +165,8 @@ class AmplitudeRabiExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
-            fitparams = [None, 1/max(data['xpts']), None, None]
-            # fitparams = None
+            # fitparams = [None, 1/max(data['xpts']), None, None]
+            fitparams = None
             p_avgi, pCov_avgi = fitter.fitsin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
             p_avgq, pCov_avgq = fitter.fitsin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
             p_amps, pCov_amps = fitter.fitsin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
@@ -182,15 +182,20 @@ class AmplitudeRabiExperiment(Experiment):
         if data is None:
             data=self.data 
 
-        # plt.figure(figsize=(12, 8))
-        # plt.subplot(111, title=f"Amplitude Rabi", xlabel="Gain [DAC units]", ylabel="Amplitude [ADC units]")
+        # plt.figure(figsize=(10, 6))
+        # plt.subplot(111, title=f"Amplitude Rabi (Pulse Length {self.cfg.expt.sigma_test})", xlabel="Gain [DAC units]", ylabel="Amplitude [ADC units]")
         # plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
         # if fit:
         #     p = data['fit_amps']
         #     plt.plot(data["xpts"][1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
+        #     pi_gain = 1/p[1]/2
+        #     print(f'Pi gain from amps data [dac units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from amps data [dac units]: {int(pi_gain/2)}')
+        #     plt.axvline(pi_gain, color='0.2', linestyle='--')
+        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
 
         plt.figure(figsize=(10,10))
-        plt.subplot(211, title="Amplitude Rabi", ylabel="I [ADC levels]")
+        plt.subplot(211, title=f"Amplitude Rabi (Pulse Length {self.cfg.expt.sigma_test})", ylabel="I [ADC units]")
         plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
         if fit:
             p = data['fit_avgi']
@@ -200,7 +205,7 @@ class AmplitudeRabiExperiment(Experiment):
             print(f'\tPi/2 gain from avgi data [dac units]: {int(pi_gain/2)}')
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        plt.subplot(212, xlabel="Gain [dac units]", ylabel="Q [ADC levels]")
+        plt.subplot(212, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
         plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
         if fit:
             p = data['fit_avgq']
@@ -210,6 +215,7 @@ class AmplitudeRabiExperiment(Experiment):
             print(f'\tPi/2 gain from avgq data [dac units]: {int(pi_gain/2)}')
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+
         plt.show()
 
     def save_data(self, data=None):

@@ -145,27 +145,27 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=True, signs=[1,1], **kwargs):
         if data is None:
             data=self.data
         if fit:
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], -data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], data['avgq'][1:-1])
+            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], signs[0]*data['avgi'][1:-1])
+            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], signs[1]*data['avgq'][1:-1])
         return data
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, signs=[1,1], **kwargs):
         if data is None:
             data=self.data 
         plt.figure(figsize=(10,8))
         plt.subplot(211, title="Pulse Probe EF Spectroscopy", ylabel="I [adc level]")
         plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+            plt.plot(data["xpts"][1:-1], signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
             print(f'Found peak in avgi at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
         plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [adc level]")
         plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
+            plt.plot(data["xpts"][1:-1], signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
             # plt.axvline(3593.2, c='k', ls='--')
             print(f'Found peak in avgq at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
         plt.show()

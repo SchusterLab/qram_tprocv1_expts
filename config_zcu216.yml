@@ -20,7 +20,7 @@ device:
     
     readout:
         trig_offset: 200 # [Clock ticks]
-        frequency: [200, 400, 200, 200] # [MHz] (5.95 GHz, 7.15053 GHz)
+        frequency: [1586, 319, 693, 855] # [MHz] (5.95 GHz, 7.15053 GHz)
         gain: 20000
         phase: [0, 0, 0, 0] # degrees 
         threshold: [0, 0, 0, 0] # adc units
@@ -29,7 +29,7 @@ device:
     
 hw:
     lo:
-        readout: {frequency: 5.3e9, power: 13} # mixer wants 7 dBm
+        readout: {frequency: 6.1e9, power: 10} # mixer wants 7 dBm
     soc:
         dacs:
         # dac types: full (full gen - all gens in standard firmware) or int4, mux4 (q3diamond)
@@ -52,5 +52,5 @@ hw:
                 ch: 1
             
 aliases: # for use in instrument manager
-    readout_LO: SC26C1
+    readout_LO: SC_26C1
     soc: Qick187

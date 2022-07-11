@@ -1,9 +1,10 @@
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpl_patches
 import numpy as np
 from qick import *
 from qick.helpers import gauss
 
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
@@ -135,26 +136,47 @@ class T1Experiment(Experiment):
             data=self.data
             
         # fitparams=[y-offset, amp, x-offset, decay rate]
-        # Remove the first and last point from fit in case weird edge measurements
-        data['fit'], data['fit_err'] = fitter.fitexp(data['xpts'][1:-1], data['amps'][1:-1], fitparams=None)
+        # Remove the last point from fit in case weird edge measurements
+        data['fit_amps'], data['fit_err_amps'] = fitter.fitexp(data['xpts'][:-1], data['amps'][:-1], fitparams=None)
+        data['fit_avgi'], data['fit_err_avgi'] = fitter.fitexp(data['xpts'][:-1], data['avgi'][:-1], fitparams=None)
+        data['fit_avgq'], data['fit_err_avgq'] = fitter.fitexp(data['xpts'][:-1], data['avgq'][:-1], fitparams=None)
         return data
 
-    def display(self, data=None, **kwargs):
+    def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data 
         
-        plt.figure(figsize=(12, 8))
-        plt.subplot(111,title="T1", xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
-        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
-        if "fit" in data:
-            plt.plot(data["xpts"][1:-1], fitter.expfunc(data["xpts"][1:-1], *data["fit"]))
-            captionStr = f'$T_1$ fit [us]: {data["fit"][3]:.3} $\pm$ {np.sqrt(data["fit_err"][3][3]):.3}'
-            xmin = data['xpts'][0]
-            xmax = data['xpts'][-1]
-            ymin = np.min(data['amps'])
-            ymax = np.max(data['amps'])
-            plt.text(xmin+0.7*(xmax-xmin), ymin+0.9*(ymax-ymin), captionStr, fontsize=14, verticalalignment='top')
-            print(f'Fit T1 [us]: {data["fit"][3]}')
+        # plt.figure(figsize=(12, 8))
+        # plt.subplot(111,title="$T_1$", xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
+        # plt.plot(data["xpts"][:-1], data["amps"][:-1],'o-')
+        # if fit:
+        #     p = data['fit_amps']
+        #     pCov = data['fit_err_amps']
+        #     captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_amps"]), label=captionStr)
+        #     plt.legend()
+        #     print(f'Fit T1 amps [us]: {data["fit_amps"][3]}')
+
+        plt.figure(figsize=(10,10))
+        plt.subplot(211, title="$T_1$", ylabel="I [ADC units]")
+        plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
+        if fit:
+            p = data['fit_avgi']
+            pCov = data['fit_err_avgi']
+            captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgi"]), label=captionStr)
+            plt.legend()
+            print(f'Fit T1 avgi [us]: {data["fit_avgi"][3]}')
+        plt.subplot(212, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
+        plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
+        if fit:
+            p = data['fit_avgq']
+            pCov = data['fit_err_avgq']
+            captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgq"]), label=captionStr)
+            plt.legend()
+            print(f'Fit T1 avgq [us]: {data["fit_avgq"][3]}')
+
         plt.show()
         
     def save_data(self, data=None):

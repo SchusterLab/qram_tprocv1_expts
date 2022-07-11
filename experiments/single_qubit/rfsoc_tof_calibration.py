@@ -41,6 +41,7 @@ class ToFCalibrationProgram(AveragerProgram):
             mux_gains=[cfg.expt.gain, 0, 0, 0]
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.dac_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+        print(f'readout freq {mixer_freq} +/- {cfg.expt.frequency}')
 
         self.declare_readout(ch=self.adc_ch, length=self.readout_length, freq=self.frequency, gen_ch=self.dac_ch) # gen_ch links to the mixer_freq being used on the mux
 

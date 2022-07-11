@@ -23,14 +23,14 @@ def hist(data, plot=True, span=None, verbose=True):
     numbins = 200
 
     xg, yg = np.median(Ig), np.median(Qg)
-    if verbose: print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)}')
+    if verbose: print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)}')
 
     xe, ye = np.median(Ie), np.median(Qe)
-    if verbose: print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)}')
+    if verbose: print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)}')
 
     if plot_f:
         xf, yf = np.median(If), np.median(Qf)
-        if verbose: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)}')
+        if verbose: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
         fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(20, 5))
@@ -107,6 +107,7 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[2].axvline(threshold, color='0.2', linestyle='--')
 
     return fid, threshold, theta*180/np.pi
+
 class HistogramProgram(AveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -281,11 +282,11 @@ class HistogramExperiment(Experiment):
         
         return data
 
-    def display(self, data=None, span=None, **kwargs):
+    def display(self, data=None, span=None, verbose=True, **kwargs):
         if data is None:
             data=self.data 
         
-        fid, threshold, angle = hist(data=data, plot=True, span=span)
+        fid, threshold, angle = hist(data=data, plot=True, verbose=verbose, span=span)
             
         print(f'fidelity: {fid}')
         print(f'rotation angle (deg): {angle}')

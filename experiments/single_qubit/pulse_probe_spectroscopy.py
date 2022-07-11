@@ -113,7 +113,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
                             if isinstance(value3, list):
                                 value2.update({key3: value3[q_ind]})                                
 
-        qspec=PulseProbeSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
+        qspec = PulseProbeSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
         xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
         avgi = avgi[0][0]
         avgq = avgq[0][0]
@@ -124,41 +124,43 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=True, signs=[1,1], **kwargs):
         if data is None:
             data=self.data
         if fit:
             data['fit_amps']=dsfit.fitlor(data["xpts"][1:-1], data['amps'][1:-1])
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], -data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], data['avgq'][1:-1])
+            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], signs[0]*data['avgi'][1:-1])
+            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], signs[1]*data['avgq'][1:-1])
         return data
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, signs=[1,1], **kwargs):
         if data is None:
             data=self.data 
 
-        plt.figure(figsize=(12, 8))
-        plt.subplot(111, title=f"Qubit Spectroscopy", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
-        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
-        if fit:
-            plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_amps"], data["xpts"][1:-1]))
+        xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq + data['xpts'][1:-1]
 
-        # plt.figure(figsize=(10,8))
-        # plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
-        # plt.plot(data["xpts"][:], data["avgi"][:],'o-')
+        # plt.figure(figsize=(12, 8))
+        # plt.subplot(111, title=f"Qubit Spectroscopy", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
+        # plt.plot(xpts, data["amps"][1:-1],'o-')
         # if fit:
-        #     plt.plot(data["xpts"][1:-1], -dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
-        #     print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
-        # plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
-        # plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
-        # if fit:
-        #     plt.plot(data["xpts"][1:-1], dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-        #     # plt.axvline(3593.2, c='k', ls='--')
-        #     print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
+        #     plt.plot(xpts, dsfit.lorfunc(data["fit_amps"], data["xpts"][1:-1]))
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
+        plt.plot(xpts, data["avgi"][1:-1],'o-')
+        if fit:
+            plt.plot(xpts, signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+            print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
+        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
+        plt.plot(xpts, data["avgq"][1:-1],'o-')
+        if fit:
+            plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
+            # plt.axvline(3593.2, c='k', ls='--')
+            print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
 
         plt.tight_layout()
         plt.show()
-                
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
