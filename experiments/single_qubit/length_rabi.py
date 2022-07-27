@@ -40,8 +40,10 @@ class LengthRabiProgram(AveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -179,21 +181,29 @@ class LengthRabiExperiment(Experiment):
         if fit:
             p = data['fit_avgi']
             plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-            pi_length = 1/p[1]/2
-            print(f'Pi length from avgi data [us]: {pi_length}')
-            print(f'Pi/2 length from avgi data [dac units]: {pi_length/2}')
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length= (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
+            print(f'Pi length from avgi data [us]: {int(pi_length)}')
+            print(f'\tPi/2 length from avgi data [us]: {int(pi2_length)}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
         plt.subplot(212, xlabel="Pulse length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[1:-1], data["avgq"][1:-1],'o-')
         if fit:
             p = data['fit_avgq']
             plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-            pi_length = 1/p[1]/2
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length= (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
             print(f'Pi length from avgq data [us]: {pi_length}')
-            print(f'Pi/2 length from avgq data [dac units]: {pi_length/2}')
+            print(f'Pi/2 length from avgq data [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
         plt.tight_layout()
         plt.show()
     

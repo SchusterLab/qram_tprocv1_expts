@@ -80,7 +80,7 @@ class AbstractStateTomo2qutritProgram(QutritAveragerProgram):
     def collect_counts(self, angle=None, threshold_ge=None, threshold_ef=None, shot_avg=1):
         # collect shots for 2 adcs (indexed by qubit order) in the I channel, then sorts into e, g based on >/< threshold and angle rotation
         bufi = np.array([
-            self.di_buf[i]*np.cos(angle[i]) - self.dq_buf[i]*np.sin(angle[i]) 
+            self.di_buf[i]*np.cos(np.pi/180*(angle[i]) - self.dq_buf[i]*np.sin(angle[i]))
             for i, ch in enumerate(self.ro_chs)])
         avgi = []
         for bufi_ch in bufi:

@@ -33,23 +33,25 @@ def hist(data, plot=True, span=None, verbose=True):
         if verbose: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
-        fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(20, 5))
+        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(16, 10))
         fig.tight_layout()
 
-        axs[0].scatter(Ig, Qg, label='g', color='b', marker='.')
-        axs[0].scatter(Ie, Qe, label='e', color='r', marker='.')
-        if plot_f: axs[0].scatter(If, Qf, label='f', color='g', marker='.')
-        axs[0].scatter(xg, yg, color='k', marker='o')
-        axs[0].scatter(xe, ye, color='k', marker='o')
-        if plot_f: axs[0].scatter(xf, yf, color='k', marker='o')
+        axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.')
+        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.')
+        if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.')
+        axs[0,0].scatter(xg, yg, color='k', marker='o')
+        axs[0,0].scatter(xe, ye, color='k', marker='o')
+        if plot_f: axs[0,0].scatter(xf, yf, color='k', marker='o')
 
-        axs[0].set_xlabel('I [ADC levels]')
-        axs[0].set_ylabel('Q [ADC levels]')
-        axs[0].legend(loc='upper right')
-        axs[0].set_title('Unrotated')
-        axs[0].axis('equal')
+        axs[0,0].set_xlabel('I [ADC levels]')
+        axs[0,0].set_ylabel('Q [ADC levels]')
+        axs[0,0].legend(loc='upper right')
+        axs[0,0].set_title('Unrotated')
+        axs[0,0].axis('equal')
+
     """Compute the rotation angle"""
     theta = -np.arctan2((ye-yg),(xe-xg))
+    if plot_f: theta = -np.arctan2((yf-yg),(xf-xg))
 
     """Rotate the IQ data"""
     Ig_new = Ig*np.cos(theta) - Qg*np.sin(theta)
@@ -73,40 +75,76 @@ def hist(data, plot=True, span=None, verbose=True):
     ylims = [yg-span, yg+span]
 
     if plot:
-        axs[1].scatter(Ig_new, Qg_new, label='g', color='b', marker='.')
-        axs[1].scatter(Ie_new, Qe_new, label='e', color='r', marker='.')
-        if plot_f: axs[1].scatter(If_new, Qf_new, label='f', color='g', marker='.')
-        axs[1].scatter(xg, yg, color='k', marker='o')
-        axs[1].scatter(xe, ye, color='k', marker='o')    
-        if plot_f: axs[1].scatter(xf, yf, color='k', marker='o')    
+        axs[0,1].scatter(Ig_new, Qg_new, label='g', color='b', marker='.')
+        axs[0,1].scatter(Ie_new, Qe_new, label='e', color='r', marker='.')
+        if plot_f: axs[0, 1].scatter(If_new, Qf_new, label='f', color='g', marker='.')
+        axs[0,1].scatter(xg, yg, color='k', marker='o')
+        axs[0,1].scatter(xe, ye, color='k', marker='o')    
+        if plot_f: axs[0, 1].scatter(xf, yf, color='k', marker='o')    
 
-        axs[1].set_xlabel('I [ADC levels]')
-        axs[1].legend(loc='upper right')
-        axs[1].set_title('Rotated')
-        axs[1].axis('equal')
+        axs[0,1].set_xlabel('I [ADC levels]')
+        axs[0,1].legend(loc='upper right')
+        axs[0,1].set_title('Rotated')
+        axs[0,1].axis('equal')
 
         """X and Y ranges for histogram"""
 
-        ng, binsg, pg = axs[2].hist(Ig_new, bins=numbins, range = xlims, color='b', label='g', alpha=0.5)
-        ne, binse, pe = axs[2].hist(Ie_new, bins=numbins, range = xlims, color='r', label='e', alpha=0.5)
-        if plot_f: nf, binsf, pf = axs[2].hist(If_new, bins=numbins, range = xlims, color='g', label='f', alpha=0.5)
-        axs[2].set_xlabel('I [ADC levels]')       
-        axs[2].legend(loc='upper right')
+        ng, binsg, pg = axs[1,0].hist(Ig_new, bins=numbins, range = xlims, color='b', label='g', alpha=0.5)
+        ne, binse, pe = axs[1,0].hist(Ie_new, bins=numbins, range = xlims, color='r', label='e', alpha=0.5)
+        if plot_f:
+            nf, binsf, pf = axs[1,0].hist(If_new, bins=numbins, range = xlims, color='g', label='f', alpha=0.5)
+        axs[1,0].set_ylabel('Counts')
+        axs[1,0].set_xlabel('I [ADC levels]')       
+        axs[1,0].legend(loc='upper right')
 
     else:        
-        ng, binsg = np.histogram(Ig_new, bins=numbins, range = xlims)
-        ne, binse = np.histogram(Ie_new, bins=numbins, range = xlims)
+        ng, binsg = np.histogram(Ig_new, bins=numbins, range=xlims)
+        ne, binse = np.histogram(Ie_new, bins=numbins, range=xlims)
+        if plot_f:
+            nf, binsf = np.histogram(If_new, bins=numbins, range=xlims)
 
     """Compute the fidelity using overlap of the histograms"""
+    fids = []
+    thresholds = []
     contrast = np.abs(((np.cumsum(ng) - np.cumsum(ne)) / (0.5*ng.sum() + 0.5*ne.sum())))
     tind=contrast.argmax()
-    threshold=binsg[tind]
-    fid = contrast[tind]
-    if plot: 
-        axs[2].set_title(f"Readout Fidelity: {fid*100:.2f}%")
-        axs[2].axvline(threshold, color='0.2', linestyle='--')
+    thresholds.append(binsg[tind])
+    fids.append(contrast[tind])
+    if plot_f:
+        contrast = np.abs(((np.cumsum(ng) - np.cumsum(nf)) / (0.5*ng.sum() + 0.5*nf.sum())))
+        tind=contrast.argmax()
+        thresholds.append(binsg[tind])
+        fids.append(contrast[tind])
 
-    return fid, threshold, theta*180/np.pi
+        contrast = np.abs(((np.cumsum(ne) - np.cumsum(nf)) / (0.5*ne.sum() + 0.5*nf.sum())))
+        tind=contrast.argmax()
+        thresholds.append(binsg[tind])
+        fids.append(contrast[tind])
+        
+    if plot: 
+        axs[1,0].set_title('Histogram')
+        axs[1,0].axvline(thresholds[0], color='0.2', linestyle='--')
+        if plot_f:
+            axs[1,0].axvline(thresholds[1], color='0.2', linestyle='--')
+            axs[1,0].axvline(thresholds[2], color='0.2', linestyle='--')
+
+        axs[1,1].set_title('Cumulative Counts')
+        axs[1,1].plot(binsg[:-1], np.cumsum(ng), 'b', label='g')
+        axs[1,1].plot(binse[:-1], np.cumsum(ne), 'r', label='e')
+        axs[1,1].axvline(thresholds[0], color='0.2', linestyle='--')
+        if plot_f:
+            axs[1,1].plot(binsf[:-1], np.cumsum(nf), 'g', label='f')
+            axs[1,1].axvline(thresholds[1], color='0.2', linestyle='--')
+            axs[1,1].axvline(thresholds[2], color='0.2', linestyle='--')
+        axs[1,1].legend()
+        axs[1,1].set_xlabel('I [ADC levels]')
+        
+        plt.subplots_adjust(hspace=0.25, wspace=0.15)        
+        plt.show()
+
+    return fids, thresholds, theta*180/np.pi # fids: ge, gf, ef
+
+# ====================================================== #
 
 class HistogramProgram(AveragerProgram):
     def initialize(self):
@@ -139,8 +177,10 @@ class HistogramProgram(AveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -194,6 +234,7 @@ class HistogramProgram(AveragerProgram):
     def collect_shots(self):
         # collect shots for the relevant adc and I and Q channels
         cfg=AttrDict(self.cfg)
+        # print(np.average(self.di_buf[0]))
         shots_i0 = self.di_buf[0] / self.readout_length_adc
         shots_q0 = self.dq_buf[0] / self.readout_length_adc
         return shots_i0, shots_q0
@@ -205,6 +246,7 @@ class HistogramExperiment(Experiment):
     Histogram Experiment
     expt = dict(
         reps: number of shots per expt
+        check_e: whether to test the e state blob (true if unspecified)
         check_f: whether to also test the f state blob
     )
     """
@@ -251,12 +293,16 @@ class HistogramExperiment(Experiment):
         data['Ig'], data['Qg'] = histpro.collect_shots()
 
         # Excited state shots
-        cfg = AttrDict(self.cfg.copy())
-        cfg.expt.pulse_e = True 
-        cfg.expt.pulse_f = False
-        histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-        avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
-        data['Ie'], data['Qe'] = histpro.collect_shots()
+        if 'check_e' not in self.cfg.expt:
+            self.check_e = True
+        else: self.check_e = self.cfg.expt.check_e
+        if self.check_e:
+            cfg = AttrDict(self.cfg.copy())
+            cfg.expt.pulse_e = True 
+            cfg.expt.pulse_f = False
+            histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
+            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
+            data['Ie'], data['Qe'] = histpro.collect_shots()
 
         # Excited state shots
         self.check_f = self.cfg.expt.check_f
@@ -275,10 +321,10 @@ class HistogramExperiment(Experiment):
         if data is None:
             data=self.data
         
-        fid, threshold, angle = hist(data=data, plot=False, span=span, verbose=verbose)
-        data['fid'] = fid
+        fids, thresholds, angle = hist(data=data, plot=False, span=span, verbose=verbose)
+        data['fids'] = fids
         data['angle'] = angle
-        data['threshold'] = threshold
+        data['thresholds'] = thresholds
         
         return data
 
@@ -286,12 +332,18 @@ class HistogramExperiment(Experiment):
         if data is None:
             data=self.data 
         
-        fid, threshold, angle = hist(data=data, plot=True, verbose=verbose, span=span)
+        fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, span=span)
             
-        print(f'fidelity: {fid}')
+        print(f'ge fidelity: {fids[0]}')
+        if self.cfg.expt.check_f:
+            print(f'gf fidelity: {fids[1]}')
+            print(f'ef fidelity: {fids[2]}')
         print(f'rotation angle (deg): {angle}')
-        # print(f'set angle to (deg): {self.cfg.device.readout.phase - angle}')
-        print(f'threshold: {threshold}')
+        print(f'set angle to (deg): {-angle}')
+        print(f'threshold ge: {thresholds[0]}')
+        if self.cfg.expt.check_f:
+            print(f'threshold gf: {thresholds[1]}')
+            print(f'threshold ef: {thresholds[2]}')
     
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
@@ -315,6 +367,8 @@ class SingleShotOptExperiment(Experiment):
         start_len: start readout len (dac units)
         step_len: length step (dac units)
         expts_len: number of experiments in length sweep
+
+        check_f: optimize fidelity for g/f (as opposed to g/e)
     )
     """
 
@@ -337,11 +391,16 @@ class SingleShotOptExperiment(Experiment):
                     shot.cfg.device.readout.frequency = f
                     shot.cfg.device.readout.gain = gain
                     shot.cfg.device.readout.length = l 
-                    shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_f=False, qubit=self.cfg.expt.qubit)
+                    check_e = True
+                    if 'check_f' not in self.cfg.expt: check_f = False
+                    else:
+                        check_f = self.cfg.expt.check_f
+                        check_e = not check_f
+                    shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_e=check_e, check_f=check_f, qubit=self.cfg.expt.qubit)
                     shot.go(analyze=False, display=False, progress=False, save=False)
                     results = shot.analyze(verbose=False)
-                    fid[f_ind, g_ind, l_ind] = results['fid']
-                    threshold[f_ind, g_ind, l_ind] = results['threshold']
+                    fid[f_ind, g_ind, l_ind] = results['fids'][0] if not check_f else results['fids'][1]
+                    threshold[f_ind, g_ind, l_ind] = results['thresholds'][0] if not check_f else results['thresholds'][1]
                     angle[f_ind, g_ind, l_ind] = results['angle']
 
         self.data = dict(fpts=fpts, gainpts=gainpts, lenpts=lenpts, fid=fid, threshold=threshold, angle=angle)
@@ -362,7 +421,7 @@ class SingleShotOptExperiment(Experiment):
         print(gainpts)
         print(lenpts)
         print(f'Max fidelity {fid[imax]}')
-        print(f'Set params: \n angle (deg) {self.cfg.device.readout.phase[self.cfg.expt.qubit] - angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
+        print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imaxs[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
 
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

@@ -37,8 +37,10 @@ class ToFCalibrationProgram(AveragerProgram):
             assert self.dac_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.expt.frequency, 0, 0, 0]
-            mux_gains=[cfg.expt.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.expt.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.expt.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.dac_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
         print(f'readout freq {mixer_freq} +/- {cfg.expt.frequency}')

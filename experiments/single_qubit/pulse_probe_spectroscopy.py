@@ -7,6 +7,8 @@ from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 import time
 
+import experiments.fitting as fitter
+
 """
 This program uses the RAveragerProgram class, which allows you to sweep a parameter directly on the processor rather than in python. Because the whole sweep is done on the processor there is less downtime (especially for fast experiments).
 """
@@ -41,8 +43,10 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -128,9 +132,10 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data
         if fit:
-            data['fit_amps']=dsfit.fitlor(data["xpts"][1:-1], data['amps'][1:-1])
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], signs[0]*data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], signs[1]*data['avgq'][1:-1])
+            xdata = data['xpts'][1:-1]
+            data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, data['amps'][1:-1])
+            data['fit_avgi'], data['fit_err_avgi'] = fitter.fitlor(xdata, signs[0]*data['avgi'][1:-1])
+            data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[1]*data['avgq'][1:-1])
         return data
 
     def display(self, data=None, fit=True, signs=[1,1], **kwargs):
@@ -143,18 +148,21 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         # plt.subplot(111, title=f"Qubit Spectroscopy", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
         # plt.plot(xpts, data["amps"][1:-1],'o-')
         # if fit:
-        #     plt.plot(xpts, dsfit.lorfunc(data["fit_amps"], data["xpts"][1:-1]))
+        #     plt.plot(xpts, fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))
 
         plt.figure(figsize=(10,8))
         plt.subplot(211, title="Pulse Probe Spectroscopy", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(xpts, signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+            plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgi"]))
             print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
         plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
         plt.plot(xpts, data["avgq"][1:-1],'o-')
+        # plt.axvline(3476, c='k', ls='--')
+        # plt.axvline(3376+50, c='k', ls='--')
+        # plt.axvline(3376, c='k', ls='--')
         if fit:
-            plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
+            plt.plot(xpts, signs[1]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgq"]))
             # plt.axvline(3593.2, c='k', ls='--')
             print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
 

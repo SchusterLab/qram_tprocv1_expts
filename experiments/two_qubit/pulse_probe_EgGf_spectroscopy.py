@@ -68,15 +68,16 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         mixer_freq = 0
         if self.swap_ch_types[qA] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.swap.mixer_freq[qA]
-        self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        if self.swap_chs[qA] not in gen_chs: 
+            self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
         gen_chs.append(self.swap_chs[qA])
 
-        # declare adcs - readout for all qubits everytime
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # drive is applied on qB via the swap channel indexed by qA
-        self.r_freq_swap=self.sreg(self.swap_chs[qA], "freq") # get frequency register for swap_ch 
+        self.r_freq_swap = self.sreg(self.swap_chs[qA], "freq") # get frequency register for swap_ch 
         self.r_freq_swap_update = 4 # register to hold the current sweep frequency
  
         # copy over parameters for the acquire method
@@ -84,16 +85,18 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         self.cfg.rounds = cfg.expt.rounds
 
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
+        self.pi_ge_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qB], gen_ch=self.qubit_chs[qB])
         self.pi_ef_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qB], gen_ch=self.qubit_chs[qB])
 
         self.f_start = self.freq2reg(cfg.expt.start, gen_ch=self.swap_chs[qA])
         self.f_step = self.freq2reg(cfg.expt.step, gen_ch=self.swap_chs[qA])
 
         # send start frequency to r_freq_swap_update
-        self.safe_regwi(self.q_rps[qB], self.r_freq_swap_update, self.f_start)
+        self.safe_regwi(self.ch_page(self.swap_chs[qA]), self.r_freq_swap_update, self.f_start)
 
         # add qubit pulses to respective channels
         self.add_gauss(ch=self.qubit_chs[qA], name="pi_qubitA", sigma=self.pi_sigmaA, length=self.pi_sigmaA*4)
+        self.add_gauss(ch=self.qubit_chs[qB], name="pi_ge_qubitB", sigma=self.pi_ge_sigmaB, length=self.pi_ge_sigmaB*4)
         self.add_gauss(ch=self.qubit_chs[qB], name="pi_ef_qubitB", sigma=self.pi_ef_sigmaB, length=self.pi_ef_sigmaB*4)
 
         # add readout pulses to respective channels
@@ -125,9 +128,7 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         self.pulse(ch=self.swap_chs[qA])
         self.sync_all(5)
 
-        # take qubit A G->E and qubit B f->e: expect to end in Ee (or Gg if incomplete Eg-Gf)
-        self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", freq=self.f_ge_reg[qA], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
-        self.sync_all(5)
+        # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
         self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", freq=self.f_ef_reg[qB], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qB], waveform="pi_ef_qubitB")
 
         self.sync_all(5)
@@ -135,7 +136,7 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
             pulse_ch=measure_chs, 
-            adcs=[0,1],
+            adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
             syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in self.qubits])))
@@ -144,6 +145,7 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         qA, qB = self.qubits
         self.mathi(self.ch_page(self.swap_chs[qA]), self.r_freq_swap_update, self.r_freq_swap_update, '+', self.f_step) # update frequency list index
         
+# ====================================================== #
 
 class PulseProbeEgGfSpectroscopyExperiment(Experiment):
     """
@@ -184,7 +186,6 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
 
         qspec_EgGf = PulseProbeEgGfSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
         xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
-        print(np.shape(avgi))
         
         data=dict(
             xpts=xpts,
@@ -195,6 +196,7 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
             phases=(np.angle(avgi[adcA_ch][0]+1j*avgq[adcA_ch][0]),
                     np.angle(avgi[adcB_ch][0]+1j*avgq[adcB_ch][0])),
         )
+
         self.data=data
         return data
 
@@ -203,7 +205,6 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
         if data is None: data=self.data
         self.sign = sign
         if fit:
-            print(np.shape(data['xpts']), np.shape(data['avgi'][0]))
             data['fitA_avgi']=dsfit.fitlor(data["xpts"], sign[0][0]*data['avgi'][0])
             data['fitA_avgq']=dsfit.fitlor(data["xpts"], sign[0][1]*data['avgq'][0])
             data['fitB_avgi']=dsfit.fitlor(data["xpts"], sign[1][0]*data['avgi'][1])
@@ -217,31 +218,179 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
         plt.figure(figsize=(14,8))
         plt.suptitle(f"Pulse Probe Eg-Gf Spectroscopy")
 
-        plt.subplot(221, title='Qubit A', ylabel="I [adc level]")
+        test_f = 2410
+        
+        plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="I [adc level]")
         plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
+        # plt.axvline(test_f, color='r')
         if fit:
             plt.plot(data["xpts"], sign[0][0]*dsfit.lorfunc(data["fitA_avgi"], data["xpts"]))
             print(f'Found peak in avgi data (qubit A) at [MHz] {data["fitA_avgi"][2]}, HWHM {data["fitA_avgi"][3]}')
         plt.subplot(223, xlabel="Pulse Frequency [MHz]", ylabel="Q [adc levels]")
         plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
+        # plt.axvline(test_f, color='r')
         if fit:
             plt.plot(data["xpts"], sign[0][1]*dsfit.lorfunc(data["fitA_avgq"], data["xpts"]))
             print(f'Found peak in avgq data (qubit A) at [MHz] {data["fitA_avgq"][2]}, HWHM {data["fitA_avgq"][3]}')
 
 
-        plt.subplot(222, title='Qubit B')
+        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
         if fit:
             plt.plot(data["xpts"], sign[1][0]*dsfit.lorfunc(data["fitB_avgi"], data["xpts"]))
             print(f'Found peak in avgi data (qubit B) at [MHz] {data["fitB_avgi"][2]}, HWHM {data["fitB_avgi"][3]}')
+        # plt.axvline(test_f, color='r')
         plt.subplot(224, xlabel="Pulse Frequency [MHz]")
         plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
+        # plt.axvline(test_f, color='r')
         if fit:
             plt.plot(data["xpts"], sign[1][1]*dsfit.lorfunc(data["fitB_avgq"], data["xpts"]))
             print(f'Found peak in avgq data (qubit B) at [MHz] {data["fitB_avgq"][2]}, HWHM {data["fitB_avgq"][3]}')
 
         plt.tight_layout()
         plt.show()
+
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
+        super().save_data(data=data)
+
+# ====================================================== #
+                      
+class PulseProbeEgGfSweepSpectroscopyExperiment(Experiment):
+    """
+    Pulse probe EgGf length sweep spectroscopy experiment
+    Experimental Config
+        expt = dict(
+        start_f: start probe frequency [MHz]
+        step_f: step probe frequency
+        expts_f: number experiments freq stepping from start
+        start_len: start const pulse len [us]
+        step_len
+        expts_len
+        reps: number averages per experiment
+        rounds: number repetitions of experiment sweep
+        gain: ef const pulse gain [dac units]
+    )
+    """
+
+    def __init__(self, soccfg=None, path='', prefix='PulseProbeEgGfSweep', config_file=None, progress=None):
+        super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=False, debug=False):
+        qA, qB = self.cfg.expt.qubits
+
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+
+        adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
+        adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
+
+        fpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
+        lenpts = self.cfg.expt["start_len"] + self.cfg.expt["step_len"]*np.arange(self.cfg.expt["expts_len"])
+
+        data=dict(
+            fpts=fpts,
+            lenpts=lenpts,
+            avgi=([], []),
+            avgq=([], []),
+            amps=([], []),
+            phases=([], []),
+        )
+
+        for length in tqdm(lenpts):
+            self.cfg.expt.length = length
+            self.cfg.expt.start = self.cfg.expt.start_f
+            self.cfg.expt.step = self.cfg.expt.step_f
+            self.cfg.expt.expts = self.cfg.expt.expts_f
+            qspec_EgGf = PulseProbeEgGfSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
+            xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False, debug=debug)        
+        
+            data['avgi'][0].append(avgi[adcA_ch][0])
+            data['avgq'][0].append(avgq[adcA_ch][0])
+            data['amps'][0].append(np.abs(avgi[adcA_ch][0]+1j*avgq[adcA_ch][0]))
+            data['phases'][0].append(np.angle(avgi[adcA_ch][0]+1j*avgq[adcA_ch][0]))
+
+            data['avgi'][1].append(avgi[adcB_ch][0])
+            data['avgq'][1].append(avgq[adcB_ch][0])
+            data['amps'][1].append(np.abs(avgi[adcB_ch][0]+1j*avgq[adcB_ch][0]))
+            data['phases'][1].append(np.angle(avgi[adcB_ch][0]+1j*avgq[adcB_ch][0]))
+
+        for k, a in data.items():
+            data[k] = np.array(a)
+
+        self.data=data
+        return data
+
+    def analyze(self, data=None, fit=True, sign=[[1, 1], [1, 1]], **kwargs):
+        if data is None:
+            data=self.data
+        return data
+
+    def display(self, data=None, fit=True, sign=None, **kwargs):
+        if data is None:
+            data=self.data 
+
+        x_sweep = data['fpts']
+        y_sweep = data['lenpts'] 
+
+        # Qubit 0
+        avgi = data['avgi'][0]
+        avgq = data['avgq'][0]
+
+        plt.figure(figsize=(10,12))
+        plt.subplot(211, title=f"Pulse Probe EgGf Spectroscopy Length Sweep Qubit A ({self.cfg.expt.qubits[0]})", ylabel="Pulse Length [us]")
+        plt.imshow(
+            np.flip(avgi, 0),
+            cmap='viridis',
+            extent=[x_sweep[0], x_sweep[-1], y_sweep[0], y_sweep[-1]],
+            aspect='auto')
+        plt.clim(vmin=None, vmax=None)
+        plt.colorbar(label='I [adc level]')
+
+        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Pulse Length [us]")
+        plt.imshow(
+            np.flip(avgq, 0),
+            cmap='viridis',
+            extent=[x_sweep[0], x_sweep[-1], y_sweep[0], y_sweep[-1]],
+            aspect='auto')
+        plt.clim(vmin=None, vmax=None)
+        plt.colorbar(label='Q [radians]')
+        
+        plt.show()    
+
+        # Qubit 1
+        avgi = data['avgi'][1]
+        avgq = data['avgq'][1]
+
+        plt.figure(figsize=(10,12))
+        plt.subplot(211, title=f"Pulse Probe EgGf Spectroscopy Length Sweep Qubit B ({self.cfg.expt.qubits[1]})", ylabel="Pulse Length [us]")
+        plt.imshow(
+            np.flip(avgi, 0),
+            cmap='viridis',
+            extent=[x_sweep[0], x_sweep[-1], y_sweep[0], y_sweep[-1]],
+            aspect='auto')
+        plt.clim(vmin=None, vmax=None)
+        plt.colorbar(label='I [adc level]')
+
+        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Pulse Length [us]")
+        plt.imshow(
+            np.flip(avgq, 0),
+            cmap='viridis',
+            extent=[x_sweep[0], x_sweep[-1], y_sweep[0], y_sweep[-1]],
+            aspect='auto')
+        plt.clim(vmin=None, vmax=None)
+        plt.colorbar(label='Q')
+        
+        plt.show()    
 
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

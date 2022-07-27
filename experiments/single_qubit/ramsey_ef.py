@@ -22,7 +22,10 @@ class RamseyEFProgram(RAveragerProgram):
         self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
         self.r_wait = 3
         self.r_phase2 = 4
-        self.r_phase=self.sreg(self.qubit_ch, "phase")
+        if self.qubit_ch_type == 'int4':
+            self.r_phase = self.sreg(self.qubit_ch, "freq")
+            self.r_phase3 = 5 # for storing the left shifted value
+        else: self.r_phase = self.sreg(self.qubit_ch, "phase")
 
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
         self.f_ef = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
@@ -43,8 +46,10 @@ class RamseyEFProgram(RAveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -82,7 +87,7 @@ class RamseyEFProgram(RAveragerProgram):
         # init to qubit excited state
         self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
 
-        # play pi/2 efpulse
+        # play pi/2 ef pulse
         self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain, waveform="pi2_ef")
 
         # wait advanced wait time
@@ -90,7 +95,11 @@ class RamseyEFProgram(RAveragerProgram):
         self.sync(self.q_rp, self.r_wait)
 
         # play pi/2 ef pulse with advanced phase (all regs except phase already set by previous pulse)
-        self.mathi(self.q_rp, self.r_phase, self.r_phase2,"+",0)
+        if self.qubit_ch_type == 'int4':
+            self.bitwi(self.q_rp, self.r_phase3, self.r_phase2, '<<', 16)
+            self.bitwi(self.q_rp, self.r_phase3, self.r_phase3, '|', self.f_ef)
+            self.mathi(self.q_rp, self.r_phase, self.r_phase3, "+", 0)
+        else: self.mathi(self.q_rp, self.r_phase, self.r_phase2, "+", 0)
         self.pulse(ch=self.qubit_ch)
 
         # map excited back to qubit ground state for measurement
@@ -178,55 +187,59 @@ class RamseyEFExperiment(Experiment):
         if data is None:
             data=self.data
 
-        plt.figure(figsize=(10, 6))
-        plt.subplot(111,title=f"EF Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
-                    xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
-        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
+        # plt.figure(figsize=(10, 6))
+        # plt.subplot(111,title=f"EF Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
+        #             xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
+        # plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
+        # if fit:
+        #     p = data['fit_amps']
+        #     pCov = data['fit_err_amps']
+        #     captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+        #     plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p), label=captionStr)
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
+        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
+        #     plt.legend()
+        #     print(f'Current EF frequency: {self.cfg.device.qubit.f_ef}')
+        #     print(f'Fit frequency from amps [MHz]: {p[1]}')
+        #     print('Suggested new EF frequencies from fit amps [MHz]:\n',
+        #           f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_amps"][0]}\n',
+        #           f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_amps"][1]}')
+        #     print(f'T2 Ramsey EF from fit amps [us]: {p[3]}')
+
+        plt.figure(figsize=(10,9))
+        plt.subplot(211, 
+            title=f"EF Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
+            ylabel="I [ADC level]")
+        plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
         if fit:
-            p = data['fit_amps']
-            pCov = data['fit_err_amps']
-            plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p))
+            p = data['fit_avgi']
+            pCov = data['fit_err_avgi']
+            captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+            plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p), label=captionStr)
             plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
             plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
+            plt.legend()
+            print(f'Current EF frequency: {self.cfg.device.qubit.f_ef}')
+            print(f'Fit frequency from I [MHz]: {p[1]}')
+            print('Suggested new EF frequencies from fit avgi [MHz]:\n',
+                  f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgi"][0]}\n',
+                  f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgi"][1]}')
+            print(f'T2 Ramsey EF from fit avgi [us]: {p[3]}')
+        plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
+        plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
+        if fit:
+            p = data['fit_avgq']
+            pCov = data['fit_err_avgq']
             captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-            xmin = data['xpts'][0]
-            xmax = data['xpts'][-1]
-            ymin = np.min(data['amps'])
-            ymax = np.max(data['amps'])
-            plt.text(xmin+0.6*(xmax-xmin), ymin+1*(ymax-ymin), captionStr, fontsize=14, verticalalignment='top')
-            print(f'Fit frequency from amps [MHz]: {p[1]}')
-            print('Suggested new EF frequencies from fit amps [MHz]:\n',
-                  f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_amps"][0]}\n',
-                  f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_amps"][1]}')
-            print(f'T2 Ramsey EF from fit amps [us]: {p[3]}')
-
-        # plt.figure(figsize=(10,9))
-        # plt.subplot(211, 
-        #     title=f"Ramsey (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
-        #     ylabel="I [ADC level]")
-        # plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
-        # if fit:
-        #     p = data['fit_avgi']
-        #     plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p))
-        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
-        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
-        #     print(f'Fit frequency from I [MHz]: {p[1]}')
-        #     print('Suggested new EF frequencies from fit avgi [MHz]:\n',
-        #           f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgi"][0]}\n',
-        #           f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgi"][1]}')
-        #     print(f'T2 Ramsey EF from fit avgi [us]: {p[3]}')
-        # plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
-        # plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
-        # if fit:
-        #     p = data['fit_avgq']
-        #     plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p))
-        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
-        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
-        #     print(f'Fit frequency from Q [MHz]: {p[1]}')
-        #     print('Suggested new EF frequencies from fit avgq [MHz]:\n',
-        #           f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgq"][0]}\n',
-        #           f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgq"][1]}')
-        #     print(f'T2 Ramsey EF from fit avgq [us]: {p[3]}')
+            plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p), label=captionStr)
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
+            plt.legend()
+            print(f'Fit frequency from Q [MHz]: {p[1]}')
+            print('Suggested new EF frequencies from fit avgq [MHz]:\n',
+                  f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgq"][0]}\n',
+                  f'\t{self.cfg.device.qubit.f_ef + data["f_ef_adjust_ramsey_avgq"][1]}')
+            print(f'T2 Ramsey EF from fit avgq [us]: {p[3]}')
 
         plt.tight_layout()
         plt.show()

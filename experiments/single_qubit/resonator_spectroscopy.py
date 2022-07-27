@@ -48,8 +48,10 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [self.frequency, 0, 0, 0]
-            mux_gains=[self.res_gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = self.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = self.res_gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
         # print(f'readout freq {mixer_freq} +/- {self.frequency}')
@@ -106,7 +108,8 @@ class ResonatorSpectroscopyExperiment(Experiment):
         start: start frequency (MHz), 
         step: frequency step (MHz), 
         expts: number of experiments, 
-        pulse_e: boolean to add pi pulse prior to measurement
+        pulse_e: boolean to add e pulse prior to measurement
+        pulse_f: boolean to add f pulse prior to measurement
         reps: number of reps
         )
     """
@@ -162,20 +165,17 @@ class ResonatorSpectroscopyExperiment(Experiment):
             ydata = data['amps'][1:-1]
             fitparams=None
             data['fit'], data['fit_err'] = fitter.fithanger(xdata, ydata, fitparams=fitparams)
-            f0, Qi, Qe, phi, scale, a0 = data['fit']
-            if verbose:
-                print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
-                print('From fit:')
-                print(f'\tf0: {f0}')
-                print(f'\tQi: {Qi}')
-                print(f'\tQe: {Qe}')
-                print(f'\tQ0: {1/(1/Qi+1/Qe)}')
-                print(f'\tkappa [MHz]: {f0*(1/Qi+1/Qe)}')
-                print(f'\tphi [radians]: {phi}')
-
-            # p = dsfit.fitdecaysin(data['xpts'][1:-1], data["amps"][1:-1], fitparams=None, showfit=False)
-            # p = np.append(p, data['xpts'][0])
-            # data['fit'] = p        
+            if isinstance(data['fit'], (list, np.ndarray)):
+                f0, Qi, Qe, phi, scale, a0 = data['fit']
+                if verbose:
+                    print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
+                    print('From fit:')
+                    print(f'\tf0: {f0}')
+                    print(f'\tQi: {Qi}')
+                    print(f'\tQe: {Qe}')
+                    print(f'\tQ0: {1/(1/Qi+1/Qe)}')
+                    print(f'\tkappa [MHz]: {f0*(1/Qi+1/Qe)}')
+                    print(f'\tphi [radians]: {phi}')
             
         if findpeaks:
             maxpeaks, minpeaks = dsfit.peakdetect(data['amps'][1:-1], x_axis=data['xpts'][1:-1], lookahead=30, delta=5*np.std(data['amps'][:5]))
@@ -190,7 +190,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
         plt.figure(figsize=(18,12))
         plt.subplot(211, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}",  ylabel="Amps [ADC units]")
 
-        xpts = self.cfg.hw.soc.dacs.readout.mixer_freq + data['xpts'][1:-1]
+        xpts = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + data['xpts'][1:-1])
         plt.plot(xpts, data['amps'][1:-1],'o-')
         if fit:
             plt.plot(xpts, fitter.hangerS21func(data["xpts"][1:-1], *data["fit"]))
@@ -199,7 +199,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
             for peak in data['minpeaks']:
                 plt.axvline(peak[0], linestyle='--', color='0.2')
                 print(f'Found peak [MHz]: {peak[0]}')
-        # plt.axvline(-663.5, c='k', ls='--')
+        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq -804.5), c='k', ls='--')
 
         plt.subplot(212, xlabel="Readout Frequency [MHz]", ylabel="Phases [radians]")
         plt.plot(xpts, data["phases"][1:-1],'o-')

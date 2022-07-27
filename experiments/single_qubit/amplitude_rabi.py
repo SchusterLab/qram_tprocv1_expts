@@ -42,8 +42,10 @@ class AmplitudeRabiProgram(RAveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -188,11 +190,15 @@ class AmplitudeRabiExperiment(Experiment):
         # if fit:
         #     p = data['fit_amps']
         #     plt.plot(data["xpts"][1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
-        #     pi_gain = 1/p[1]/2
+        #     if p[2] > 180: p[2] = p[2] - 360
+        #     elif p[2] < -180: p[2] = p[2] + 360
+        #     if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+        #     else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+        #     pi2_gain = pi_gain/2
         #     print(f'Pi gain from amps data [dac units]: {int(pi_gain)}')
-        #     print(f'\tPi/2 gain from amps data [dac units]: {int(pi_gain/2)}')
+        #     print(f'\tPi/2 gain from amps data [dac units]: {int(pi2_gain)}')
         #     plt.axvline(pi_gain, color='0.2', linestyle='--')
-        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+        #     plt.axvline(pi2_gain, color='0.2', linestyle='--')
 
         plt.figure(figsize=(10,10))
         plt.subplot(211, title=f"Amplitude Rabi (Pulse Length {self.cfg.expt.sigma_test})", ylabel="I [ADC units]")
@@ -200,21 +206,29 @@ class AmplitudeRabiExperiment(Experiment):
         if fit:
             p = data['fit_avgi']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-            pi_gain = 1/p[1]/2
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi2_gain = pi_gain/2
             print(f'Pi gain from avgi data [dac units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from avgi data [dac units]: {int(pi_gain/2)}')
+            print(f'\tPi/2 gain from avgi data [dac units]: {int(pi2_gain)}')
             plt.axvline(pi_gain, color='0.2', linestyle='--')
-            plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+            plt.axvline(pi2_gain, color='0.2', linestyle='--')
         plt.subplot(212, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
         plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
         if fit:
             p = data['fit_avgq']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-            pi_gain = 1/p[1]/2
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi2_gain = pi_gain/2
             print(f'Pi gain from avgq data [dac units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from avgq data [dac units]: {int(pi_gain/2)}')
+            print(f'\tPi/2 gain from avgq data [dac units]: {int(pi2_gain)}')
             plt.axvline(pi_gain, color='0.2', linestyle='--')
-            plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+            plt.axvline(pi2_gain, color='0.2', linestyle='--')
 
         plt.show()
 

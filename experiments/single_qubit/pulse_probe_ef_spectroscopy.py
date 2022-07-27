@@ -41,8 +41,10 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs = [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains = [cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -89,7 +91,7 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
         self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
         self.pulse(ch=self.qubit_ch)
 
-        # go back to ground state if in e
+        # go back to ground state if in e to distinguish between e and f
         self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge_reg, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
 
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
@@ -156,17 +158,19 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
     def display(self, data=None, fit=True, signs=[1,1], **kwargs):
         if data is None:
             data=self.data 
+
+        xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq + data['xpts'][1:-1]
+
         plt.figure(figsize=(10,8))
         plt.subplot(211, title="Pulse Probe EF Spectroscopy", ylabel="I [adc level]")
-        plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
+        plt.plot(xpts, data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+            plt.plot(xpts, signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
             print(f'Found peak in avgi at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
         plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [adc level]")
-        plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
+        plt.plot(xpts, data["avgq"][1:-1],'o-')
         if fit:
-            plt.plot(data["xpts"][1:-1], signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            # plt.axvline(3593.2, c='k', ls='--')
+            plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
             print(f'Found peak in avgq at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
         plt.show()
 
@@ -177,7 +181,7 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
 
 class PulseProbeEFPowerSweepSpectroscopyExperiment(Experiment):
     """
-    Pulse probe EF power wweep spectroscopy experiment
+    Pulse probe EF power sweep spectroscopy experiment
     Experimental Config
         expt = dict(
         start_f: start ef probe frequency [MHz]

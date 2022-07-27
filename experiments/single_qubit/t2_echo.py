@@ -47,8 +47,10 @@ class RamseyEchoProgram(RAveragerProgram):
             assert self.res_ch == 6
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs= [cfg.device.readout.frequency, 0, 0, 0]
-            mux_gains=[cfg.device.readout.gain, 0, 0, 0]
+            mux_freqs = [0]*4
+            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
+            mux_gains = [0]*4
+            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
             ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
@@ -277,6 +279,8 @@ class RamseyEchoExperiment(Experiment):
         #           f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_amps"][0]}\n',
         #           f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_amps"][1]}')
         #     print(f'T2 Echo from fit amps [us]: {p[3]}')
+        # plt.tight_layout()
+        # plt.show()
 
         plt.figure(figsize=(10,9))
         plt.subplot(211, 
@@ -314,7 +318,6 @@ class RamseyEchoExperiment(Experiment):
                   f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"][0]}\n',
                   f'\t{self.cfg.device.qubit.f_ge + data["f_ge_adjust_ramsey_avgq"][1]}')
             print(f'T2 Echo from fit Q [us]: {p[3]}')
-
         plt.tight_layout()
         plt.show()
 

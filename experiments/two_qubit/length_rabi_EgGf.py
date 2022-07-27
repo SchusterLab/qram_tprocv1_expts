@@ -36,37 +36,44 @@ class LengthRabiEgGfProgram(AveragerProgram):
         self.f_EgGf_reg = self.freq2reg(cfg.device.qubit.f_EgGf[qA], gen_ch=self.swap_chs[qA])
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
-        self.readout_length = [self.us2cycles(len) for len in self.cfg.device.readout.readout_length]
 
+        gen_chs = []
+        
         # declare res dacs
         mask = None
         if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
             assert np.all([ch == 6 for ch in self.res_chs])
             mask = range(4) # indices of mux_freqs, mux_gains list to play
-            mux_freqs = [0 if i in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
-            mux_gains = [0 if i in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
+            mux_freqs = [0 if i not in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
+            mux_gains = [0 if i not in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
             self.declare_gen(ch=6, nqz=cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
+            gen_chs.append(6)
         else:
             for q in self.qubits:
                 mixer_freq = 0
                 if self.res_ch_types[q] == 'int4':
                     mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
                 self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
+                gen_chs.append(self.res_chs[q])
 
         # declare qubit dacs
         for q in self.qubits:
             mixer_freq = 0
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
+            if self.qubit_chs[q] not in gen_chs:
+                self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
+                gen_chs.append(self.qubit_chs[q])
 
         # declare swap dac indexed by qA (since the the drive is always applied to qB)
         mixer_freq = 0
         if self.swap_ch_types[qA] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.swap.mixer_freq[qA]
-        self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        if self.swap_chs[qA] not in gen_chs: 
+            self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        gen_chs.append(self.swap_chs[qA])
 
-        # declare adcs - readout for all qubits everytime
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
@@ -110,9 +117,7 @@ class LengthRabiEgGfProgram(AveragerProgram):
                 self.setup_and_pulse(ch=self.swap_chs[qA], style="const", freq=self.f_EgGf_reg, phase=0, gain=cfg.expt.gain, length=self.sigma_test)
         self.sync_all(5)
 
-        # take qubit A G->E and qubit B f->e: expect to end in Ee (or Gg if incomplete Eg-Gf)
-        self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", freq=self.f_ge_reg[qA], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
-        self.sync_all(5)
+        # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
         self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", freq=self.f_ef_reg[qB], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qB], waveform="pi_ef_qubitB")
         
         self.sync_all(5)
@@ -120,7 +125,7 @@ class LengthRabiEgGfProgram(AveragerProgram):
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
             pulse_ch=measure_chs, 
-            adcs=[0,1],
+            adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
             syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in self.qubits])))
@@ -174,15 +179,16 @@ class LengthRabiEgGfExperiment(Experiment):
             self.cfg.expt.sigma_test = float(length)
             lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
             avgi, avgq = lengthrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, load_pulses=True, progress=False, debug=debug)        
-            # print(avgi, avgq)
-            data['avgi'][0].append(avgi[adcA_ch][0])
-            data['avgi'][1].append(avgi[adcB_ch][0])
-            data['avgq'][0].append(avgq[adcA_ch][0])
-            data['avgq'][1].append(avgq[adcB_ch][0])
-            data['amps'][0].append(np.abs(avgi[adcA_ch][0]+1j*avgi[adcA_ch][0]))
-            data['amps'][1].append(np.abs(avgi[adcB_ch][0]+1j*avgi[adcB_ch][0]))
-            data['phases'][0].append(np.angle(avgi[adcA_ch][0]+1j*avgi[adcA_ch][0]))
-            data['phases'][1].append(np.angle(avgi[adcB_ch][0]+1j*avgi[adcB_ch][0]))
+            # print(avgi[:,0], avgq[:,0])
+            # print()
+            data['avgi'][0].append(avgi[adcA_ch, 0])
+            data['avgi'][1].append(avgi[adcB_ch, 0])
+            data['avgq'][0].append(avgq[adcA_ch, 0])
+            data['avgq'][1].append(avgq[adcB_ch, 0])
+            data['amps'][0].append(np.abs(avgi[adcA_ch, 0]+1j*avgi[adcA_ch, 0]))
+            data['amps'][1].append(np.abs(avgi[adcB_ch, 0]+1j*avgi[adcB_ch, 0]))
+            data['phases'][0].append(np.angle(avgi[adcA_ch, 0]+1j*avgi[adcA_ch, 0]))
+            data['phases'][1].append(np.angle(avgi[adcB_ch, 0]+1j*avgi[adcB_ch, 0]))
             data['xpts'].append(length)
 
         for k, a in data.items():
@@ -226,74 +232,95 @@ class LengthRabiEgGfExperiment(Experiment):
         xpts_ns = data['xpts']*1e3
 
         # plt.figure(figsize=(18,6))
-        # plt.suptitle(f"Length Rabi Eg-Gf") # (Drive Gain {self.cfg.expt.gain})")
-        # plt.subplot(121, title="Qubit A", ylabel="Amplitude [adc level]", xlabel='Length [ns]')
+        # plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
+        # plt.subplot(121, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Amplitude [adc level]", xlabel='Length [ns]')
         # plt.plot(xpts_ns[0:-1], data["amps"][0][0:-1],'o-')
         # if fit:
         #     p = data['fitA_amps']
         #     plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-        #     pi_length = 1/p[1]/2
-        #     print(f'Pi length from amps data (qubit A) [us]: {int(pi_length)}')
-        #     print(f'\tPi/2 length from amps data (qubit A) [us]: {int(pi_length/2)}')
+        #     if p[2] > 180: p[2] = p[2] - 360
+        #     elif p[2] < -180: p[2] = p[2] + 360
+        #     if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+        #     else: pi_length= (3/2 - p[2]/180)/2/p[1]
+        #     pi2_length = pi_length/2
+        #     print(f'Pi length from amps data (qubit A) [us]: {pi_length}')
+        #     print(f'Pi/2 length from amps data (qubit A) [us]: {pi2_length}')
         #     plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-        #     plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
-        # plt.subplot(122, title="Qubit B", xlabel='Length[ns]')
+        #     plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        # plt.subplot(122, title=f'Qubit B ({self.cfg.expt.qubits[1]})', xlabel='Length[ns]')
         # plt.plot(xpts_ns[0:-1], data["amps"][1][0:-1],'o-')
         # if fit:
         #     p = data['fitB_amps']
         #     plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-        #     pi_length = 1/p[1]/2
-        #     print()
-        #     print(f'Pi length from amps data (qubit B) [us]: {int(pi_length)}')
-        #     print(f'\tPi/2 length from amps data (qubit B) [us]: {int(pi_length/2)}')
-        #     plt.axvline(pi_length, color='0.2', linestyle='--')
-        #     plt.axvline(pi_length/2, color='0.2', linestyle='--')
+        #     if p[2] > 180: p[2] = p[2] - 360
+        #     elif p[2] < -180: p[2] = p[2] + 360
+        #     if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+        #     else: pi_length= (3/2 - p[2]/180)/2/p[1]
+        #     pi2_length = pi_length/2
+        #     print(f'Pi length from amps data (qubit B) [us]: {pi_length}')
+        #     print(f'Pi/2 length from amps data (qubit B) [us]: {pi2_length}')
+        #     plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+        #     plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
 
         plt.figure(figsize=(14,8))
-        plt.suptitle(f"Length Rabi Eg-Gf") # (Drive Gain {self.cfg.expt.gain})")
-        plt.subplot(221, title="Qubit A", ylabel="I [adc level]")
+        plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
+        plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="I [adc level]")
         plt.plot(xpts_ns[0:-1], data["avgi"][0][0:-1],'o-')
         if fit:
             p = data['fitA_avgi']
             plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-            pi_length = 1/p[1]/2
-            print(f'Pi length from avgi data (qubit A) [us]: {int(pi_length)}')
-            print(f'\tPi/2 length from avgi data (qubit A) [us]: {int(pi_length/2)}')
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length= (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
+            print(f'Pi length from avgi data (qubit A) [us]: {pi_length}')
+            print(f'\tPi/2 length from avgi data (qubit A) [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi_length*1e3/2, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
         plt.subplot(223, xlabel="Length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[0:-1], data["avgq"][0][0:-1],'o-')
         if fit:
             p = data['fitA_avgq']
             plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-            pi_length = 1/p[1]/2
-            pi_length = 1/data['fitA_avgq'][1]/2
-            print(f'Pi length from avgq data (qubit A) [us]: {int(pi_length)}')
-            print(f'\tPi/2 length from avgq data (qubit A) [us]: {int(pi_length/2)}')
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length= (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
+            print(f'Pi length from avgq data (qubit A) [us]: {pi_length}')
+            print(f'\tPi/2 length from avgq data (qubit A) [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi_length/2, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
 
-        plt.subplot(222, title="Qubit B")
+        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         plt.plot(xpts_ns[0:-1], data["avgi"][1][0:-1],'o-')
         if fit:
             p = data['fitB_avgi']
             plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-            pi_length = 1/p[1]/2
-            print()
-            print(f'Pi length from avgi data (qubit B) [us]: {int(pi_length)}')
-            print(f'\tPi/2 length from avgi data (qubit B) [us]: {int(pi_length/2)}')
-            plt.axvline(pi_length, color='0.2', linestyle='--')
-            plt.axvline(pi_length/2, color='0.2', linestyle='--')
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length= (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
+            print(f'Pi length from avgi data (qubit B) [us]: {pi_length}')
+            print(f'\tPi/2 length from avgi data (qubit B) [us]: {pi2_length}')
+            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
         plt.subplot(224, xlabel="Length [ns]")
         plt.plot(xpts_ns[0:-1], data["avgq"][1][0:-1],'o-')
         if fit:
             p = data['fitB_avgq']
             plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-            pi_length = 1/p[1]/2
-            print(f'Pi length from avgq data (qubit B) [us]: {int(pi_length)}')
-            print(f'\tPi/2 length from avgq data (qubit B) [us]: {int(pi_length/2)}')
-            plt.axvline(pi_length, color='0.2', linestyle='--')
-            plt.axvline(pi_length/2, color='0.2', linestyle='--')
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length= (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
+            print(f'Pi length from avgq data (qubit B) [us]: {pi_length}')
+            print(f'\tPi/2 length from avgq data (qubit B) [us]: {pi2_length}')
+            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
 
         plt.tight_layout()
         plt.show()

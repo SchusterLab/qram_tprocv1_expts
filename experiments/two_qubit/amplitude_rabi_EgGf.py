@@ -34,35 +34,43 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
+        gen_chs = []
+        
         # declare res dacs
         mask = None
         if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
             assert np.all([ch == 6 for ch in self.res_chs])
             mask = range(4) # indices of mux_freqs, mux_gains list to play
-            mux_freqs = [0 if i in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
-            mux_gains = [0 if i in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
+            mux_freqs = [0 if i not in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
+            mux_gains = [0 if i not in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
             self.declare_gen(ch=6, nqz=cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
+            gen_chs.append(6)
         else:
             for q in self.qubits:
                 mixer_freq = 0
                 if self.res_ch_types[q] == 'int4':
                     mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
                 self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
+                gen_chs.append(self.res_chs[q])
 
         # declare qubit dacs
         for q in self.qubits:
             mixer_freq = 0
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
+            if self.qubit_chs[q] not in gen_chs:
+                self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
+                gen_chs.append(self.qubit_chs[q])
 
         # declare swap dac indexed by qA (since the the drive is always applied to qB)
         mixer_freq = 0
         if self.swap_ch_types[qA] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.swap.mixer_freq[qA]
-        self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        if self.swap_chs[qA] not in gen_chs: 
+            self.declare_gen(ch=self.swap_chs[qA], nqz=cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        gen_chs.append(self.swap_chs[qA])
 
-        # declare adcs - readout for all qubits everytime
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
@@ -128,9 +136,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
             self.pulse(ch=self.swap_chs[qA])
         self.sync_all(5)
 
-        # take qubit A G->E and qubit B f->e: expect to end in Ee (or Gg if incomplete Eg-Gf)
-        self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", freq=self.f_ge_reg[qA], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
-        self.sync_all(5)
+        # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
         self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", freq=self.f_ef_reg[qB], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qB], waveform="pi_ef_qubitB")
         
         self.sync_all(5)
@@ -187,7 +193,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
  
         if 'pi_EgGf_sigma' not in self.cfg.expt:
-            self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf.sigma
+            self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qA]
 
         threshold = None
         angle = None
@@ -219,8 +225,8 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), amp offset]
             # Remove the first and last point from fit in case weird edge measurements
-            fitparams = [None, 1/max(data['xpts']), None, None]
-            # fitparams = None
+            # fitparams = [None, 1/max(data['xpts']), None, None]
+            fitparams = None
             pA_avgi, pCovA_avgi = fitter.fitsin(data['xpts'][:-1], data["avgi"][0][:-1], fitparams=fitparams)
             pA_avgq, pCovA_avgq = fitter.fitsin(data['xpts'][:-1], data["avgq"][0][:-1], fitparams=fitparams)
             pA_amps, pCovA_amps = fitter.fitsin(data['xpts'][:-1], data["amps"][0][:-1], fitparams=fitparams)
@@ -246,77 +252,99 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         if data is None:
             data=self.data 
 
-        plt.figure(figsize=(20,6))
-        plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.pi_EgGf_sigma} us)")
-        plt.subplot(121, title="Qubit A", ylabel="Amplitude [adc units]", xlabel='Gain [DAC units]')
-        plt.plot(data["xpts"][0:-1], data["amps"][0][0:-1],'o-')
-        if fit:
-            p = data['fitA_amps']
-            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-            pi_gain = 1/p[1]/2
-            print(f'Pi gain from amps data (qubit A) [DAC units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from amps data (qubit A) [DAC units]: {int(pi_gain/2)}')
-            # plt.axvline(pi_gain, color='0.2', linestyle='--')
-            # plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        plt.subplot(122, title="Qubit B", xlabel='Gain [DAC units]')
-        plt.plot(data["xpts"][0:-1], data["amps"][1][0:-1],'o-')
-        if fit:
-            p = data['fitB_amps']
-            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-            pi_gain = 1/p[1]/2
-            print()
-            print(f'Pi gain from amps data (qubit A) [DAC units]: {int(pi_gain)}')
-            print(f'\tPi/2 gain from amps data (qubit A) [DAC units]: {int(pi_gain/2)}')
-            # plt.axvline(pi_gain, color='0.2', linestyle='--')
-            # plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-
-        # plt.figure(figsize=(14,8))
+        # plt.figure(figsize=(20,6))
         # plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.pi_EgGf_sigma} us)")
-        # if self.cfg.expt.singleshot: plt.subplot(221, title='Qubit A', ylabel=r"Probability of $|e\rangle$")
-        # else: plt.subplot(221, title='Qubit A', ylabel="I [ADC units]")
-        # plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
+        # plt.subplot(121, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Amplitude [adc units]", xlabel='Gain [DAC units]')
+        # plt.plot(data["xpts"][0:-1], data["amps"][0][0:-1],'o-')
         # if fit:
-        #     p = data['fitA_avgi']
+        #     p = data['fitA_amps']
         #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-        #     pi_gain = 1/p[1]/2
-        #     print(f'Pi gain from avgi data (qubit A) [DAC units]: {int(pi_gain)}')
-        #     print(f'\tPi/2 gain from avgi data (qubit A) [DAC units]: {int(pi_gain/2)}')
+        #     if p[2] > 180: p[2] = p[2] - 360
+        #     elif p[2] < -180: p[2] = p[2] + 360
+        #     if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+        #     else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+        #     pi2_gain = pi_gain/2
+        #     print(f'Pi gain from amps data (qubit A) [dac units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from amps data (qubit A) [dac units]: {int(pi2_gain)}')
         #     plt.axvline(pi_gain, color='0.2', linestyle='--')
-        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        # plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
-        # plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
+        #     plt.axvline(pi2_gain, color='0.2', linestyle='--')
+        # plt.subplot(122, title=f'Qubit B ({self.cfg.expt.qubits[1]})', xlabel='Gain [DAC units]')
+        # plt.plot(data["xpts"][0:-1], data["amps"][1][0:-1],'o-')
         # if fit:
-        #     p = data['fitA_avgq']
+        #     p = data['fitB_amps']
         #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-        #     pi_gain = 1/p[1]/2
-        #     print(f'Pi gain from avgq data (qubit A) [DAC units]: {int(pi_gain)}')
-        #     print(f'\tPi/2 gain from avgq data (qubit A) [DAC units]: {int(pi_gain/2)}')
+        #     if p[2] > 180: p[2] = p[2] - 360
+        #     elif p[2] < -180: p[2] = p[2] + 360
+        #     if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+        #     else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+        #     pi2_gain = pi_gain/2
+        #     print(f'Pi gain from amps data (qubit B) [dac units]: {int(pi_gain)}')
+        #     print(f'\tPi/2 gain from amps data (qubit B) [dac units]: {int(pi2_gain)}')
         #     plt.axvline(pi_gain, color='0.2', linestyle='--')
-        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
+        #     plt.axvline(pi2_gain, color='0.2', linestyle='--')
 
-        # plt.subplot(222, title='Qubit B')
-        # plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
-        # if fit:
-        #     p = data['fitB_avgi']
-        #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-        #     pi_gain = 1/p[1]/2
-        #     print()
-        #     print(f'Pi gain from avgi data (qubit B) [DAC units]: {int(pi_gain)}')
-        #     print(f'\tPi/2 gain from avgi data (qubit B) [DAC units]: {int(pi_gain/2)}')
-        #     plt.axvline(pi_gain, color='0.2', linestyle='--')
-        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        # plt.subplot(224, xlabel="Gain [DAC units]")
-        # plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
-        # if fit:
-        #     p = data['fitB_avgq']
-        #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
-        #     pi_gain = 1/p[1]/2
-        #     print(f'Pi gain from avgq data (qubit B) [DAC units]: {int(pi_gain)}')
-        #     print(f'\tPi/2 gain from avgq data (qubit B) [DAC units]: {int(pi_gain/2)}')
-        #     plt.axvline(pi_gain, color='0.2', linestyle='--')
-        #     plt.axvline(pi_gain/2, color='0.2', linestyle='--')
-        # plt.tight_layout()
-        # plt.show()
+        plt.figure(figsize=(14,8))
+        plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.pi_EgGf_sigma} us)")
+        if self.cfg.expt.singleshot: plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel=r"Probability of $|e\rangle$")
+        else: plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="I [ADC units]")
+        plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
+        if fit:
+            p = data['fitA_avgi']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi2_gain = pi_gain/2
+            print(f'Pi gain from avgi data (qubit A) [dac units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from avgi data (qubit A) [dac units]: {int(pi2_gain)}')
+            plt.axvline(pi_gain, color='0.2', linestyle='--')
+            plt.axvline(pi2_gain, color='0.2', linestyle='--')
+        plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
+        plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
+        if fit:
+            p = data['fitA_avgq']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi2_gain = pi_gain/2
+            print(f'Pi gain from avgq data (qubit A) [dac units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from avgq data (qubit A) [dac units]: {int(pi2_gain)}')
+            plt.axvline(pi_gain, color='0.2', linestyle='--')
+            plt.axvline(pi2_gain, color='0.2', linestyle='--')
+
+        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
+        plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
+        if fit:
+            p = data['fitB_avgi']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi2_gain = pi_gain/2
+            print(f'Pi gain from avgi data (qubit B) [dac units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from avgi data (qubit B) [dac units]: {int(pi2_gain)}')
+            plt.axvline(pi_gain, color='0.2', linestyle='--')
+            plt.axvline(pi2_gain, color='0.2', linestyle='--')
+        plt.subplot(224, xlabel="Gain [DAC units]")
+        plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
+        if fit:
+            p = data['fitB_avgq']
+            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
+            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi2_gain = pi_gain/2
+            print(f'Pi gain from avgq data (qubit B) [dac units]: {int(pi_gain)}')
+            print(f'\tPi/2 gain from avgq data (qubit B) [dac units]: {int(pi2_gain)}')
+            plt.axvline(pi_gain, color='0.2', linestyle='--')
+            plt.axvline(pi2_gain, color='0.2', linestyle='--')
+        plt.tight_layout()
+        plt.show()
 
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

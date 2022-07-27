@@ -109,7 +109,7 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
             phase=0,
             gain=cfg.expt.gain,
             length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA]))
-        self.mathi(self.ch_page(self.qubit_chs[qA]), self.r_freq_A, self.r_freq_A_update, "+", 0)
+        self.mathi(self.q_rps[qA], self.r_freq_A, self.r_freq_A_update, "+", 0)
         self.pulse(ch=self.qubit_chs[qA])
         self.sync_all(5)
 
@@ -125,7 +125,7 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
 
     def update(self):
         qA, qB = self.qubits
-        self.mathi(self.ch_page(self.qubit_chs[qA]), self.r_freq_A_update, self.r_freq_A_update, '+', self.f_step) # update frequency list index
+        self.mathi(self.q_rps[qA], self.r_freq_A_update, self.r_freq_A_update, '+', self.f_step) # update frequency list index
         
 
 class PulseProbeCouplingSpectroscopyExperiment(Experiment):
@@ -209,7 +209,7 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
         plt.plot(xpts, data["avgq"][1:-1],'o-')
         if fit:
             plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            # plt.axvline(3593.2, c='k', ls='--')
+            plt.axvline(4161, c='k', ls='--')
             print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
 
         plt.tight_layout()
