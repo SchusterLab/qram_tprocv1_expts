@@ -186,10 +186,13 @@ class LengthRabiExperiment(Experiment):
             if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
             else: pi_length= (3/2 - p[2]/180)/2/p[1]
             pi2_length = pi_length/2
-            print(f'Pi length from avgi data [us]: {int(pi_length)}')
-            print(f'\tPi/2 length from avgi data [us]: {int(pi2_length)}')
+            print('Decay from avgi [us]', p[3])
+            print(f'Pi length from avgi data [us]: {pi_length}')
+            print(f'\tPi/2 length from avgi data [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        
+        print()
         plt.subplot(212, xlabel="Pulse length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[1:-1], data["avgq"][1:-1],'o-')
         if fit:
@@ -200,6 +203,7 @@ class LengthRabiExperiment(Experiment):
             if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
             else: pi_length= (3/2 - p[2]/180)/2/p[1]
             pi2_length = pi_length/2
+            print('Decay from avgq [us]', p[3])
             print(f'Pi length from avgq data [us]: {pi_length}')
             print(f'Pi/2 length from avgq data [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
@@ -210,3 +214,4 @@ class LengthRabiExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

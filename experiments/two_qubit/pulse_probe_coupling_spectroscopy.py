@@ -209,7 +209,7 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
         plt.plot(xpts, data["avgq"][1:-1],'o-')
         if fit:
             plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            plt.axvline(4161, c='k', ls='--')
+            plt.axvline(4828.13, c='k', ls='--')
             print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
 
         plt.tight_layout()

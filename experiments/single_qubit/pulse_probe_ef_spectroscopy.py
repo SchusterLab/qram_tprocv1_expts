@@ -3,8 +3,10 @@ import numpy as np
 from qick import *
 from qick.helpers import gauss
 
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 
 class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
     def initialize(self):
@@ -151,8 +153,10 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data
         if fit:
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], signs[0]*data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], signs[1]*data['avgq'][1:-1])
+            xdata = data['xpts'][1:-1]
+            data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*data['amps'][1:-1])
+            data['fit_avgi'], data['fit_err_avgi'] = fitter.fitlor(xdata, signs[1]*data['avgi'][1:-1])
+            data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[2]*data['avgq'][1:-1])
         return data
 
     def display(self, data=None, fit=True, signs=[1,1], **kwargs):
@@ -161,17 +165,29 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
 
         xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq + data['xpts'][1:-1]
 
-        plt.figure(figsize=(10,8))
-        plt.subplot(211, title="Pulse Probe EF Spectroscopy", ylabel="I [adc level]")
+        plt.figure(figsize=(9, 11))
+        plt.subplot(311, title=f"Qubit {self.cfg.expt.qubit} EF Spectroscopy (Gain {self.cfg.expt.gain})", ylabel="Amplitude [ADC units]")
+        plt.plot(xpts, data["amps"][1:-1],'o-')
+        if fit:
+            plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))
+            print(f'Found peak in amps at [MHz] {data["fit_amps"][2]}, HWHM {data["fit_amps"][3]}')
+
+        plt.subplot(312, ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(xpts, signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
-            print(f'Found peak in avgi at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
-        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [adc level]")
+            plt.plot(xpts, signs[1]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgi"]))
+            print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
+        plt.subplot(313, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
         plt.plot(xpts, data["avgq"][1:-1],'o-')
+        # plt.axvline(3476, c='k', ls='--')
+        # plt.axvline(3376+50, c='k', ls='--')
+        # plt.axvline(3376, c='k', ls='--')
         if fit:
-            plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            print(f'Found peak in avgq at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
+            plt.plot(xpts, signs[2]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgq"]))
+            # plt.axvline(3593.2, c='k', ls='--')
+            print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
+
+        plt.tight_layout()
         plt.show()
 
     def save_data(self, data=None):

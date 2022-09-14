@@ -169,7 +169,7 @@ class T1Experiment(Experiment):
             plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgi"]), label=captionStr)
             plt.legend()
             print(f'Fit T1 avgi [us]: {data["fit_avgi"][3]}')
-        plt.subplot(212, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
+        plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC units]")
         plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
         if fit:
             p = data['fit_avgq']
@@ -184,3 +184,4 @@ class T1Experiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

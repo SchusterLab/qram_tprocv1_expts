@@ -1,41 +1,37 @@
 device:
     qubit:
-        T1: [70, 120, 40, 5] # [us]
-        f_ge: [743.119, 3476.716, 166.5217, 456.7] # [MHz]
-        f_ef: [649.12, 3376.34, -59.294, 295.9599] # [MHz]
-        f_EgGf: [2013, -1, 2682, 2385.8] # [MHz] expect to be ge_1 + ef_1 - ge_0
+        T1: [50, 100, 29, 100] # [us]
+        f_ge: [828.193, 3470.7039558072906, 160.544663455941, 445.697747526901] # [MHz]
+        f_ef: [637.4704365863639, 3370.260942584849, -81.47654241457579, 274.4176421308761] # [MHz]
+        f_EgGf: [2007.267, -1, 2682, 2385.8] # [MHz] expect to be ge_1 + ef_1 - ge_0
         gs: [43, 0, 54, 40] # [MHz] from theoretical comparison for ZZ shift
         pulses:
             pi_ge:
-                gain: [27145, 15419, 13869, 7000]
-                sigma: [0.035, 0.025, 0.020, 0.025] # [us]
-                type: gauss
+                gain: [30000, 30000, 30000, 30000]
+                sigma: [0.135, 0.0882, 0.198, 0.135] # [us]
+                type: [gauss, gauss, gauss, gauss]
             pi_ef:
-                gain: [3006, 10922, 14543, 4728]
-                sigma: [0.035, 0.025, 0.025, 0.025] # [us]
+                gain: [25271, 22889, 30000, 19229]
+                sigma: [0.090, 0.095, 0.095, 0.090] # [us]
                 type: gauss
             pi_EgGf:
-                gain: [1000, 0, 7800, 10000]
-                sigma: [0.100, 0, 0.170, 0.253] # [us]
+                gain: [2500, 0, 3000, 3000]
+                sigma: [0.335, 0, 0.400, 0.400] # [us]
                 type: const
     
     readout:
-        trig_offset: 120 # [Clock ticks]
+        trig_offset: 125 # [Clock ticks]
         # frequency: [810.409984606071, -804.7555447534925, -82.3, 79.3372763161615] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 7.681/7.686, 5.775/5.781, 6.787/6.793, 6.949/6.955)
-        frequency: [810.409984606071, -804.25, -82.3, 79.3372763161615] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 7.681/7.686, 5.775/5.781, 6.787/6.793, 6.949/6.955)
+        frequency: [812.37, -806.77, -80.4, 79.63708892384405] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 7.681/7.686, 5.775/5.781, 6.787/6.793, 6.949/6.955)
         lo_sideband: [1, -1, 1, 1] # whether taking the +/- sideband after LO
-        gain: [0.085, 0.07, 0.04, 0.07] # [MUX units: range -1 to 1, signed amplitude]
+        gain: [0.300, 0.270, 0.270, 0.200] # [MUX units: range -1 to 1, signed amplitude]
         # phase: [0, 0, 90, 0] # degrees 
         # threshold_ge: [0, -73, 0.75, 0] # adc units
         # threshold_ef: [1, 1, 1, 1] # adc units
         readout_length: [10, 10, 10, 10] # [us]
-        relax_delay: [200, 300, 150, 50] # [us]
+        relax_delay: [150, 300, 140, 150] # [us]
     
 hw:
-    lo:
-        readout:
-            frequency: 5925e6
-            power: 10 # mixer wants 7 dBm
     soc:
         dacs:
         # dac types: full (full gen - all gens in standard firmware) or int4, mux4 (q3diamond)
@@ -67,6 +63,10 @@ hw:
         adcs:
             readout:
                 ch: [0, 1, 2, 3]
+    lo:
+        readout:
+            frequency: 5925e6
+            power: 7 # mixer wants 7 dBm
             
 aliases: # for use in instrument manager
     readout_LO: SC_26C1

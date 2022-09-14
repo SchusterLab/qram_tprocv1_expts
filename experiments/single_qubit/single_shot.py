@@ -23,14 +23,14 @@ def hist(data, plot=True, span=None, verbose=True):
     numbins = 200
 
     xg, yg = np.median(Ig), np.median(Qg)
-    if verbose: print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)}')
-
     xe, ye = np.median(Ie), np.median(Qe)
-    if verbose: print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)}')
+    if plot_f: xf, yf = np.median(If), np.median(Qf)
 
-    if plot_f:
-        xf, yf = np.median(If), np.median(Qf)
-        if verbose: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
+    if verbose:
+        print('Unrotated:')
+        print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)}')
+        print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)}')
+        if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
         fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(16, 10))
@@ -68,6 +68,12 @@ def hist(data, plot=True, span=None, verbose=True):
     xg, yg = np.median(Ig_new), np.median(Qg_new)
     xe, ye = np.median(Ie_new), np.median(Qe_new)
     if plot_f: xf, yf = np.median(If_new), np.median(Qf_new)
+    if verbose:
+        print('Rotated:')
+        print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)}')
+        print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)}')
+        if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
+
 
     if span is None:
         span = (np.max(np.concatenate((Ie_new, Ig_new))) - np.min(np.concatenate((Ie_new, Ig_new))))/2
@@ -122,7 +128,7 @@ def hist(data, plot=True, span=None, verbose=True):
         fids.append(contrast[tind])
         
     if plot: 
-        axs[1,0].set_title('Histogram')
+        axs[1,0].set_title(f'Histogram (Fidelity g-e: {fids[0]:.3})')
         axs[1,0].axvline(thresholds[0], color='0.2', linestyle='--')
         if plot_f:
             axs[1,0].axvline(thresholds[1], color='0.2', linestyle='--')
@@ -202,9 +208,9 @@ class HistogramProgram(AveragerProgram):
         self.cfg.reps = cfg.expt.reps
         
         # add qubit and readout pulses to respective channels
-        if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
+        if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f and cfg.device.qubit.pulses.pi_ge.type == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
-        if self.cfg.expt.pulse_f:
+        if self.cfg.expt.pulse_f and cfg.device.qubit.pulses.pi_ef.type == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
 
         if self.res_ch_type == 'mux4':
@@ -217,12 +223,18 @@ class HistogramProgram(AveragerProgram):
         cfg=AttrDict(self.cfg)
 
         if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
-            self.sync_all()
+            if cfg.device.qubit.pulses.pi_ge.type == 'gauss':
+                self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
+            else: # const pulse
+                self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=self.pi_gain, length=self.pi_sigma)
+        self.sync_all()
 
         if self.cfg.expt.pulse_f:
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
-            self.sync_all()
+            if cfg.device.qubit.pulses.pi_ef.type == 'gauss':
+                self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
+            else: # const pulse
+                self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, length=self.pi_ef_sigma)
+        self.sync_all()
 
         self.measure(pulse_ch=self.res_ch, 
              adcs=[self.adc_ch],
@@ -334,10 +346,10 @@ class HistogramExperiment(Experiment):
         
         fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, span=span)
             
-        print(f'ge fidelity: {fids[0]}')
+        print(f'ge fidelity (%): {100*fids[0]}')
         if self.cfg.expt.check_f:
-            print(f'gf fidelity: {fids[1]}')
-            print(f'ef fidelity: {fids[2]}')
+            print(f'gf fidelity (%): {100*fids[1]}')
+            print(f'ef fidelity (%): {100*fids[2]}')
         print(f'rotation angle (deg): {angle}')
         print(f'set angle to (deg): {-angle}')
         print(f'threshold ge: {thresholds[0]}')

@@ -169,9 +169,9 @@ class AmplitudeRabiExperiment(Experiment):
             # Remove the first and last point from fit in case weird edge measurements
             # fitparams = [None, 1/max(data['xpts']), None, None]
             fitparams = None
-            p_avgi, pCov_avgi = fitter.fitsin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
-            p_avgq, pCov_avgq = fitter.fitsin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
-            p_amps, pCov_amps = fitter.fitsin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
+            p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
+            p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
+            p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
             data['fit_amps'] = p_amps
@@ -189,7 +189,7 @@ class AmplitudeRabiExperiment(Experiment):
         # plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
         # if fit:
         #     p = data['fit_amps']
-        #     plt.plot(data["xpts"][1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
+        #     plt.plot(data["xpts"][1:-1], fitter.decaysin(data["xpts"][1:-1], *p))
         #     if p[2] > 180: p[2] = p[2] - 360
         #     elif p[2] < -180: p[2] = p[2] + 360
         #     if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
@@ -205,7 +205,7 @@ class AmplitudeRabiExperiment(Experiment):
         plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
         if fit:
             p = data['fit_avgi']
-            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            plt.plot(data["xpts"][0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
             if p[2] > 180: p[2] = p[2] - 360
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
@@ -219,7 +219,7 @@ class AmplitudeRabiExperiment(Experiment):
         plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
         if fit:
             p = data['fit_avgq']
-            plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
+            plt.plot(data["xpts"][0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
             if p[2] > 180: p[2] = p[2] - 360
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
@@ -347,3 +347,4 @@ class AmplitudeRabiChevronExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

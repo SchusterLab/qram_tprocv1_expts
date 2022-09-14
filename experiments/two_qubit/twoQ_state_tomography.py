@@ -146,20 +146,20 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
         # self.X_pulse(q=qubits[1], pihalf=False, play=True)
 
         # initialize to Eg
-        self.X_pulse(q=qubits[0], play=True)
+        self.X_pulse(q=qubits[0], play=True, pihalf=True)
 
-        # apply Eg -> Gf pulse on B: expect to end in Gf
-        type = self.cfg.device.qubit.pulses.pi_EgGf.type
-        pulse = self.handle_const_pulse
-        if type == 'gauss': pulse = self.handle_gauss_pulse
-        elif type == 'flat_top': pulse = self.flat_top
-        pulse(name=f'pi_EgGf_{qubits[0]}{qubits[1]}', play=True)
-        self.sync_all()
+        # # apply Eg -> Gf pulse on B: expect to end in Gf
+        # type = self.cfg.device.qubit.pulses.pi_EgGf.type
+        # pulse = self.handle_const_pulse
+        # if type == 'gauss': pulse = self.handle_gauss_pulse
+        # elif type == 'flat_top': pulse = self.flat_top
+        # pulse(name=f'pi_EgGf_{qubits[0]}{qubits[1]}', play=True)
+        # self.sync_all()
 
-        # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
-        # self.X_pulse(q=qubits[0], play=True) # G->E on qubits[0]
-        # self.sync_all() # necessary for ZZ?
-        self.handle_gauss_pulse(f'ef_qubit{qubits[1]}', play=True) # f->e on qubits[1]
+        # # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
+        # # self.X_pulse(q=qubits[0], play=True) # G->E on qubits[0]
+        # # self.sync_all() # necessary for ZZ?
+        # self.handle_gauss_pulse(f'ef_qubit{qubits[1]}', play=True) # f->e on qubits[1]
 
     def initialize(self):
         super().initialize()
@@ -227,9 +227,6 @@ class EgGfStateTomographyExperiment(Experiment):
         data={'counts_tomo':[], 'counts_calib':[]}
         self.pulse_dict = dict()
         
-        angle = self.cfg.device.readout.phase
-        threshold = self.cfg.device.readout.threshold_ge
-
         # Error mitigation measurements: prep in gg, ge, eg, ee to recalibrate measurement angle and measure confusion matrix
         calib_prog_dict = dict()
         for prep_state in tqdm(self.calib_order):

@@ -169,6 +169,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
                 f0, Qi, Qe, phi, scale, a0 = data['fit']
                 if verbose:
                     print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
+                    print(f'Freq with maximum transmission: {xdata[np.argmax(ydata)]}')
                     print('From fit:')
                     print(f'\tf0: {f0}')
                     print(f'\tQi: {Qi}')
@@ -187,10 +188,10 @@ class ResonatorSpectroscopyExperiment(Experiment):
     def display(self, data=None, fit=True, findpeaks=False, **kwargs):
         if data is None:
             data=self.data 
-        plt.figure(figsize=(18,12))
-        plt.subplot(211, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}",  ylabel="Amps [ADC units]")
-
         xpts = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + data['xpts'][1:-1])
+
+        plt.figure(figsize=(16,16))
+        plt.subplot(311, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}",  ylabel="Amps [ADC units]")
         plt.plot(xpts, data['amps'][1:-1],'o-')
         if fit:
             plt.plot(xpts, fitter.hangerS21func(data["xpts"][1:-1], *data["fit"]))
@@ -199,12 +200,14 @@ class ResonatorSpectroscopyExperiment(Experiment):
             for peak in data['minpeaks']:
                 plt.axvline(peak[0], linestyle='--', color='0.2')
                 print(f'Found peak [MHz]: {peak[0]}')
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq -804.5), c='k', ls='--')
+        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + 812.37), c='k', ls='--')
+        # plt.axvline(7687.5, c='k', ls='--')
 
-        plt.subplot(212, xlabel="Readout Frequency [MHz]", ylabel="Phases [radians]")
-        plt.plot(xpts, data["phases"][1:-1],'o-')
-        if fit:
-            plt.plot(xpts, fitter.hangerphasefunc(data["xpts"][1:-1], *data["fit"]))
+        plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
+        plt.plot(xpts, data["avgi"][1:-1],'o-')
+
+        plt.subplot(313, xlabel="Readout Frequency [MHz]", ylabel="Q [ADC units]")
+        plt.plot(xpts, data["avgq"][1:-1],'o-')
         plt.show()
         
     def save_data(self, data=None):
@@ -255,7 +258,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
             data["phases"].append([])
 
             for f in tqdm(xpts, disable=True):
-                self.cfg.device.readout.frequency = f
+                self.cfg.expt.frequency = f
                 rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = rspec
                 avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
@@ -298,20 +301,20 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data 
-        
-        x_sweep = data['xpts']
-        y_sweep = data['gainpts'] 
+
+        inner_sweep = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + data['xpts'])
+        outer_sweep = data['gainpts']
+
         amps = data['amps']
         for amps_gain in amps:
             amps_gain -= np.average(amps_gain)
         
-        plt.figure(figsize=(12, 8))
-        lo_freq = float(self.cfg.hw.lo.readout.frequency)*1e-6
-        plt.imshow(
-            np.flip(amps, 0),
-            cmap='viridis',
-            extent=[x_sweep[0]+lo_freq, x_sweep[-1]+lo_freq, y_sweep[0], y_sweep[-1]],
-            aspect='auto')
+        y_sweep = outer_sweep
+        x_sweep = inner_sweep
+
+        # THIS IS CORRECT EXTENT LIMITS FOR 2D PLOTS
+        plt.figure(figsize=(10,8))
+        plt.pcolormesh(x_sweep, y_sweep, amps, cmap='viridis', shading='auto')
         
         if fit:
             fit_highpow, fit_lowpow = data['fit']
@@ -456,3 +459,4 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname
