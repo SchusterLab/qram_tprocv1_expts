@@ -10,6 +10,9 @@ Compare the fit between the check_measures (amps, avgi, and avgq by default) in 
 """
 def get_best_fit(data, compare_param_i, check_measures=('amps', 'avgi', 'avgq'), get_best_data_params=(), override=None):
     fit_errs = [data[f'fit_err_{check}'] for check in check_measures]
+    for fit_err_check in fit_errs:
+        for i, fit_err in enumerate(np.diag(fit_err_check)):
+            if fit_err == 0: fit_err_check[i][i] = np.inf
     fits = [data[f'fit_{check}'] for check in check_measures]
     if override is not None and override in check_measures:
         i_best = np.argwhere(np.array(check_measures) == override)[0][0]

@@ -6,6 +6,8 @@ from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
+import experiments.fitting as fitter
+
 class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
     """
     Qubit A: E<->G
@@ -181,9 +183,10 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data
         if fit:
-            data['fit_amps']=dsfit.fitlor(data["xpts"][1:-1], data['amps'][1:-1])
-            data['fit_avgi']=dsfit.fitlor(data["xpts"][1:-1], signs[0]*data['avgi'][1:-1])
-            data['fit_avgq']=dsfit.fitlor(data["xpts"][1:-1], signs[1]*data['avgq'][1:-1])
+            xdata = data['xpts'][1:-1]
+            data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*data['amps'][1:-1])
+            data['fit_avgi'], data['fit_err_avgi'] = fitter.fitlor(xdata, signs[1]*data['avgi'][1:-1])
+            data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[2]*data['avgq'][1:-1])
         return data
 
     def display(self, data=None, fit=True, signs=[1,1], **kwargs):
@@ -193,23 +196,23 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
         qA, qB = self.cfg.expt.qubits
         xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq[qA] + data['xpts'][1:-1]
 
-        # plt.figure(figsize=(12, 8))
-        # plt.subplot(111, title=f"Qubit Spectroscopy on Q{qA} with Pi Pulse on Q{qB}", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
-        # plt.plot(xpts, data["amps"][1:-1],'o-')
-        # if fit:
-        #     plt.plot(xpts, dsfit.lorfunc(data["fit_amps"], data["xpts"][1:-1]))
+        plt.figure(figsize=(9, 11))
+        plt.subplot(311, title=f"Qubit Spectroscopy on Q{qA} with Pi Pulse on Q{qB}", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
+        plt.plot(xpts, data["amps"][1:-1],'o-')
+        if fit:
+            plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))
+            print(f'Found peak in amps at [MHz] {data["fit_amps"][2]}, HWHM {data["fit_amps"][3]}')
 
-        plt.figure(figsize=(10,8))
-        plt.subplot(211, title=f"Qubit {qA} Spectroscopy (Q{qB} in {'e' if self.cfg.expt.pulseB else 'g'})", ylabel="I [ADC units]")
+        plt.subplot(312, title=f"Qubit {qA} Spectroscopy (Q{qB} in {'e' if self.cfg.expt.pulseB else 'g'})", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')
         if fit:
-            plt.plot(xpts, signs[0]*dsfit.lorfunc(data["fit_avgi"], data["xpts"][1:-1]))
+            plt.plot(xpts, signs[1]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgi"]))
             print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
-        plt.subplot(212, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
+        plt.subplot(313, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
         plt.plot(xpts, data["avgq"][1:-1],'o-')
         if fit:
-            plt.plot(xpts, signs[1]*dsfit.lorfunc(data["fit_avgq"], data["xpts"][1:-1]))
-            plt.axvline(4828.13, c='k', ls='--')
+            plt.plot(xpts, signs[2]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgq"]))
+            # plt.axvline(4828.13, c='k', ls='--')
             print(f'Found peak in Q at [MHz] {data["fit_avgq"][2]}, HWHM {data["fit_avgq"][3]}')
 
         plt.tight_layout()

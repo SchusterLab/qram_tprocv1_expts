@@ -134,7 +134,8 @@ class CliffordAveragerProgram(AveragerProgram):
     def initialize(self):
         self.cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
-        self.qubits = self.cfg.expt.qubits
+        if 'qubits' in self.cfg.expt: self.qubits = self.cfg.expt.qubits
+        else: self.qubits = range(4)
         self.pulse_dict = dict()
         self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
 
@@ -150,20 +151,28 @@ class CliffordAveragerProgram(AveragerProgram):
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_ch
         self.f_res_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
 
+        self.f_ge_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ge, self.qubit_chs)]
+        self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[1]) for f in self.cfg.device.qubit.f_Q1_ZZ]
+
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
         # copy over parameters for the acquire method
         self.cfg.reps = self.cfg.expt.reps
 
-        # declare res dacs
+        self.prog_gen_chs = []
+
+        # declare res dacs, add readout pulses
         if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
             assert np.all([ch == 6 for ch in self.res_chs])
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mux_freqs = [self.cfg.device.readout.frequency[i] if i in self.qubits else 0 for i in range(4)]
-            mux_gains = [self.cfg.device.readout.gain[i] if i in self.qubits else 0 for i in range(4)]
+            mux_freqs = self.cfg.device.readout.frequency
+            mux_gains = self.cfg.device.readout.gain
             self.declare_gen(ch=6, nqz=self.cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=self.cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
             self.handle_mux4_pulse(name=f'measure', ch=6, length=max(self.readout_lengths_dac), mask=mask, play=False, set_reg=True)
+            self.prog_gen_chs.append(6)
         else:
             for q in self.qubits:
                 mixer_freq = 0
@@ -171,14 +180,16 @@ class CliffordAveragerProgram(AveragerProgram):
                     mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[q]
                 self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
                 self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq=self.f_res_reg[q], phase=0, gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)
+                self.prog_gen_chs.append(self.res_chs[q])
 
-        # declare qubit dacs
+        # declare qubit dacs, add qubit pi_ge pulses
         for q in self.qubits:
             mixer_freq = 0
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
             self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
             self.X_pulse(q=q, play=False)
+            self.prog_gen_chs.append(self.qubit_chs[q])
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
@@ -186,22 +197,27 @@ class CliffordAveragerProgram(AveragerProgram):
 
     """
     Collect shots for all adcs, rotates by given angle (degrees), and averages over shot_avg adjacent shots
+    Returns avgi, avgq, avgi_err, avgq_err which avgi/q are avg over shot_avg and avgi/q_err is (std dev of each group of shots)/sqrt(shot_avg)
     """
-    def get_shots(self, angle=None, shot_avg=1, verbose=True):
+    def get_shots(self, angle=None, shot_avg=1, verbose=True, return_err=False):
         if angle == None: angle = [0]*len(self.cfg.device.qubit.f_ge)
         bufi = np.array([
             self.di_buf[i]*np.cos(np.pi/180*angle[i]) - self.dq_buf[i]*np.sin(np.pi/180*angle[i])
             for i, ch in enumerate(self.ro_chs)])
         avgi = []
+        avgi_err = []
         for bufi_ch in bufi:
             # drop extra shots that aren't divisible into averages
             new_bufi_ch = np.copy(bufi_ch[:len(bufi_ch) - (len(bufi_ch) % shot_avg)])
             # average over shots_avg number of consecutive shots
             new_bufi_ch = np.reshape(new_bufi_ch, (len(new_bufi_ch)//shot_avg, shot_avg))
+            new_bufi_ch_err = np.std(new_bufi_ch, axis=1) / np.sqrt(shot_avg)
             new_bufi_ch = np.average(new_bufi_ch, axis=1)
+            avgi_err.append(new_bufi_ch_err)
             avgi.append(new_bufi_ch)
         avgi = np.array(avgi)
         avgi = np.array([avgi[i]/ro.length for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        avgi_err = np.array([avgi[i]/ro.length for i, (ch, ro) in enumerate(self.ro_chs.items())])
         # print(avgi[self.cfg.expt.qubits[1]])
         if verbose: print([np.median(avgi[i]) for i in range(4)])
 
@@ -209,18 +225,40 @@ class CliffordAveragerProgram(AveragerProgram):
             self.di_buf[i]*np.sin(np.pi/180*angle[i]) + self.dq_buf[i]*np.cos(np.pi/180*angle[i])
             for i, ch in enumerate(self.ro_chs)])
         avgq = []
+        avgq_err = []
         for bufq_ch in bufq:
             # drop extra shots that aren't divisible into averages
             new_bufq_ch = np.copy(bufq_ch[:len(bufq_ch) - (len(bufq_ch) % shot_avg)])
             # average over shots_avg number of consecutive shots
             new_bufq_ch = np.reshape(new_bufq_ch, (len(new_bufq_ch)//shot_avg, shot_avg))
+            new_bufq_ch_err = np.std(new_bufq_ch, axis=1) / np.sqrt(shot_avg)
             new_bufq_ch = np.average(new_bufq_ch, axis=1)
+            assert(np.shape(new_bufq_ch_err) == np.shape(new_bufq_ch))
+            avgq_err.append(new_bufq_ch_err)
             avgq.append(new_bufq_ch)
         avgq = np.array(avgq)
         avgq = np.array([avgq[i]/ro.length for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        avgq_err = np.array([avgq[i]/ro.length for i, (ch, ro) in enumerate(self.ro_chs.items())])
 
-        return avgi, avgq
+        if return_err: return avgi, avgq, avgi_err, avgq_err
+        else: return avgi, avgq
 
+    def acquire_threshold(self, soc, progress, angle=None, threshold=None, shot_avg=1, verbose=False):
+        avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress, debug=False)
+        # if angle == None or threshold == None: return avgi[:,0], avgq[:,0]
+        if angle == None or threshold == None: shot_avg = len(self.di_buf[0])
+        avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, shot_avg=shot_avg, verbose=verbose, return_err=True)
+        # print(np.shape(avgi_rot), np.average(avgi_rot[0])) #, avgi_rot[0])
+        if angle == None or threshold == None: 
+            return avgi_rot, avgq_rot, avgi_err, avgq_err
+        else:
+            e_counts = np.array([avgi_rot_ch > threshold_ch for avgi_rot_ch, threshold_ch in zip(avgi_rot, threshold)]) # 1 for e, 0 for g
+            popln = np.average(e_counts, axis=1)
+            popln_err = np.std(e_counts, axis=1) / np.sqrt(np.shape(e_counts)[1])
+            avgq = np.zeros(np.shape(popln))
+            avgq_err = np.zeros(np.shape(popln_err))
+            return popln, avgq, popln_err, avgq_err
+        
 """
 Take care of extra clifford pulses for qutrits.
 """

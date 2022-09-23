@@ -351,7 +351,7 @@ class HistogramExperiment(Experiment):
             print(f'gf fidelity (%): {100*fids[1]}')
             print(f'ef fidelity (%): {100*fids[2]}')
         print(f'rotation angle (deg): {angle}')
-        print(f'set angle to (deg): {-angle}')
+        # print(f'set angle to (deg): {-angle}')
         print(f'threshold ge: {thresholds[0]}')
         if self.cfg.expt.check_f:
             print(f'threshold gf: {thresholds[1]}')

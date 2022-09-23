@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from qick import *
 import json
+from copy import deepcopy
 
 from slab import Experiment, NpEncoder, AttrDict
 from tqdm import tqdm_notebook as tqdm
@@ -211,7 +212,7 @@ class EgGfStateTomographyExperiment(Experiment):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         qA, qB = self.cfg.expt.qubits
-        
+
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -226,17 +227,17 @@ class EgGfStateTomographyExperiment(Experiment):
         self.calib_order = ['gg', 'ge', 'eg', 'ee'] # should match with order of counts for each tomography measurement 
         data={'counts_tomo':[], 'counts_calib':[]}
         self.pulse_dict = dict()
-        
+
         # Error mitigation measurements: prep in gg, ge, eg, ee to recalibrate measurement angle and measure confusion matrix
         calib_prog_dict = dict()
         for prep_state in tqdm(self.calib_order):
             # print(prep_state)
-            cfg = AttrDict(self.cfg.copy())
+            cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
             err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
             calib_prog_dict.update({prep_state:err_tomo})
-        
+
         g_prog = calib_prog_dict['gg']
         Ig, Qg = g_prog.get_shots(verbose=False)
         threshold = [0]*num_qubits_sample
@@ -248,7 +249,7 @@ class EgGfStateTomographyExperiment(Experiment):
         shot_data = dict(Ig=Ig[qA], Qg=Qg[qA], Ie=Ie[qA], Qe=Qe[qA])
         print(f'Qubit  ({qA})')
         fid, thresholdA, angleA = hist(data=shot_data, plot=True, verbose=False)
-        threshold[qA] = thresholdA
+        threshold[qA] = thresholdA[0]
         angle[qA] = angleA
 
         # Get readout angle + threshold for qubit B
@@ -257,7 +258,7 @@ class EgGfStateTomographyExperiment(Experiment):
         shot_data = dict(Ig=Ig[qB], Qg=Qg[qB], Ie=Ie[qB], Qe=Qe[qB])
         print(f'Qubit  ({qB})')
         fid, thresholdB, angleB = hist(data=shot_data, plot=True, verbose=False)
-        threshold[qB] = thresholdB
+        threshold[qB] = thresholdB[0]
         angle[qB] = angleB
 
         print('thresholds', threshold)
@@ -271,7 +272,7 @@ class EgGfStateTomographyExperiment(Experiment):
         # Tomography measurements
         for basis in tqdm(self.meas_order):
             # print(basis)
-            cfg = AttrDict(self.cfg.copy())
+            cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.basis = basis
             tomo = EgGfStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
             tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
