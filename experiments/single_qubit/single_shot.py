@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from qick import *
 from qick.helpers import gauss
+from copy import deepcopy
 
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
@@ -297,7 +298,7 @@ class HistogramExperiment(Experiment):
         data=dict()
 
         # Ground state shots
-        cfg = AttrDict(self.cfg.copy())
+        cfg = AttrDict(deepcopy(self.cfg))
         cfg.expt.pulse_e = False
         cfg.expt.pulse_f = False
         histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
@@ -356,7 +357,7 @@ class HistogramExperiment(Experiment):
         if self.cfg.expt.check_f:
             print(f'threshold gf: {thresholds[1]}')
             print(f'threshold ef: {thresholds[2]}')
-    
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
@@ -391,6 +392,9 @@ class SingleShotOptExperiment(Experiment):
         fpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
         gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"]*np.arange(self.cfg.expt["expts_gain"])
         lenpts = self.cfg.expt["start_len"] + self.cfg.expt["step_len"]*np.arange(self.cfg.expt["expts_len"])
+        print(fpts)
+        print(gainpts)
+        print(lenpts)
         
         fid = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
         threshold = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
@@ -414,6 +418,9 @@ class SingleShotOptExperiment(Experiment):
                     fid[f_ind, g_ind, l_ind] = results['fids'][0] if not check_f else results['fids'][1]
                     threshold[f_ind, g_ind, l_ind] = results['thresholds'][0] if not check_f else results['thresholds'][1]
                     angle[f_ind, g_ind, l_ind] = results['angle']
+                    print(f'freq: {f}, gain: {gain}, len: {l}')
+                    print(f'\tfid ge [%]: {100*results["fids"][0]}')
+                    if check_f: print(f'\tfid gf [%]: {100*results["fids"][1]}')
 
         self.data = dict(fpts=fpts, gainpts=gainpts, lenpts=lenpts, fid=fid, threshold=threshold, angle=angle)
         return self.data
@@ -433,7 +440,24 @@ class SingleShotOptExperiment(Experiment):
         print(gainpts)
         print(lenpts)
         print(f'Max fidelity {fid[imax]}')
-        print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imaxs[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
+        print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
+
+    def display(self, data=None, **kwargs):
+        if data is None:
+            data=self.data 
+        
+        fid = data['fid']
+        fpts = data['fpts'] # outer sweep, index 0
+        gainpts = data['gainpts'] # middle sweep, index 1
+        lenpts = data['lenpts'] # inner sweep, index 2
+
+        for g_ind, gain in enumerate(gainpts):
+            for l_ind, l in enumerate(lenpts):
+                plt.plot(fpts, 100*fid[:,g_ind, l_ind], 'o-', label=f'gain: {gain:.2}, len [us]: {l}')
+        plt.xlabel('Frequency [MHz]')
+        plt.ylabel(f'Fidelity [%]')
+        plt.legend()
+        plt.show()
 
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

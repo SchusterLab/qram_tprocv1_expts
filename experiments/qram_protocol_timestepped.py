@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from qick import *
 from qick.helpers import gauss
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, AttrDict
 
 import experiments.fitting as fitter
 
@@ -252,6 +252,7 @@ class QramProtocolExperiment(Experiment):
                     angles_q[q] = angle
                     fids_q[q] = fid[0]
                     print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+
                 # g states for q2, q3
                 sscfg.expt.qubits = [2, 3]
                 sscfg.expt.state_prep_kwargs = dict(prep_state='gg')

@@ -61,24 +61,25 @@ class CliffordAveragerProgram(AveragerProgram):
                 # print('playing gauss pulse', params['name'], 'on ch', params['ch'])
                 self.pulse(ch=params['ch'])
             
-    def handle_flat_top_pulse(self, ch=None, name=None, sigma=None, flat_length=None, freq=None, phase=None, gain=None, play=False, set_reg=False):
+    def handle_flat_top_pulse(self, ch=None, name=None, sigma=None, length=None, freq=None, phase=None, gain=None, play=False, set_reg=False):
         """
-        Plays a gaussian ramp up (2.5*sigma), a constant pulse of length flat_length,
-        gaussian ramp down (2.5*sigma) on channel ch
+        Plays a gaussian ramp up (2*sigma), a constant pulse of length length-4*sigma,
+        plus a gaussian ramp down (2*sigma) on channel ch. By default: sigma=5 clock cycles
         """
         if name is not None and name not in self.pulse_dict.keys():
-            assert None not in [ch, sigma, flat_length]
-            self.pulse_dict.update({name:dict(ch=ch, name=name, type='flat_top', sigma=sigma, flat_length=flat_length, freq=freq, phase=phase, gain=gain)})
-            self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*5)
+            assert None not in [ch, sigma, length]
+            if sigma == None: sigma = 5 # clock cycles
+            self.pulse_dict.update({name:dict(ch=ch, name=name, type='flat_top', sigma=sigma, length=length, freq=freq, phase=phase, gain=gain)})
+            self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*4)
         if play or set_reg:
-            # if not (ch == name == sigma == flat_length == None):
+            # if not (ch == name == sigma == length == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
             assert name in self.pulse_dict.keys()
             params = self.pulse_dict[name].copy()
             if freq is not None: params['freq'] = freq
             if phase is not None: params['phase'] = phase
             if gain is not None: params['gain'] = gain
-            self.set_pulse_registers(ch=params['ch'], style='flat_top', freq=params['freq'], phase=params['phase'], gain=params['gain'], waveform=params['name'], length=params['flat_length'])
+            self.set_pulse_registers(ch=params['ch'], style='flat_top', freq=params['freq'], phase=params['phase'], gain=params['gain'], waveform=params['name'], length=params['length']-4*params['sigma'])
             if play: self.pulse(ch=params['ch'])
     
     def handle_mux4_pulse(self, name, ch=None, mask=None, length=None, play=False, set_reg=False):
@@ -116,8 +117,8 @@ class CliffordAveragerProgram(AveragerProgram):
         elif type == 'gauss':
             self.handle_gauss_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, freq=f_ge, phase=phase, gain=gain, play=play) 
         elif type == 'flat_top':
-            flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.flat_length[q], gen_ch=self.qubit_chs[q])
-            self.handle_flat_top_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, flat_length=flat_length, freq=f_ge, phase=phase, gain=gain, play=play) 
+            length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.length[q], gen_ch=self.qubit_chs[q])
+            self.handle_flat_top_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, length=length, freq=f_ge, phase=phase, gain=gain, play=play) 
         else: assert False, f'Pulse type {type} not supported.'
     
     def Y_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
@@ -250,7 +251,8 @@ class CliffordAveragerProgram(AveragerProgram):
         avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, shot_avg=shot_avg, verbose=verbose, return_err=True)
         # print(np.shape(avgi_rot), np.average(avgi_rot[0])) #, avgi_rot[0])
         if angle == None or threshold == None: 
-            return avgi_rot, avgq_rot, avgi_err, avgq_err
+            # print(np.shape(avgi_rot))
+            return avgi_rot[:,0], avgq_rot[:,0], avgi_err[:,0], avgq_err[:,0]
         else:
             e_counts = np.array([avgi_rot_ch > threshold_ch for avgi_rot_ch, threshold_ch in zip(avgi_rot, threshold)]) # 1 for e, 0 for g
             popln = np.average(e_counts, axis=1)
@@ -277,8 +279,8 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         elif type == 'gauss':
             self.handle_gauss_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, freq=f_ef, phase=phase, gain=gain, play=play) 
         elif type == 'flat_top':
-            flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.flat_length[q], gen_ch=self.qubit_chs[q])
-            self.handle_flat_top_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, flat_length=flat_length, freq=f_ef, phase=phase, gain=gain, play=play) 
+            length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.length[q], gen_ch=self.qubit_chs[q])
+            self.handle_flat_top_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, length=length, freq=f_ef, phase=phase, gain=gain, play=play) 
         else: assert False, f'Pulse type {type} not supported.'
     
     def Yef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):

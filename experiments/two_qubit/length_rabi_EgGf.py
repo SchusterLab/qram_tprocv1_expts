@@ -130,6 +130,7 @@ class LengthRabiEgGfProgram(AveragerProgram):
             wait=True,
             syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in self.qubits])))
 
+# ===================================================================== #
         
 class LengthRabiEgGfExperiment(Experiment):
     """
@@ -321,6 +322,117 @@ class LengthRabiEgGfExperiment(Experiment):
             print(f'\tPi/2 length from avgq data (qubit B) [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+
+        plt.tight_layout()
+        plt.show()
+
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
+        super().save_data(data=data)
+
+# ===================================================================== #
+
+class EgGfFreqLenChevronExperiment(Experiment):
+    """
+    Rabi Eg<->Gf Experiment Chevron sweeping freq vs. len
+    Experimental Config:
+    expt = dict(
+        start_len: start length [us],
+        step_len: length step, 
+        expts_len: number of different length experiments, 
+        start_f: start freq [MHz],
+        step_f: freq step, 
+        expts_f: number of different freq experiments, 
+        reps: number averages per expt
+        rounds: number repetitions of experiment sweep
+        pulse_type: 'gauss' or 'const'
+    )
+    """
+    def __init__(self, soccfg=None, path='', prefix='RabiEgGfFreqLenChevron', config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=False, debug=False):
+        qA, qB = self.cfg.expt.qubits
+
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+
+        adc_chs = self.cfg.hw.soc.adcs.readout.ch
+        
+        freqpts = self.cfg.expt.start_f + self.cfg.expt.step_f * np.arange(self.cfg.expt.expts_f)
+        lenpts = self.cfg.expt.start_len + self.cfg.expt.step_len * np.arange(self.cfg.expt.expts_len)
+        
+        data={"lenpts":lenpts, "freqpts":freqpts, "avgi":[[],[]], "avgq":[[],[]], "amps":[[],[]], "phases":[[],[]]}
+
+        self.cfg.expt.start = self.cfg.expt.start_len
+        self.cfg.expt.step = self.cfg.expt.step_len
+        self.cfg.expt.expts = self.cfg.expt.expts_len
+
+        threshold = None
+        angle = None
+
+        for freq in tqdm(freqpts, disable=not progress):
+            self.cfg.device.qubit.f_EgGf[qA] = float(freq)
+
+            lenrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
+            lenpts, avgi, avgq = lenrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
+
+            for q_ind, q in enumerate(self.cfg.expt.qubits):
+                data['avgi'][q_ind].append(avgi[adc_chs[q], 0])
+                data['avgq'][q_ind].append(avgq[adc_chs[q], 0])
+                data['amps'][q_ind].append(np.abs(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+                data['phases'][q_ind].append(np.angle(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+
+        for k, a in data.items():
+            data[k] = np.array(a)
+        self.data=data
+        return data
+
+    def analyze(self, data=None, fit=True, **kwargs):
+        if data is None:
+            data=self.data
+        pass
+
+    def display(self, data=None, fit=True, **kwargs):
+        if data is None:
+            data=self.data 
+
+        inner_sweep = data['lenpts']
+        outer_sweep = data['freqpts']
+
+        y_sweep = outer_sweep
+        x_sweep = inner_sweep
+
+        plt.figure(figsize=(14,8))
+        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length")
+
+
+        plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
+        plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
+        plt.colorbar(label='I [ADC level]')
+
+        plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
+        plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
+        plt.colorbar(label='Q [ADC level]')
+
+
+        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
+        plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
+        plt.colorbar(label='I [ADC level]')
+
+        plt.subplot(224, xlabel="Gain [DAC units]")
+        plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
+        plt.colorbar(label='Q [ADC level]')
+
 
         plt.tight_layout()
         plt.show()

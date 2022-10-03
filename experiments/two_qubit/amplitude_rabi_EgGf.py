@@ -116,7 +116,8 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
 
         # apply Eg -> Gf pulse on B: expect to end in Gf
         if cfg.expt.pi_EgGf_sigma > 0:
-            if cfg.expt.pulse_type.lower() == "gauss":
+            pulse_type = cfg.expt.pulse_type.lower()
+            if pulse_type == "gauss":
                 self.set_pulse_registers(
                     ch=self.swap_chs[qA],
                     style="arb",
@@ -124,7 +125,16 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                     phase=0,
                     gain=0, # gain set by update
                     waveform="pi_EgGf_swap")
-            else:
+            elif pulse_type == 'flat_top':
+                self.set_pulse_registers(
+                    ch=self.swap_chs[qA],
+                    style="flat_top",
+                    freq=self.f_EgGf_reg,
+                    phase=0,
+                    gain=0, # gain set by update
+                    length=self.us2cycles(cfg.device.qubit.pulses.pi_EgGf.length[qA], gen_ch=self.swap_chs[qA]),
+                    waveform="pi_EgGf_swap")
+            else: # const
                 self.set_pulse_registers(
                     ch=self.swap_chs[qA],
                     style="const",
@@ -350,9 +360,11 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
 
-class EgGfChevronExperiment(Experiment):
+# ===================================================================== #
+
+class EgGfLenGainChevronExperiment(Experiment):
     """
-    Amplitude Rabi Eg<->Gf Experiment Chevron
+    Rabi Eg<->Gf Experiment Chevron sweeping length vs. gain
     Experimental Config:
     expt = dict(
         start_gain: qubit gain [dac units]
@@ -366,7 +378,7 @@ class EgGfChevronExperiment(Experiment):
         pulse_type: 'gauss' or 'const'
     )
     """
-    def __init__(self, soccfg=None, path='', prefix='RabiEgGfChevron', config_file=None, progress=None):
+    def __init__(self, soccfg=None, path='', prefix='RabiEgGfLenGainChevron', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
     def acquire(self, progress=False, debug=False):
@@ -432,7 +444,7 @@ class EgGfChevronExperiment(Experiment):
         x_sweep = inner_sweep
 
         plt.figure(figsize=(14,8))
-        plt.suptitle(f"Eg-Gf Chevron")
+        plt.suptitle(f"Eg-Gf Chevron Length vs. Gain")
 
 
         plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Length [us]")
@@ -440,6 +452,118 @@ class EgGfChevronExperiment(Experiment):
         plt.colorbar(label='I [ADC level]')
 
         plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Length [us]")
+        plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
+        plt.colorbar(label='Q [ADC level]')
+
+
+        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
+        plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
+        plt.colorbar(label='I [ADC level]')
+
+        plt.subplot(224, xlabel="Gain [DAC units]")
+        plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
+        plt.colorbar(label='Q [ADC level]')
+
+
+        plt.tight_layout()
+        plt.show()
+
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
+        super().save_data(data=data)
+
+# ===================================================================== #
+
+class EgGfFreqGainChevronExperiment(Experiment):
+    """
+    Rabi Eg<->Gf Experiment Chevron sweeping freq vs. gain
+    Experimental Config:
+    expt = dict(
+        start_gain: qubit gain [dac units]
+        step_gain: gain step [dac units]
+        expts_gain: number steps
+        start_f: start freq [MHz],
+        step_f: freq step, 
+        expts_f: number of different freq experiments, 
+        reps: number averages per expt
+        rounds: number repetitions of experiment sweep
+        pulse_type: 'gauss' or 'const'
+    )
+    """
+    def __init__(self, soccfg=None, path='', prefix='RabiEgGfFreqGainChevron', config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=False, debug=False):
+        qA, qB = self.cfg.expt.qubits
+
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+
+        adc_chs = self.cfg.hw.soc.adcs.readout.ch
+        
+        freqpts = self.cfg.expt.start_f + self.cfg.expt.step_f * np.arange(self.cfg.expt.expts_f)
+        gainpts = self.cfg.expt.start_gain + self.cfg.expt.step_gain * np.arange(self.cfg.expt.expts_gain)
+        
+        data={"gainpts":gainpts, "freqpts":freqpts, "avgi":[[],[]], "avgq":[[],[]], "amps":[[],[]], "phases":[[],[]]}
+
+        self.cfg.expt.start = self.cfg.expt.start_gain
+        self.cfg.expt.step = self.cfg.expt.step_gain
+        self.cfg.expt.expts = self.cfg.expt.expts_gain
+
+        threshold = None
+        angle = None
+
+        for freq in tqdm(freqpts, disable=not progress):
+            self.cfg.device.qubit.f_EgGf[qA] = float(freq)
+
+            amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
+            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
+
+            for q_ind, q in enumerate(self.cfg.expt.qubits):
+                data['avgi'][q_ind].append(avgi[adc_chs[q], 0])
+                data['avgq'][q_ind].append(avgq[adc_chs[q], 0])
+                data['amps'][q_ind].append(np.abs(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+                data['phases'][q_ind].append(np.angle(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+
+        for k, a in data.items():
+            data[k] = np.array(a)
+        self.data=data
+        return data
+
+    def analyze(self, data=None, fit=True, **kwargs):
+        if data is None:
+            data=self.data
+        pass
+            
+
+    def display(self, data=None, fit=True, **kwargs):
+        if data is None:
+            data=self.data 
+
+        inner_sweep = data['gainpts']
+        outer_sweep = data['freqpts']
+
+        y_sweep = outer_sweep
+        x_sweep = inner_sweep
+
+        plt.figure(figsize=(14,8))
+        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Gain")
+
+
+        plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
+        plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
+        plt.colorbar(label='I [ADC level]')
+
+        plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
         plt.colorbar(label='Q [ADC level]')
 
