@@ -190,3 +190,39 @@ def fithanger(xdata, ydata, fitparams=None):
         print('Warning: fit failed!')
         # return 0, 0
     return pOpt, pCov
+
+# ====================================================== #
+
+def rb_func(depth, p, a, b):
+    return a*p**depth + b
+
+# Gives the average error rate over all gates in sequence
+def rb_error(p, d): # d = dim of system = 2^(number of qubits)
+    return 1 - (p + (1-p)/d)
+
+# Run both regular RB and interleaved RB to calculate this
+def rb_gate_fidelity(p_rb, p_irb, d):
+    return 1 - (d-1)*(1-p_irb/p_rb) / d
+
+def fitrb(xdata, ydata, fitparams=None):
+    if fitparams is None: fitparams = [None]*3
+    if fitparams[0] is None: fitparams[0]=0.9
+    if fitparams[1] is None: fitparams[1]=np.max(ydata) - np.min(ydata)
+    if fitparams[2] is None: fitparams[2]=np.min(ydata)
+    bounds = (
+        [0, 0, 0],
+        [1, 10*np.max(ydata)-np.min(ydata), np.max(ydata)]
+        )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(f'Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}')
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(rb_func, xdata, ydata, p0=fitparams) #, bounds=bounds)
+        # return pOpt, pCov
+    except RuntimeError: 
+        print('Warning: fit failed!')
+        # return 0, 0
+    return pOpt, pCov

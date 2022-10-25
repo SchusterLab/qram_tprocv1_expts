@@ -34,7 +34,6 @@ class QramProtocolProgram(CliffordAveragerProgram):
                 self.declare_gen(ch=self.swap_chs[qA], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
             self.prog_gen_chs.append(self.swap_chs[qA])
 
-
         # get aliases for the sigmas we need in clock cycles
         self.pi_sigmas_us = cfg.device.qubit.pulses.pi_ge.sigma
         self.pi_ef_sigmas_us = cfg.device.qubit.pulses.pi_ef.sigma

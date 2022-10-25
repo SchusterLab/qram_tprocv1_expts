@@ -7,6 +7,16 @@ from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
 class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        self.cfg.rounds = cfg.expt.rounds
+        
+        super().__init__(soccfg, self.cfg)
+
     """
     Qubit A: E<->G
     Qubit B: g<->f
@@ -79,10 +89,6 @@ class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
         # drive is applied on qB via the swap channel indexed by qA
         self.r_freq_swap = self.sreg(self.swap_chs[qA], "freq") # get frequency register for swap_ch 
         self.r_freq_swap_update = 4 # register to hold the current sweep frequency
- 
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-        self.cfg.rounds = cfg.expt.rounds
 
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
         self.pi_ge_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qB], gen_ch=self.qubit_chs[qB])

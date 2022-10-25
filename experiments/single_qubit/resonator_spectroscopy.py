@@ -17,6 +17,15 @@ The resonator frequency is stored in the parameter cfg.device.readouti.frequency
 Note that harmonics of the clock frequency (6144 MHz) will show up as "infinitely"  narrow peaks!
 """
 class ResonatorSpectroscopyProgram(AveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        
+        super().__init__(soccfg, self.cfg)
+
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(self.cfg.expt)
@@ -68,9 +77,6 @@ class ResonatorSpectroscopyProgram(AveragerProgram):
         if self.cfg.expt.pulse_f:
             self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
             self.pi_ef_gain = cfg.device.qubit.pulses.pi_ef.gain
-        
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
         
         if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)

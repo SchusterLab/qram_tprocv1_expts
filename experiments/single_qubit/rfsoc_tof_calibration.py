@@ -11,9 +11,17 @@ Run this calibration when the wiring of the setup is changed.
 This calibration measures the time of flight of measurement pulse so we only start capturing data from this point in time onwards. Time of flight (tof) is stored in parameter cfg.device.readout.trig_offset.
 """
 class ToFCalibrationProgram(AveragerProgram):
-    def initialize(self):
-        cfg = AttrDict(self.cfg)
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.soft_avgs = cfg.expt.reps # same as reps
+        self.cfg.reps = 1
+        super().__init__(soccfg, self.cfg)
+
+    def initialize(self):
+        cfg = self.cfg
 
         self.adc_ch = cfg.hw.soc.adcs.readout.ch
         self.dac_ch = cfg.hw.soc.dacs.readout.ch
@@ -46,10 +54,6 @@ class ToFCalibrationProgram(AveragerProgram):
         print(f'readout freq {mixer_freq} +/- {cfg.expt.frequency}')
 
         self.declare_readout(ch=self.adc_ch, length=self.readout_length, freq=self.frequency, gen_ch=self.dac_ch) # gen_ch links to the mixer_freq being used on the mux
-
-        # copy over parameters for the acquire method
-        self.cfg.soft_avgs = cfg.expt.reps # same as reps
-        self.cfg.reps = 1 # not used for acquire_decimated
 
         if self.dac_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.dac_ch, style="const", length=self.pulse_length, mask=mask)
@@ -91,7 +95,8 @@ class ToFCalibrationExperiment(Experiment):
 
         data={"i":[], "q":[], "amps":[], "phases":[]}
         tof = ToFCalibrationProgram(soccfg=self.soccfg, cfg=self.cfg)
-        # print(tof)
+        # from qick.helpers import progs2json
+        # print(progs2json([tof.dump_prog()]))
         iq = tof.acquire_decimated(self.im[self.cfg.aliases.soc], load_pulses=True, progress=True)
         i, q = iq[0]
         amp = np.abs(i+1j*q) # Calculating the magnitude

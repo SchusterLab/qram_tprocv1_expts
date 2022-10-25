@@ -9,6 +9,16 @@ from tqdm import tqdm_notebook as tqdm
 import experiments.fitting as fitter
 
 class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        self.cfg.rounds = cfg.expt.rounds
+        
+        super().__init__(soccfg, self.cfg)
+
     def initialize(self):
         cfg=AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
@@ -58,10 +68,6 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
 
         # declare adcs
         self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
-
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-        self.cfg.rounds = cfg.expt.rounds
 
         self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma, gen_ch=self.qubit_ch)
 

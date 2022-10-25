@@ -9,6 +9,16 @@ from tqdm import tqdm_notebook as tqdm
 import experiments.fitting as fitter
 
 class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        self.cfg.rounds = cfg.expt.rounds
+        
+        super().__init__(soccfg, self.cfg)
+
     """
     Qubit A: E<->G
     Qubit B: g<->f
@@ -70,10 +80,6 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
         # sweep drive is applied on qA
         self.r_freq_A = self.sreg(self.qubit_chs[qA], "freq")
         self.r_freq_A_update = 4 # register to hold the current sweep frequency
- 
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-        self.cfg.rounds = cfg.expt.rounds
 
         self.pi_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qB], gen_ch=self.qubit_chs[qB])
 

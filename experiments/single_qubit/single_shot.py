@@ -129,7 +129,7 @@ def hist(data, plot=True, span=None, verbose=True):
         fids.append(contrast[tind])
         
     if plot: 
-        axs[1,0].set_title(f'Histogram (Fidelity g-e: {fids[0]:.3})')
+        axs[1,0].set_title(f'Histogram (Fidelity g-e: {100*fids[0]:.3}%)')
         axs[1,0].axvline(thresholds[0], color='0.2', linestyle='--')
         if plot_f:
             axs[1,0].axvline(thresholds[1], color='0.2', linestyle='--')
@@ -154,6 +154,15 @@ def hist(data, plot=True, span=None, verbose=True):
 # ====================================================== #
 
 class HistogramProgram(AveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        
+        super().__init__(soccfg, self.cfg)
+
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
@@ -204,9 +213,6 @@ class HistogramProgram(AveragerProgram):
         if self.cfg.expt.pulse_f:
             self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
             self.pi_ef_gain = cfg.device.qubit.pulses.pi_ef.gain
-        
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
         
         # add qubit and readout pulses to respective channels
         if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f and cfg.device.qubit.pulses.pi_ge.type == 'gauss':
@@ -441,6 +447,8 @@ class SingleShotOptExperiment(Experiment):
         print(lenpts)
         print(f'Max fidelity {fid[imax]}')
         print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
+
+        return imax
 
     def display(self, data=None, **kwargs):
         if data is None:

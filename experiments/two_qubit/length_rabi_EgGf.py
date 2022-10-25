@@ -12,6 +12,15 @@ import experiments.fitting as fitter
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
 """
 class LengthRabiEgGfProgram(AveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        
+        super().__init__(soccfg, self.cfg)
+
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
@@ -77,9 +86,6 @@ class LengthRabiEgGfProgram(AveragerProgram):
         for q in range(self.num_qubits_sample):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
         self.pi_ef_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qB], self.qubit_chs[qB])
 
@@ -137,13 +143,13 @@ class LengthRabiEgGfExperiment(Experiment):
     Length Rabi EgGf Experiment
     Experimental Config
     expt = dict(
-       start: start length [us],
-       step: length step, 
-       expts: number of different length experiments, 
-       reps: number of reps,
-       gain: gain to use for the qubit pulse
-       pulse_type: 'gauss' or 'const'
-       singleshot: (optional) if true, uses threshold
+        start: start length [us],
+        step: length step, 
+        expts: number of different length experiments, 
+        reps: number of reps,
+        gain: gain to use for the qubit pulse
+        pulse_type: 'gauss' or 'const'
+        singleshot: (optional) if true, uses threshold
     )
     """
 
@@ -343,6 +349,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
         start_f: start freq [MHz],
         step_f: freq step, 
         expts_f: number of different freq experiments, 
+        gain: gain to use for the qubit pulse
         reps: number averages per expt
         rounds: number repetitions of experiment sweep
         pulse_type: 'gauss' or 'const'
@@ -383,17 +390,21 @@ class EgGfFreqLenChevronExperiment(Experiment):
         for freq in tqdm(freqpts, disable=not progress):
             self.cfg.device.qubit.f_EgGf[qA] = float(freq)
 
-            lenrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-            lenpts, avgi, avgq = lenrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
+            for length in tqdm(lenpts, disable=True):
+                self.cfg.expt.sigma_test = float(length)
+                lenrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
+                avgi, avgq = lenrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
 
-            for q_ind, q in enumerate(self.cfg.expt.qubits):
-                data['avgi'][q_ind].append(avgi[adc_chs[q], 0])
-                data['avgq'][q_ind].append(avgq[adc_chs[q], 0])
-                data['amps'][q_ind].append(np.abs(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
-                data['phases'][q_ind].append(np.angle(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+                for q_ind, q in enumerate(self.cfg.expt.qubits):
+                    data['avgi'][q_ind].append(avgi[adc_chs[q], 0])
+                    data['avgq'][q_ind].append(avgq[adc_chs[q], 0])
+                    data['amps'][q_ind].append(np.abs(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+                    data['phases'][q_ind].append(np.angle(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
 
         for k, a in data.items():
             data[k] = np.array(a)
+            if np.shape(data[k]) == (2, len(freqpts) * len(lenpts)):
+                data[k] = np.reshape(data[k], (2, len(freqpts), len(lenpts)))
         self.data=data
         return data
 
@@ -402,7 +413,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
             data=self.data
         pass
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, plot_freq=None, plot_len=None, **kwargs):
         if data is None:
             data=self.data 
 
@@ -415,22 +426,33 @@ class EgGfFreqLenChevronExperiment(Experiment):
         plt.figure(figsize=(14,8))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length")
 
+        print(len(data['avgi'][0]))
+
 
         plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
+        # plt.pcolormesh(x_sweep, y_sweep, np.reshape(data['avgi'][0], (len(outer_sweep), len(inner_sweep))), cmap='viridis', shading='auto')
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='I [ADC level]')
 
         plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='Q [ADC level]')
 
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='I [ADC level]')
 
         plt.subplot(224, xlabel="Gain [DAC units]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='Q [ADC level]')
 
 

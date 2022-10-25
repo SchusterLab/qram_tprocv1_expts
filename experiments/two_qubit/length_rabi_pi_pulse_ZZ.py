@@ -12,6 +12,15 @@ import experiments.fitting as fitter
 Rabi oscillations for pi pulses on qB with qA in the e state
 """
 class LengthRabiPiZZProgram(AveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        
+        super().__init__(soccfg, self.cfg)
+
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
@@ -68,9 +77,6 @@ class LengthRabiPiZZProgram(AveragerProgram):
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
-
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
 
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
 

@@ -9,6 +9,16 @@ from tqdm import tqdm_notebook as tqdm
 import experiments.fitting as fitter
 
 class AmplitudeRabiEgGfProgram(RAveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        self.cfg.rounds = cfg.expt.rounds
+        
+        super().__init__(soccfg, self.cfg)
+
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
@@ -83,10 +93,6 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         # initialize gain
         self.safe_regwi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap_update, self.cfg.expt.start)
 
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-        self.cfg.rounds = cfg.expt.rounds
-
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
         self.pi_ef_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qB], self.qubit_chs[qB])
         self.pi_EgGf_sigma = self.us2cycles(cfg.expt.pi_EgGf_sigma, gen_ch=self.swap_chs[qA]) # defaults to eg-gf sigma in config
@@ -96,6 +102,8 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         self.add_gauss(ch=self.qubit_chs[qB], name="pi_ef_qubitB", sigma=self.pi_ef_sigmaB, length=self.pi_ef_sigmaB*4)
         if cfg.expt.pulse_type.lower() == "gauss" and cfg.expt.pi_EgGf_sigma > 0:
             self.add_gauss(ch=self.swap_chs[qA], name="pi_EgGf_swap", sigma=self.pi_EgGf_sigma, length=self.pi_EgGf_sigma*4)
+        elif cfg.expt.pulse_type.lower() == "flat_top" and cfg.expt.pi_EgGf_sigma > 0:
+            self.add_gauss(ch=self.swap_chs[qA], name="pi_EgGf_swap", sigma=5, length=20)
 
         # add readout pulses to respective channels
         if self.res_ch_types[0] == 'mux4':
@@ -126,14 +134,16 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                     gain=0, # gain set by update
                     waveform="pi_EgGf_swap")
             elif pulse_type == 'flat_top':
-                self.set_pulse_registers(
-                    ch=self.swap_chs[qA],
-                    style="flat_top",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=0, # gain set by update
-                    length=self.us2cycles(cfg.device.qubit.pulses.pi_EgGf.length[qA], gen_ch=self.swap_chs[qA]),
-                    waveform="pi_EgGf_swap")
+                length = self.us2cycles(cfg.expt.pi_EgGf_sigma, gen_ch=self.swap_chs[qA])-5*4
+                if length > 0:
+                    self.set_pulse_registers(
+                        ch=self.swap_chs[qA],
+                        style="flat_top",
+                        freq=self.f_EgGf_reg,
+                        phase=0,
+                        gain=0, # gain set by update
+                        length=length,
+                        waveform="pi_EgGf_swap")
             else: # const
                 self.set_pulse_registers(
                     ch=self.swap_chs[qA],
@@ -143,7 +153,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                     gain=0, # gain set by update
                     length=self.pi_EgGf_sigma)
             self.mathi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap, self.r_gain_swap_update, "+", 0)
-            self.pulse(ch=self.swap_chs[qA])
+            if pulse_type != 'flat_top' or length > 0: self.pulse(ch=self.swap_chs[qA])
         self.sync_all(5)
 
         # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
@@ -519,6 +529,9 @@ class EgGfFreqGainChevronExperiment(Experiment):
         self.cfg.expt.step = self.cfg.expt.step_gain
         self.cfg.expt.expts = self.cfg.expt.expts_gain
 
+        if 'pi_EgGf_sigma' not in self.cfg.expt:
+            self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qA]
+
         threshold = None
         angle = None
 
@@ -545,7 +558,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         pass
             
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, plot_freq=None, plot_gain=None, **kwargs):
         if data is None:
             data=self.data 
 
@@ -561,19 +574,27 @@ class EgGfFreqGainChevronExperiment(Experiment):
 
         plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_gain is not None: plt.axvline(plot_gain, color='r')
         plt.colorbar(label='I [ADC level]')
 
         plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_gain is not None: plt.axvline(plot_gain, color='r')
         plt.colorbar(label='Q [ADC level]')
 
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_gain is not None: plt.axvline(plot_gain, color='r')
         plt.colorbar(label='I [ADC level]')
 
         plt.subplot(224, xlabel="Gain [DAC units]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
+        if plot_freq is not None: plt.axhline(plot_freq, color='r')
+        if plot_gain is not None: plt.axvline(plot_gain, color='r')
         plt.colorbar(label='Q [ADC level]')
 
 
