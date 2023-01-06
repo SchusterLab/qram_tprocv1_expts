@@ -3,7 +3,7 @@ import numpy as np
 from qick import *
 from qick.helpers import gauss
 
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
@@ -227,3 +227,4 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

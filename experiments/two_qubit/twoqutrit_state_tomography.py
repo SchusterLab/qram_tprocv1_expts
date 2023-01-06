@@ -295,3 +295,4 @@ class EgGfStateTomographyQutritExperiment(Experiment):
             f.attrs['pulse_dict'] = json.dumps(self.pulse_dict, cls=NpEncoder)
             f.attrs['meas_order_1Q'] = json.dumps(self.meas_order_1Q, cls=NpEncoder)
             f.attrs['calib_order'] = json.dumps(self.calib_order, cls=NpEncoder)
+        return self.fname

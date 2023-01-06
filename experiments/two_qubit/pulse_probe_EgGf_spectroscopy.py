@@ -3,8 +3,10 @@ import numpy as np
 from qick import *
 from qick.helpers import gauss
 
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 
 class PulseProbeEgGfSpectroscopyProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
@@ -206,21 +208,21 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, sign=[[1, 1], [1, 1]], **kwargs):
-        # sign of fit: [iA, qA], [iB, qB]
+    def analyze(self, data=None, fit=True, signs=[[1, 1], [1, 1]], **kwargs):
+        # signs of fit: [iA, qA], [iB, qB]
         if data is None: data=self.data
-        self.sign = sign
+        self.signs = signs
         if fit:
-            data['fitA_avgi']=dsfit.fitlor(data["xpts"], sign[0][0]*data['avgi'][0])
-            data['fitA_avgq']=dsfit.fitlor(data["xpts"], sign[0][1]*data['avgq'][0])
-            data['fitB_avgi']=dsfit.fitlor(data["xpts"], sign[1][0]*data['avgi'][1])
-            data['fitB_avgq']=dsfit.fitlor(data["xpts"], sign[1][1]*data['avgq'][1])
+            data['fitA_avgi'], data['fitA_err_avgi'] = fitter.fitlor(data["xpts"], signs[0][0]*data['avgi'][0])
+            data['fitA_avgq'], data['fitA_err_avgq'] = fitter.fitlor(data["xpts"], signs[0][1]*data['avgq'][0])
+            data['fitB_avgi'], data['fitB_err_avgi'] = fitter.fitlor(data["xpts"], signs[1][0]*data['avgi'][1])
+            data['fitB_avgq'], data['fitB_err_avgq'] = fitter.fitlor(data["xpts"], signs[1][1]*data['avgq'][1])
         return data
 
-    def display(self, data=None, fit=True, sign=None, **kwargs):
-        # sign of fit: [iA, qA], [iB, qB]
+    def display(self, data=None, fit=True, signs=None, **kwargs):
+        # signs of fit: [iA, qA], [iB, qB]
         if data is None: data=self.data 
-        if sign is None: sign = self.sign
+        if signs is None: signs = self.signs
         plt.figure(figsize=(14,8))
         plt.suptitle(f"Pulse Probe Eg-Gf Spectroscopy")
 
@@ -230,27 +232,27 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
         plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
         # plt.axvline(test_f, color='r')
         if fit:
-            plt.plot(data["xpts"], sign[0][0]*dsfit.lorfunc(data["fitA_avgi"], data["xpts"]))
+            plt.plot(data["xpts"], signs[0][0]*fitter.lorfunc(data["xpts"], *data["fitA_avgi"]))
             print(f'Found peak in avgi data (qubit A) at [MHz] {data["fitA_avgi"][2]}, HWHM {data["fitA_avgi"][3]}')
         plt.subplot(223, xlabel="Pulse Frequency [MHz]", ylabel="Q [adc levels]")
         plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
         # plt.axvline(test_f, color='r')
         if fit:
-            plt.plot(data["xpts"], sign[0][1]*dsfit.lorfunc(data["fitA_avgq"], data["xpts"]))
+            plt.plot(data["xpts"], signs[0][1]*fitter.lorfunc(data["xpts"], *data["fitA_avgq"]))
             print(f'Found peak in avgq data (qubit A) at [MHz] {data["fitA_avgq"][2]}, HWHM {data["fitA_avgq"][3]}')
 
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
         if fit:
-            plt.plot(data["xpts"], sign[1][0]*dsfit.lorfunc(data["fitB_avgi"], data["xpts"]))
+            plt.plot(data["xpts"], signs[1][0]*fitter.lorfunc(data["xpts"], *data["fitB_avgi"]))
             print(f'Found peak in avgi data (qubit B) at [MHz] {data["fitB_avgi"][2]}, HWHM {data["fitB_avgi"][3]}')
         # plt.axvline(test_f, color='r')
         plt.subplot(224, xlabel="Pulse Frequency [MHz]")
         plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
         # plt.axvline(test_f, color='r')
         if fit:
-            plt.plot(data["xpts"], sign[1][1]*dsfit.lorfunc(data["fitB_avgq"], data["xpts"]))
+            plt.plot(data["xpts"], signs[1][1]*fitter.lorfunc(data["xpts"], *data["fitB_avgq"]))
             print(f'Found peak in avgq data (qubit B) at [MHz] {data["fitB_avgq"][2]}, HWHM {data["fitB_avgq"][3]}')
 
         plt.tight_layout()
@@ -336,12 +338,12 @@ class PulseProbeEgGfSweepSpectroscopyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, sign=[[1, 1], [1, 1]], **kwargs):
+    def analyze(self, data=None, fit=True, signs=[[1, 1], [1, 1]], **kwargs):
         if data is None:
             data=self.data
         return data
 
-    def display(self, data=None, fit=True, sign=None, **kwargs):
+    def display(self, data=None, fit=True, signs=None, **kwargs):
         if data is None:
             data=self.data 
 
@@ -401,3 +403,4 @@ class PulseProbeEgGfSweepSpectroscopyExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

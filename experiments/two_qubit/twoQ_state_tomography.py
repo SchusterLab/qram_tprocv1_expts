@@ -29,8 +29,10 @@ class AbstractStateTomo2QProgram(CliffordAveragerProgram):
         """
         assert basis in 'IXYZ'
         assert len(basis) == 1
-        if basis == 'X': self.Y_pulse(qubit, pihalf=True, play=play) # Y/2 pulse
-        elif basis == 'Y': self.X_pulse(qubit, pihalf=True, neg=True, play=play) # -X/2 pulse
+        if basis == 'X':
+            self.Y_pulse(qubit, pihalf=True, play=play, flag='ZZcorrection') # Y/2 pulse
+            # print('x pulse dict', self.pulse_dict)
+        elif basis == 'Y': self.X_pulse(qubit, pihalf=True, neg=True, play=play, flag='ZZcorrection') # -X/2 pulse
         else: return # measure in I/Z basis
 
     def state_prep_pulse(self, qubits, **kwargs):
@@ -67,8 +69,8 @@ class AbstractStateTomo2QProgram(CliffordAveragerProgram):
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(pulse_ch=measure_chs, adcs=self.adc_chs, adc_trig_offset=self.cfg.device.readout.trig_offset[0], wait=True, syncdelay=syncdelay) 
 
-    def collect_counts(self, angle=None, threshold=None, shot_avg=1):
-        avgi, avgq = self.get_shots(angle=angle, shot_avg=shot_avg)
+    def collect_counts(self, angle=None, threshold=None):
+        avgi, avgq = self.get_shots(angle=angle)
         # collect shots for all adcs, then sorts into e, g based on >/< threshold and angle rotation
         shots = np.array([np.heaviside(avgi[i] - threshold[i], 0) for i in range(len(self.adc_chs))])
 
@@ -141,13 +143,15 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
     """
     def state_prep_pulse(self, qubits, **kwargs):
         # pass in kwargs via cfg.expt.state_prep_kwargs
+        self.X_pulse(q=qubits[0], play=True, pihalf=True)
+        # self.X_pulse(q=qubits[1], play=True, pihalf=True)
 
         # self.X_pulse(q=qubits[0], pihalf=False, play=True)
         # self.sync_all()
         # self.X_pulse(q=qubits[1], pihalf=False, play=True)
 
         # initialize to Eg
-        self.X_pulse(q=qubits[0], play=True, pihalf=True)
+        # self.X_pulse(q=qubits[0], play=True, pihalf=False)
 
         # # apply Eg -> Gf pulse on B: expect to end in Gf
         # type = self.cfg.device.qubit.pulses.pi_EgGf.type
@@ -172,21 +176,21 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
 
         # initialize ef pulse on qB
         qA, qB = qubits
-        self.handle_gauss_pulse(ch=self.qubit_chs[qB], name=f"ef_qubit{qB}", sigma=self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[qB], gen_ch=self.qubit_chs[qB]), freq=self.freq2reg(self.cfg.device.qubit.f_ef[qB], gen_ch=self.qubit_chs[qB]), phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[qB], play=False)
+        self.handle_gauss_pulse(ch=self.qubit_chs[qB], name=f"ef_qubit{qB}", sigma=self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[qB], gen_ch=self.qubit_chs[qB]), freq_MHz=self.cfg.device.qubit.f_ef[qB], phase_deg=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[qB], play=False)
 
         # initialize EgGf pulse
         # apply the sideband drive on qB, indexed by qA
         type = self.cfg.device.qubit.pulses.pi_EgGf.type[qA]
-        freq = self.freq2reg(self.cfg.device.qubit.f_EgGf[qA], gen_ch=self.swap_chs[qA])
+        freq_MHz = self.cfg.device.qubit.f_EgGf[qA]
         gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qA]
         sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qA], gen_ch=self.swap_chs[qA])
         if type == 'const':
-            self.handle_const_pulse(name=f'pi_EgGf_{qA}{qB}', ch=self.swap_chs[qA], length=sigma, freq=freq, phase=0, gain=gain, play=False) 
+            self.handle_const_pulse(name=f'pi_EgGf_{qA}{qB}', ch=self.swap_chs[qA], length=sigma, freq_MHz=freq_MHz, phase_deg=0, gain=gain, play=False) 
         elif type == 'gauss':
-            self.handle_gauss_pulse(name=f'pi_EgGf_{qA}{qB}', ch=self.swap_chs[qA], sigma=sigma, freq=freq, phase=0, gain=gain, play=False)
+            self.handle_gauss_pulse(name=f'pi_EgGf_{qA}{qB}', ch=self.swap_chs[qA], sigma=sigma, freq_MHz=freq_MHz, phase_deg=0, gain=gain, play=False)
         elif type == 'flat_top':
             flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.flat_length[qA], gen_ch=self.swap_chs[qA])
-            self.handle_flat_top_pulse(name=f'pi_EgGf_{qA}{qB}', ch=self.swap_chs[qA], sigma=sigma, flat_length=flat_length, freq=freq, phase=0, gain=gain, play=False) 
+            self.handle_flat_top_pulse(name=f'pi_EgGf_{qA}{qB}', ch=self.swap_chs[qA], sigma=sigma, flat_length=flat_length, freq_MHz=freq_MHz, phase_deg=0, gain=gain, play=False) 
         else: assert False, f'Pulse type {type} not supported.'
         self.sync_all(200)
 
@@ -200,7 +204,6 @@ class EgGfStateTomographyExperiment(Experiment):
     Experimental Config:
     expt = dict(
         reps: number averages per measurement basis iteration
-        shot_avg: number of shots to average over before sorting via threshold
         qubits: the qubits to perform the two qubit tomography on (drive applied to the second qubit)
     )
     """
@@ -266,7 +269,7 @@ class EgGfStateTomographyExperiment(Experiment):
 
         # Process the shots taken for the confusion matrix with the calibration angles
         for prep_state in self.calib_order:
-            counts = calib_prog_dict[prep_state].collect_counts(angle=angle, threshold=threshold, shot_avg=self.cfg.expt.shot_avg)
+            counts = calib_prog_dict[prep_state].collect_counts(angle=angle, threshold=threshold)
             data['counts_calib'].append(counts)
 
         # Tomography measurements
@@ -276,7 +279,7 @@ class EgGfStateTomographyExperiment(Experiment):
             cfg.expt.basis = basis
             tomo = EgGfStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
             tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
-            counts = tomo.collect_counts(angle=angle, threshold=threshold, shot_avg=self.cfg.expt.shot_avg)
+            counts = tomo.collect_counts(angle=angle, threshold=threshold)
             data['counts_tomo'].append(counts)
             self.pulse_dict.update({basis:tomo.pulse_dict})
 
@@ -300,3 +303,4 @@ class EgGfStateTomographyExperiment(Experiment):
             f.attrs['pulse_dict'] = json.dumps(self.pulse_dict, cls=NpEncoder)
             f.attrs['meas_order'] = json.dumps(self.meas_order, cls=NpEncoder)
             f.attrs['calib_order'] = json.dumps(self.calib_order, cls=NpEncoder)
+        return self.fname

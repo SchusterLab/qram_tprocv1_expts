@@ -181,6 +181,9 @@ class LengthRabiEgGfExperiment(Experiment):
         threshold = None
         if 'singleshot' in self.cfg.expt.keys():
             if self.cfg.expt.singleshot: threshold = self.cfg.device.readout.threshold
+
+        if 'gain' not in self.cfg.expt:
+            self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qA]
         
         for length in tqdm(lengths, disable=not progress):
             self.cfg.expt.sigma_test = float(length)
@@ -384,6 +387,9 @@ class EgGfFreqLenChevronExperiment(Experiment):
         self.cfg.expt.step = self.cfg.expt.step_len
         self.cfg.expt.expts = self.cfg.expt.expts_len
 
+        if 'gain' not in self.cfg.expt:
+            self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qA]
+
         threshold = None
         angle = None
 
@@ -431,26 +437,26 @@ class EgGfFreqLenChevronExperiment(Experiment):
 
         plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
         # plt.pcolormesh(x_sweep, y_sweep, np.reshape(data['avgi'][0], (len(outer_sweep), len(inner_sweep))), cmap='viridis', shading='auto')
-        plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
+        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='I [ADC level]')
 
-        plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
-        plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
+        plt.subplot(223, xlabel="Length [ns]", ylabel="Pulse Frequency [MHz]")
+        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='Q [ADC level]')
 
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
-        plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
+        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='I [ADC level]')
 
-        plt.subplot(224, xlabel="Gain [DAC units]")
-        plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
+        plt.subplot(224, xlabel="Length [ns]")
+        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_len is not None: plt.axvline(plot_len, color='r')
         plt.colorbar(label='Q [ADC level]')
@@ -462,3 +468,4 @@ class EgGfFreqLenChevronExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

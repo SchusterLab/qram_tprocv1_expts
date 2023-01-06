@@ -7,23 +7,43 @@ import cmath
 
 """
 Compare the fit between the check_measures (amps, avgi, and avgq by default) in data, using the compare_param_i-th parameter to do the comparison. Pick the best method of measurement out of the check_measures, and return the fit, fit_err, and any other get_best_data_params corresponding to that measurement.
+
+If fitfunc is specified, uses R^2 to determine best fit.
 """
-def get_best_fit(data, compare_param_i, check_measures=('amps', 'avgi', 'avgq'), get_best_data_params=(), override=None):
-    fit_errs = [data[f'fit_err_{check}'] for check in check_measures]
+def get_best_fit(data, fitfunc=None, prefixes=['fit'], check_measures=('amps', 'avgi', 'avgq'), get_best_data_params=(), override=None):
+    fit_errs = [data[f'{prefix}_err_{check}'] for check in check_measures for prefix in prefixes]
+
+    # fix the error matrix so "0" error is adjusted to inf
     for fit_err_check in fit_errs:
         for i, fit_err in enumerate(np.diag(fit_err_check)):
             if fit_err == 0: fit_err_check[i][i] = np.inf
-    fits = [data[f'fit_{check}'] for check in check_measures]
+
+    fits = [data[f'{prefix}_{check}'] for check in check_measures for prefix in prefixes]
+
     if override is not None and override in check_measures:
         i_best = np.argwhere(np.array(check_measures) == override)[0][0]
         print(i_best)
     else:
-        # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
-        # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i] / fit[compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
-        i_best = np.argmin([np.average(np.sqrt(np.abs(np.diag(fit_err) / fit))) for fit, fit_err in zip(fits, fit_errs)])
-    best_meas = check_measures[i_best]
+        if fitfunc is not None:
+            ydata = [data[check] for check in check_measures]  # need to figure out how to make this support multiple qubits readout
+            xdata = data['xpts']
+
+            # residual sum of squares
+            ss_res_checks = np.array([np.sum((fitfunc(xdata, *fit_check) - ydata_check)**2) for fit_check, ydata_check in zip(fits, ydata)])
+            # total sum of squares
+            ss_tot_checks = np.array([np.sum((np.mean(ydata_check) - ydata_check)**2) for ydata_check in ydata])
+            # R^2 value
+            r2 = 1- ss_res_checks / ss_tot_checks
+            i_best = np.argmin(r2)
+            
+        else:
+            # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
+            # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i] / fit[compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
+            i_best = np.argmin([np.average(np.sqrt(np.abs(np.diag(fit_err) / fit))) for fit, fit_err in zip(fits, fit_errs)])
 
     best_data = [fits[i_best], fit_errs[i_best]]
+    best_meas = check_measures[i_best]
+
     for param in get_best_data_params:
         best_data.append(data[f'{param}_{best_meas}'])
     return best_data
@@ -60,7 +80,7 @@ def fitlor(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*4
     if fitparams[0] is None: fitparams[0] = (ydata[0] + ydata[-1])/2
     if fitparams[1] is None: fitparams[1] = max(ydata) - min(ydata)
-    if fitparams[2] is None: fitparams[2] = xdata[np.argmax(ydata)]
+    if fitparams[2] is None: fitparams[2] = xdata[np.argmax(abs(ydata - fitparams[0]))]
     if fitparams[3] is None: fitparams[3] = (max(xdata)-min(xdata))/10
     pOpt = fitparams
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
@@ -127,13 +147,14 @@ def fitdecaysin(xdata, ydata, fitparams=None):
     max_phase = fft_phases[max_ind]
     if fitparams[0] is None: fitparams[0]=max(ydata)-min(ydata)
     if fitparams[1] is None: fitparams[1]=max_freq
+    # if fitparams[2] is None: fitparams[2]=0
     if fitparams[2] is None: fitparams[2]=max_phase*180/np.pi
     if fitparams[3] is None: fitparams[3]=max(xdata) - min(xdata)
     if fitparams[4] is None: fitparams[4]=np.mean(ydata)
     if fitparams[5] is None: fitparams[5]=xdata[0]
     bounds = (
-        [0.5*fitparams[0], 0.1/(max(xdata)-min(xdata)), -360, 0.1, np.min(ydata), xdata[0]-(xdata[-1]-xdata[0])],
-        [5*fitparams[0], 15/(max(xdata)-min(xdata)), 360, np.inf, np.max(ydata), xdata[-1]+(xdata[-1]-xdata[0])]
+        [0.75*fitparams[0], 0.1/(max(xdata)-min(xdata)), -360, 0.3*(max(xdata)-min(xdata)), np.min(ydata), xdata[0]-(xdata[-1]-xdata[0])],
+        [1.25*fitparams[0], 15/(max(xdata)-min(xdata)), 360, np.inf, np.max(ydata), xdata[-1]+(xdata[-1]-xdata[0])]
         )
     for i, param in enumerate(fitparams):
         if not (bounds[0][i] < param < bounds[1][i]):
@@ -158,32 +179,45 @@ def hangerfunc(x, *p):
 
 def hangerS21func(x, *p):
     f0, Qi, Qe, phi, scale, a0 = p
-    return a0 + np.abs(hangerfunc(x, *p))
+    Q0 = 1 / (1/Qi + np.real(1/Qe))
+    return a0 + np.abs(hangerfunc(x, *p)) - scale*(1-Q0/Qe)
+
+def hangerS21func_sloped(x, *p):
+    f0, Qi, Qe, phi, scale, a0, slope = p
+    return hangerS21func(x, f0, Qi, Qe, phi, scale, a0) + slope*(x-f0)
 
 def hangerphasefunc(x, *p):
     return np.angle(hangerfunc(x, *p))
 
 def fithanger(xdata, ydata, fitparams=None):
-    if fitparams is None: fitparams = [None]*6
+    if fitparams is None: fitparams = [None]*7
     if fitparams[0] is None: fitparams[0]=np.average(xdata)
     if fitparams[1] is None: fitparams[1]=5000
     if fitparams[2] is None: fitparams[2]=1000
     if fitparams[3] is None: fitparams[3]=0
-    if fitparams[4] is None: fitparams[4]=max(np.abs(ydata))-min(np.abs(ydata))
-    if fitparams[5] is None: fitparams[5]=np.average(np.abs(ydata))
+    if fitparams[4] is None: fitparams[4]=max(ydata)-min(ydata)
+    if fitparams[5] is None: fitparams[5]=np.average(ydata)
+    if fitparams[6] is None: fitparams[6]=(ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])
+
     print(fitparams)
+
     # bounds = (
     #     [np.min(xdata), -1e9, -1e9, -2*np.pi, (max(np.abs(ydata))-min(np.abs(ydata)))/10, -np.max(np.abs(ydata))],
     #     [np.max(xdata), 1e9, 1e9, 2*np.pi, (max(np.abs(ydata))-min(np.abs(ydata)))*10, np.max(np.abs(ydata))]
     #     )
-    # for i, param in enumerate(fitparams):
-    #     if not (bounds[0][i] < param < bounds[1][i]):
-    #         fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
-    #         print(f'Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}')
+    bounds = (
+        [np.min(xdata), -np.inf, -np.inf, -np.inf, 0, min(ydata), -np.inf],
+        [np.max(xdata), np.inf, np.inf, np.inf, np.inf, max(ydata), np.inf],
+        )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(f'Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}')
+
     pOpt = fitparams
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
-        pOpt, pCov = sp.optimize.curve_fit(hangerS21func, xdata, ydata, p0=fitparams) #, bounds=bounds)
+        pOpt, pCov = sp.optimize.curve_fit(hangerS21func_sloped, xdata, ydata, p0=fitparams) #, bounds=bounds)
         print(pOpt)
         # return pOpt, pCov
     except RuntimeError: 

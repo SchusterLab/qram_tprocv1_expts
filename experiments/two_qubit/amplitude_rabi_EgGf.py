@@ -604,3 +604,4 @@ class EgGfFreqGainChevronExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname

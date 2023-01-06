@@ -172,7 +172,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
             fitparams=None
             data['fit'], data['fit_err'] = fitter.fithanger(xdata, ydata, fitparams=fitparams)
             if isinstance(data['fit'], (list, np.ndarray)):
-                f0, Qi, Qe, phi, scale, a0 = data['fit']
+                f0, Qi, Qe, phi, scale, a0, slope = data['fit']
                 if verbose:
                     print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
                     print(f'Freq with maximum transmission: {xdata[np.argmax(ydata)]}')
@@ -200,7 +200,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
         plt.subplot(311, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}",  ylabel="Amps [ADC units]")
         plt.plot(xpts, data['amps'][1:-1],'o-')
         if fit:
-            plt.plot(xpts, fitter.hangerS21func(data["xpts"][1:-1], *data["fit"]))
+            plt.plot(xpts, fitter.hangerS21func_sloped(data["xpts"][1:-1], *data["fit"]))
         if findpeaks:
             # for peak in np.concatenate((data['maxpeaks'], data['minpeaks'])):
             for peak in data['minpeaks']:

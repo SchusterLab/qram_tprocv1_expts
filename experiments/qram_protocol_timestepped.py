@@ -11,9 +11,9 @@ import experiments.fitting as fitter
 
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram
-from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram
 
-class QramProtocolProgram(CliffordAveragerProgram):
+class QramProtocolProgram(AbstractStateTomo2QProgram):
     def initialize(self):
         super().initialize()
         cfg = AttrDict(self.cfg)
@@ -93,7 +93,7 @@ class QramProtocolProgram(CliffordAveragerProgram):
         # else: already done with protocol for this timestep
         return new_count_us
 
-    def body(self):
+    def state_prep_pulse(self, qubits=None, **kwargs):
         cfg=AttrDict(self.cfg)
 
         # ================= #
@@ -185,10 +185,12 @@ class QramProtocolExperiment(Experiment):
        step: time step, 
        expts: number of different time experiments, 
        reps: number of reps per time step,
-       singleshot: if true, uses threshold
+       tomo_2q: True/False whether to do 2q state tomography on state at last time step
+       tomo_qubits: the qubits on which to do the 2q state tomo
        singleshot_reps: reps per state for singleshot calibration
-       shot_avg: number shots to average over when classifying via threshold
+       post_process: 'threshold' (uses single shot binning), 'scale' (scale by ge_avgs), or None
        thresholds: (optional) don't rerun singleshot and instead use this
+       ge_avgs: (optional) don't rerun singleshot and instead use this
        angles: (optional) don't rerun singleshot and instead use this
     )
     """
@@ -213,91 +215,140 @@ class QramProtocolExperiment(Experiment):
         
         data={"xpts":[], "avgi":[[],[],[],[]], "avgq":[[],[],[],[]], "avgi_err":[[],[],[],[]], "avgq_err":[[],[],[],[]], "amps":[[],[],[],[]], "phases":[[],[],[],[]]}
 
+        self.meas_order = ['ZZ', 'ZX', 'ZY', 'XZ', 'XX', 'XY', 'YZ', 'YX', 'YY']
+        self.calib_order = ['gg', 'ge', 'eg', 'ee'] # should match with order of counts for each tomography measurement 
+        self.tomo_qubits = self.cfg.expt.tomo_qubits
+        data.update({'counts_tomo':[], 'counts_calib':[]})
+        calib_prog_dict = dict()
+
         # ================= #
         # Get single shot calibration for all 4 qubits
         # ================= #
 
-        thresholds_q = None
-        angles_q = None
-        fids_q = None
-        if self.cfg.expt.singleshot: 
-            if 'thresholds' in self.cfg.expt and 'angles' in self.cfg.expt:
-                thresholds_q = self.cfg.expt.thresholds
-                angles_q = self.cfg.expt.angles
-            else:
-                thresholds_q = [0]*4
-                angles_q = [0]*4
-                fids_q = [0]*4
+        post_process = self.cfg.expt.post_process
+        thresholds_q = ge_avgs_q = angles_q = fids_q = None
+        if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and not self.cfg.expt.tomo_2q:
+            angles_q = self.cfg.expt.angles
+            thresholds_q = self.cfg.expt.thresholds
+            ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
+            print('Re-using provided angles, thresholds, ge_avgs')
+        else:
+            thresholds_q = [0]*4
+            ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+            angles_q = [0]*4
+            fids_q = [0]*4
+            sscfg = AttrDict(deepcopy(self.cfg))
+            sscfg.expt.reps = sscfg.expt.singleshot_reps
+
+            # g states for q0, q1
+            sscfg.expt.qubits = [0, 1]
+            sscfg.expt.state_prep_kwargs = dict(prep_state='gg')
+            err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+            err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
+            Ig, Qg = err_tomo.get_shots(verbose=False)
+            calib_prog_dict.update({'gg':err_tomo})
+
+            # e states for q0, q1
+            for q, prep_state in enumerate(['eg', 'ge']):
+                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
+                Ie, Qe = err_tomo.get_shots(verbose=False)
+                shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                print(f'Qubit  ({q})')
+                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                thresholds_q[q] = threshold[0]
+                ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                angles_q[q] = angle
+                fids_q[q] = fid[0]
+                print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+                if self.cfg.expt.tomo_2q and q in self.tomo_qubits:
+                    calib_state = 'gg'
+                    qi = np.where(np.array(self.tomo_qubits)==q)[0][0]
+                    calib_state = calib_state[:qi] + 'e' + calib_state[qi+1:]
+                    calib_prog_dict.update({calib_state:err_tomo})
+
+            # g states for q2, q3
+            sscfg.expt.qubits = [2, 3]
+            sscfg.expt.state_prep_kwargs = dict(prep_state='gg')
+            err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+            err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
+            Ig, Qg = err_tomo.get_shots(verbose=False)
+
+            # e states for q2, q3
+            for q, prep_state in enumerate(['eg', 'ge'], start=2):
+                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
+                Ie, Qe = err_tomo.get_shots(verbose=False)
+                shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                print(f'Qubit  ({q})')
+                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                thresholds_q[q] = threshold[0]
+                ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                angles_q[q] = angle
+                fids_q[q] = fid[0]
+                print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+                if self.cfg.expt.tomo_2q and q in self.tomo_qubits:
+                    calib_state = 'gg'
+                    qi = np.where(np.array(self.tomo_qubits)==q)[0][0]
+                    calib_state = calib_state[:qi] + 'e' + calib_state[qi+1:]
+                    calib_prog_dict.update({calib_state:err_tomo})
+            
+            if self.cfg.expt.tomo_2q:
+                prep_state = 'ee'
                 sscfg = AttrDict(deepcopy(self.cfg))
-                sscfg.expt.reps = sscfg.expt.singleshot_reps
-
-                # g states for q0, q1
-                sscfg.expt.qubits = [0, 1]
-                sscfg.expt.state_prep_kwargs = dict(prep_state='gg')
+                sscfg.expt.qubits = self.tomo_qubits
+                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
                 err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
-                Ig, Qg = err_tomo.get_shots(verbose=False)
+                err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                calib_prog_dict.update({prep_state:err_tomo})
 
-                # e states for q0, q1
-                for q, prep_state in enumerate(['eg', 'ge']):
-                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
-                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
-                    Ie, Qe = err_tomo.get_shots(verbose=False)
-                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                    print(f'Qubit  ({q})')
-                    fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
-                    thresholds_q[q] = threshold[0]
-                    angles_q[q] = angle
-                    fids_q[q] = fid[0]
-                    print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+        print(f'thresholds={thresholds_q}')
+        print(f'angles={angles_q}')
+        print(f'ge_avgs={ge_avgs_q}')
 
-                # g states for q2, q3
-                sscfg.expt.qubits = [2, 3]
-                sscfg.expt.state_prep_kwargs = dict(prep_state='gg')
-                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
-                Ig, Qg = err_tomo.get_shots(verbose=False)
-
-                # e states for q2, q3
-                for q, prep_state in enumerate(['eg', 'ge'], start=2):
-                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
-                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=True, debug=debug)
-                    Ie, Qe = err_tomo.get_shots(verbose=False)
-                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                    print(f'Qubit  ({q})')
-                    fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
-                    thresholds_q[q] = threshold[0]
-                    angles_q[q] = angle
-                    fids_q[q] = fid[0]
-                    print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
-
-            print(f'thresholds={thresholds_q}')
-            print(f'angles={angles_q}')
+        # Process the shots taken for the confusion matrix with the calibration angles (for tomography)
+        for prep_state in self.calib_order:
+            counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+            data['counts_calib'].append(counts)
 
         # ================= #
         # Begin protocol stepping
         # ================= #
 
         adc_chs = self.cfg.hw.soc.adcs.readout.ch
-        if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
 
-        for timestep in tqdm(timesteps, disable=not progress):
+        for time_i, timestep in enumerate(tqdm(timesteps, disable=not progress)):
             self.cfg.expt.timestep = float(timestep)
-            protocol_prog = QramProtocolProgram(soccfg=self.soccfg, cfg=self.cfg)
-            avgi, avgq, avgi_err, avgq_err = protocol_prog.acquire_threshold(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, shot_avg=self.cfg.expt.shot_avg)
 
-            for q in range(4):
-                data['avgi'][q].append(avgi[adc_chs[q]])
-                data['avgq'][q].append(avgq[adc_chs[q]])
-                data['avgi_err'][q].append(avgi_err[adc_chs[q]])
-                data['avgq_err'][q].append(avgq_err[adc_chs[q]])
-                data['amps'][q].append(np.abs(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
-                data['phases'][q].append(np.angle(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
+            # Perform 2q state tomo only on last timestep
+            if self.cfg.expt.tomo_2q and time_i == len(timesteps) - 1:
+                for basis in tqdm(self.meas_order):
+                    # print(basis)
+                    cfg = AttrDict(deepcopy(self.cfg))
+                    cfg.expt.basis = basis
+                    cfg.expt.qubits = self.tomo_qubits
+                    tomo_prog = QramProtocolProgram(soccfg=self.soccfg, cfg=self.cfg)
+                    tomo_prog.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                    counts = tomo_prog.collect_counts(angle=angle, threshold=threshold)
+                    data['counts_tomo'].append(counts)
+                    self.pulse_dict.update({basis:tomo_prog.pulse_dict})
 
-            data['xpts'].append(float(timestep))
-            # print()
+            else:
+                protocol_prog = QramProtocolProgram(soccfg=self.soccfg, cfg=self.cfg)
+                avgi, avgq, avgi_err, avgq_err = protocol_prog.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
+
+                for q in range(4):
+                    data['avgi'][q].append(avgi[adc_chs[q]])
+                    data['avgq'][q].append(avgq[adc_chs[q]])
+                    data['avgi_err'][q].append(avgi_err[adc_chs[q]])
+                    data['avgq_err'][q].append(avgq_err[adc_chs[q]])
+                    data['amps'][q].append(np.abs(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
+                    data['phases'][q].append(np.angle(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
+
+                data['xpts'].append(float(timestep))
+
         data['end_times'] = protocol_prog.end_times_us
         print('end times', protocol_prog.end_times_us)
 
@@ -379,3 +430,4 @@ class QramProtocolExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname
