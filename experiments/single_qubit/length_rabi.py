@@ -85,7 +85,8 @@ class LengthRabiProgram(AveragerProgram):
         # define pi_test_sigma as the pulse that we are calibrating with ramsey, update in outer loop over averager program
         self.pi_test_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest])
         self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
-        self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.gain[qTest] # gain of the pulse we are trying to calibrate
+        if 'gain' in self.cfg.expt: self.gain_pi_test = self.cfg.expt.gain
+        # else: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.gain[qTest] # gain of the pulse we are trying to calibrate
         # define pisigma_ge as the ge pulse for the qubit that we are calibrating the pulse on
         self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qTest], gen_ch=self.qubit_chs[qTest]) # default pi_ge value
         self.f_ge_init_reg = self.f_ge_reg[qTest]
@@ -112,7 +113,7 @@ class LengthRabiProgram(AveragerProgram):
         # add readout pulses to respective channels
         if self.res_ch_types[qTest] == 'mux4':
             self.set_pulse_registers(ch=self.res_chs[qTest], style="const", length=self.readout_lengths_dac[qTest], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_lengths_dac[qTest])
+        else: self.set_pulse_registers(ch=self.res_chs[qTest], style="const", freq=self.f_res_reg[qTest], phase=0, gain=cfg.device.readout.gain[qTest], length=self.readout_lengths_dac[qTest])
 
 
         self.sync_all(200)

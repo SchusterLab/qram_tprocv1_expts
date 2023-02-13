@@ -38,7 +38,7 @@ class ACStarkShiftProgram(RAveragerProgram):
         mixer_freq = 0 # MHz
         mux_freqs = None # MHz
         mux_gains = None
-        ro_ch = None
+        ro_ch = self.adc_ch
         if self.res_ch_type == 'int4':
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
         elif self.res_ch_type == 'mux4':
@@ -49,7 +49,6 @@ class ACStarkShiftProgram(RAveragerProgram):
             mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
             mux_gains = [0]*4
             mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
-            ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
         # declare qubit dacs
