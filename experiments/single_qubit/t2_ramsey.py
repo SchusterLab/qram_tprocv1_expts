@@ -56,7 +56,7 @@ class RamseyProgram(RAveragerProgram):
         mixer_freq = 0 # MHz
         mux_freqs = None # MHz
         mux_gains = None
-        ro_ch = None
+        ro_ch = self.adc_chs[qTest]
         if self.res_ch_types[qTest] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
         elif self.res_ch_types[qTest] == 'mux4':
@@ -67,7 +67,6 @@ class RamseyProgram(RAveragerProgram):
             mux_freqs[qTest] = cfg.device.readout.frequency[qTest]
             mux_gains = [0]*4
             mux_gains[qTest] = cfg.device.readout.gain[qTest]
-            ro_ch=self.adc_chs[qTest]
         self.declare_gen(ch=self.res_chs[qTest], nqz=cfg.hw.soc.dacs.readout.nyquist[qTest], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
         self.declare_readout(ch=self.adc_chs[qTest], length=self.readout_lengths_adc[qTest], freq=cfg.device.readout.frequency[qTest], gen_ch=self.res_chs[qTest])
 
@@ -119,7 +118,7 @@ class RamseyProgram(RAveragerProgram):
         # add readout pulses to respective channels
         if self.res_ch_types[qTest] == 'mux4':
             self.set_pulse_registers(ch=self.res_chs[qTest], style="const", length=self.readout_lengths_dac[qTest], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_lengths_dac[qTest])
+        else: self.set_pulse_registers(ch=self.res_chs[qTest], style="const", freq=self.f_res_reg[qTest], phase=0, gain=cfg.device.readout.gain[qTest], length=self.readout_lengths_dac[qTest])
 
         # initialize wait registers
         self.safe_regwi(self.q_rps[qTest], self.r_wait, self.us2cycles(cfg.expt.start))

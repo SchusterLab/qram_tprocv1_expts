@@ -145,7 +145,10 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data 
 
-        xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq + data['xpts'][1:-1]
+        if 'mixer_freq' in self.cfg.hw.soc.dacs.qubit:
+            xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq + data['xpts'][1:-1]
+        else: 
+            xpts = data['xpts'][1:-1]
 
         plt.figure(figsize=(9, 11))
         plt.subplot(311, title=f"Qubit {self.cfg.expt.qubit} Spectroscopy (Gain {self.cfg.expt.gain})", ylabel="Amplitude [ADC units]")

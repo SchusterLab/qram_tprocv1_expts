@@ -47,7 +47,7 @@ class AmplitudeRabiEFProgram(RAveragerProgram):
         mixer_freq = 0 # MHz
         mux_freqs = None # MHz
         mux_gains = None
-        ro_ch = None
+        ro_ch = self.adc_ch
         if self.res_ch_type == 'int4':
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
         elif self.res_ch_type == 'mux4':
@@ -58,7 +58,6 @@ class AmplitudeRabiEFProgram(RAveragerProgram):
             mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
             mux_gains = [0]*4
             mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
-            ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
 
         # declare qubit dacs
@@ -95,6 +94,8 @@ class AmplitudeRabiEFProgram(RAveragerProgram):
             self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
 
         # play test ef pulse
+        print('f_ge', self.f_ge)
+        print('f_ef', self.f_ef)
         if cfg.expt.sigma_test > 0:
             if cfg.expt.pulse_type.lower() == "gauss":
                 self.set_pulse_registers(
@@ -115,7 +116,7 @@ class AmplitudeRabiEFProgram(RAveragerProgram):
         self.mathi(self.q_rp, self.r_gain, self.r_gain2, "+", 0)
         self.pulse(ch=self.qubit_ch)
 
-        # go back to ground state if not in f
+        # go back to ground state if in e to distinguish between e and f
         self.setup_and_pulse(
             ch=self.qubit_ch,
             style="arb",

@@ -113,7 +113,7 @@ class LengthRabiProgram(AveragerProgram):
         # add readout pulses to respective channels
         if self.res_ch_types[qTest] == 'mux4':
             self.set_pulse_registers(ch=self.res_chs[qTest], style="const", length=self.readout_lengths_dac[qTest], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_lengths_dac[qTest])
+        else: self.set_pulse_registers(ch=self.res_chs[qTest], style="const", freq=self.f_res_reg[qTest], phase=0, gain=cfg.device.readout.gain[qTest], length=self.readout_lengths_dac[qTest])
 
 
         self.sync_all(200)
