@@ -24,6 +24,9 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.cfg.update(cfg.expt)
         self.checkZZ = self.cfg.expt.checkZZ
         self.checkEF = self.cfg.expt.checkEF
+        if self.checkEF:
+            if 'pulse_ge' not in self.cfg.expt: self.pulse_ge = True
+            else: self.pulse_ge = self.cfg.expt.pulse_ge
 
         self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         self.qubits = self.cfg.expt.qubits
@@ -127,7 +130,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if self.checkZZ:
             self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
             self.sync_all(5)
-        if self.checkEF:
+        if self.checkEF and self.pulse_ge:
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
             self.sync_all(5)
 
@@ -245,8 +248,8 @@ class AmplitudeRabiExperiment(Experiment):
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
             xdata = data['xpts']
-            # fitparams=[None, 1 / (max(xdata) - min(xdata)), None, None, None, None]
             fitparams=None
+            # fitparams=[None, 1 / (max(xdata) - min(xdata)), None, None, None, None]
 
             p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
             p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)

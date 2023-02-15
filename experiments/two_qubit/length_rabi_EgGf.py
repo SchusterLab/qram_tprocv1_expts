@@ -149,6 +149,7 @@ class LengthRabiEgGfExperiment(Experiment):
         reps: number of reps,
         gain: gain to use for the qubit pulse
         pulse_type: 'gauss' or 'const'
+        qubits: qubit 0 goes E->G, apply drive on qubit 1 (g->f)
         singleshot: (optional) if true, uses threshold
     )
     """
@@ -214,6 +215,8 @@ class LengthRabiEgGfExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
+            fitparams = None
+
             pA_avgi, pCovA_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][0][:-1], fitparams=None)
             pA_avgq, pCovA_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][0][:-1], fitparams=None)
             pA_amps, pCovA_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][0][:-1], fitparams=None)
@@ -225,7 +228,8 @@ class LengthRabiEgGfExperiment(Experiment):
             data['fitA_err_amps'] = pCovA_amps
 
             pB_avgi, pCovB_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][1][:-1], fitparams=None)
-            pB_avgq, pCovB_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][1][:-1], fitparams=None)
+            # fitparams = [20, 1/0.6, None, None, None, None]
+            pB_avgq, pCovB_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][1][:-1], fitparams=fitparams)
             pB_amps, pCovB_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][1][:-1], fitparams=None)
             data['fitB_avgi'] = pB_avgi   
             data['fitB_avgq'] = pB_avgq

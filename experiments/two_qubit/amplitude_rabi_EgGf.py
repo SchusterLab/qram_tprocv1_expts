@@ -72,8 +72,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
                 gen_chs.append(self.qubit_chs[q])
 
-        # declare swap dac indexed by qA (since the the drive is always applied to qB)
-        mixer_freq = 0
+        # declare swap dac indexed by qA (since the the drive is always applied to qB) mixer_freq = 0
         if self.swap_ch_types[qA] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.swap.mixer_freq[qA]
         if self.swap_chs[qA] not in gen_chs: 
@@ -187,7 +186,8 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         rounds: number repetitions of experiment sweep
         pi_EgGf_sigma: gaussian sigma for pulse length [us] (default: from pi_ge in config)
         pulse_type: 'gauss' or 'const'
-       singleshot: (optional) if true, uses threshold
+        qubits: qubit 0 goes E->G, apply drive on qubit 1 (g->f)
+        singleshot: (optional) if true, uses threshold
     )
     """
 

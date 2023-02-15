@@ -85,7 +85,8 @@ class LengthRabiProgram(AveragerProgram):
         # define pi_test_sigma as the pulse that we are calibrating with ramsey, update in outer loop over averager program
         self.pi_test_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest])
         self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
-        self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.gain[qTest] # gain of the pulse we are trying to calibrate
+        if 'gain' in self.cfg.expt: self.gain_pi_test = self.cfg.expt.gain 
+        else: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.gain[qTest] # gain of the pulse we are trying to calibrate
         # define pisigma_ge as the ge pulse for the qubit that we are calibrating the pulse on
         self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qTest], gen_ch=self.qubit_chs[qTest]) # default pi_ge value
         self.f_ge_init_reg = self.f_ge_reg[qTest]
@@ -96,10 +97,10 @@ class LengthRabiProgram(AveragerProgram):
             self.f_ge_init_reg = self.f_Q1_ZZ_reg[qA] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
             self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
             self.f_pi_test_reg = self.f_Q1_ZZ_reg[qA] # freq we are trying to calibrate
-            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] # gain of the pulse we are trying to calibrate
+            if 'gain' not in self.cfg.expt: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] # gain of the pulse we are trying to calibrate
         if self.checkEF:
             self.f_pi_test_reg = self.f_ef_reg[qTest] # freq we are trying to calibrate
-            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.gain[qTest] # gain of the pulse we are trying to calibrate
+            if 'gain' not in self.cfg.expt: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.gain[qTest] # gain of the pulse we are trying to calibrate
 
         # add qubit pulses to respective channels
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
@@ -240,7 +241,9 @@ class LengthRabiExperiment(Experiment):
         #     plt.plot(xpts_ns[1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
 
         plt.figure(figsize=(10,8))
-        plt.subplot(211, title=f"Length Rabi (Qubit Gain {self.cfg.expt.gain})", ylabel="I [adc level]")
+        if 'gain' in self.cfg.expt: gainlf.cfg.expt.gain
+        else: gain = self.cfg.device.qubit.pulses.pi_ge.gain[self.cfg.expt.qubits[-1]] # gain of the pulse we are trying to calibrate
+        plt.subplot(211, title=f"Length Rabi (Qubit Gain {gain})", ylabel="I [adc level]")
         plt.plot(xpts_ns[1:-1], data["avgi"][1:-1],'o-')
         if fit:
             p = data['fit_avgi']

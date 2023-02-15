@@ -150,7 +150,7 @@ class RamseyProgram(RAveragerProgram):
         # play pi/2 pulse with advanced phase (all regs except phase are already set by previous pulse)
         if self.qubit_ch_types[qTest] == 'int4':
             self.bitwi(self.q_rps[qTest], self.r_phase3, self.r_phase2, '<<', 16)
-            self.bitwi(self.q_rps[qTest], self.r_phase3, self.r_phase3, '|', self.f_ef_reg[qTest])
+            self.bitwi(self.q_rps[qTest], self.r_phase3, self.r_phase3, '|', self.f_pi_test_reg)
             self.mathi(self.q_rps[qTest], self.r_phase, self.r_phase3, "+", 0)
         else: self.mathi(self.q_rps[qTest], self.r_phase, self.r_phase2, "+", 0)
         self.pulse(ch=self.qubit_chs[qTest])
@@ -211,6 +211,7 @@ class RamseyExperiment(Experiment):
                     subcfg.update({key: [value]*num_qubits_sample})
 
         ramsey = RamseyProgram(soccfg=self.soccfg, cfg=self.cfg)
+        
         x_pts, avgi, avgq = ramsey.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
  
         avgi = avgi[0][0]
@@ -229,10 +230,11 @@ class RamseyExperiment(Experiment):
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
             # Remove the first and last point from fit in case weird edge measurements
-            # fitparams=[2, 1, 0, 10, 0]
-            p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=None)
-            p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=None)
-            p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][:-1], fitparams=None)
+            fitparams = None
+            # fitparams=[8, 0.5, 0, 20, None, None]
+            p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
+            p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
+            p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
             data['fit_amps'] = p_amps

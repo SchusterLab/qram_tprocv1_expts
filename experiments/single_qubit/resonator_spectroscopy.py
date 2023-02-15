@@ -337,7 +337,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         plt.xlabel("Resonator Frequency [MHz]")
         plt.ylabel("Resonator Gain [DAC level]")
         # plt.clim(vmin=-0.2, vmax=0.2)
-        plt.clim(vmin=None, vmax=None)
+        plt.clim(vmin=-10, vmax=5)
         plt.colorbar(label='Amps-Avg [ADC level]')
         plt.show()
         
@@ -455,7 +455,6 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
         plt.ylabel("Resonator frequency")
         plt.xlabel("DC current [mA]")
         # plt.ylabel("DC voltage [V]")
-        # plt.clim(vmin=-0.10, vmax=0.07)
         plt.clim(vmin=None, vmax=None)
         plt.colorbar(label='Amps [ADC level]')
 

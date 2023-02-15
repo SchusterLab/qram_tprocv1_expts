@@ -118,7 +118,7 @@ class CliffordAveragerProgram(AveragerProgram):
         phase_deg = self.overall_phase[q] + extra_phase
         sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
         if pihalf:
-            gain = gain//2
+            sigma = sigma//2
             name += 'half'
         if neg: phase_deg -= 180
         type = self.cfg.device.qubit.pulses.pi_ge.type[q]
@@ -191,6 +191,14 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq_MHz=self.cfg.device.readout.frequency[q], phase=0, gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)
                 self.prog_gen_chs.append(self.res_chs[q])
 
+        # get aliases for the sigmas we need in clock cycles
+        self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
+        self.pi_ef_sigmas_us = self.cfg.device.qubit.pulses.pi_ef.sigma
+        self.pi_Q1_ZZ_sigmas_us = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma
+        self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
+        self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
+        self.pi_Q1_ZZ_types = self.cfg.device.qubit.pulses.pi_Q1_ZZ.type
+
         # declare qubit dacs, add qubit pi_ge pulses
         for q in self.qubits:
             mixer_freq = 0
@@ -200,9 +208,20 @@ class CliffordAveragerProgram(AveragerProgram):
             self.X_pulse(q=q, play=False)
             self.prog_gen_chs.append(self.qubit_chs[q])
 
+            # assume ge and ef pulses are gauss
+            pi_sigma_cycles = self.us2cycles(self.pi_sigmas_us[q], gen_ch=self.qubit_chs[q])
+            self.add_gauss(ch=self.qubit_chs[q], name=f"qubit{q}", sigma=pi_sigma_cycles, length=pi_sigma_cycles*4)
+            pi_ef_sigma_cycles = self.us2cycles(self.pi_ef_sigmas_us[q], gen_ch=self.qubit_chs[q])
+            self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=pi_ef_sigma_cycles, length=pi_ef_sigma_cycles*4)
+            if q != 1:
+                pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
+                self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
+
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+
+
 
     # """
     # Collect shots for all adcs, rotates by given angle (degrees), and averages over shot_avg adjacent shots
@@ -256,7 +275,7 @@ class CliffordAveragerProgram(AveragerProgram):
     Collect shots for all adcs, rotates by given angle (degrees), and averages over all shots (i.e. shot_avg=number shots) if requested.
     Returns avgi, avgq, avgi_err, avgq_err which avgi/q are avg over shot_avg and avgi/q_err is (std dev of each group of shots)/sqrt(shot_avg)
     """
-    def get_shots(self, angle=None, avg_shots=False, verbose=True, return_err=False):
+    def get_shots(self, angle=None, avg_shots=False, verbose=False, return_err=False):
         shot_avg = 1
         if avg_shots: shot_avg = len(self.di_buf[0])
 
