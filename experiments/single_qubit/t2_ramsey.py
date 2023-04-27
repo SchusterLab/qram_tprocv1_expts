@@ -131,6 +131,14 @@ class RamseyProgram(RAveragerProgram):
         if self.checkZZ: qA, qTest = self.qubits
         else: qTest = self.qubits[0]
 
+        # Phase reset all channels
+        for ch in self.gen_chs.keys():
+            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+            self.sync_all()
+        self.sync_all(10)
+
         # initializations as necessary
         if self.checkZZ:
             self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")

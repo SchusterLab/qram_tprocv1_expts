@@ -78,7 +78,7 @@ def hist(data, plot=True, span=None, verbose=True):
 
     if span is None:
         span = (np.max(np.concatenate((Ie_new, Ig_new))) - np.min(np.concatenate((Ie_new, Ig_new))))/2
-    xlims = [xg-span, xg+span]
+    xlims = [(xg+xe)/2-span, (xg+xe)/2+span]
     ylims = [yg-span, yg+span]
 
     if plot:
@@ -228,11 +228,20 @@ class HistogramProgram(AveragerProgram):
     def body(self):
         cfg=AttrDict(self.cfg)
 
+        # Phase reset all channels
+        for ch in self.gen_chs.keys():
+            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+            self.sync_all()
+        self.sync_all(10)
+
         if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
             if cfg.device.qubit.pulses.pi_ge.type == 'gauss':
                 self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
             else: # const pulse
                 self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=self.pi_gain, length=self.pi_sigma)
+            self.sync_all()
         self.sync_all()
 
         if self.cfg.expt.pulse_f:
@@ -409,15 +418,17 @@ class SingleShotOptExperiment(Experiment):
             for g_ind, gain in enumerate(gainpts):
                 for l_ind, l in enumerate(lenpts):
                     shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
+                    shot.cfg = self.cfg
                     shot.cfg.device.readout.frequency = f
                     shot.cfg.device.readout.gain = gain
-                    shot.cfg.device.readout.length = l 
+                    shot.cfg.device.readout.readout_length = l 
                     check_e = True
                     if 'check_f' not in self.cfg.expt: check_f = False
                     else:
                         check_f = self.cfg.expt.check_f
                         check_e = not check_f
                     shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_e=check_e, check_f=check_f, qubit=self.cfg.expt.qubit)
+                    # print(shot.cfg)
                     shot.go(analyze=False, display=False, progress=False, save=False)
                     results = shot.analyze(verbose=False)
                     fid[f_ind, g_ind, l_ind] = results['fids'][0] if not check_f else results['fids'][1]
@@ -444,7 +455,7 @@ class SingleShotOptExperiment(Experiment):
         print(fpts)
         print(gainpts)
         print(lenpts)
-        print(f'Max fidelity {fid[imax]}')
+        print(f'Max fidelity {100*fid[imax]} %')
         print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
 
         return imax
@@ -458,6 +469,7 @@ class SingleShotOptExperiment(Experiment):
         gainpts = data['gainpts'] # middle sweep, index 1
         lenpts = data['lenpts'] # inner sweep, index 2
 
+        # lenpts = [data['lenpts'][0]]
         for g_ind, gain in enumerate(gainpts):
             for l_ind, l in enumerate(lenpts):
                 plt.plot(fpts, 100*fid[:,g_ind, l_ind], 'o-', label=f'gain: {gain:.2}, len [us]: {l}')

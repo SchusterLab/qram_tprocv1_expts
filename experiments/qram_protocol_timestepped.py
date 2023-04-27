@@ -12,7 +12,7 @@ import experiments.fitting as fitter
 
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, sort_counts
 
 class QramProtocolProgram(AbstractStateTomo2QProgram):
     def initialize(self):
@@ -38,8 +38,9 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.prog_gen_chs.append(self.swap_chs[qA])
 
         # get aliases for the sigmas we need in clock cycles
-        self.pi_EgGf_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma
         self.pi_EgGf_types = self.cfg.device.qubit.pulses.pi_EgGf.type
+        assert all(type == 'flat_top' for type in self.pi_EgGf_types)
+        self.pi_EgGf_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma
 
         # update timestep in outer loop over averager program
         self.timestep_us = cfg.expt.timestep
@@ -47,22 +48,29 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         # add qubit pulses to respective channels
         for q in self.all_qubits:
             if q != 1:
-                pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.qubit_chs[1])
+                pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
                 if self.pi_EgGf_types[q] == 'gauss':
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}", sigma=pi_EgGf_sigma_cycles, length=pi_EgGf_sigma_cycles*4)
+                elif self.pi_EgGf_types[q] == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
 
         self.sync_all(200)
 
     def handle_next_pulse(self, count_us, ch, freq_reg, type, phase, gain, sigma_us, waveform):
         if type == 'gauss':
             new_count_us = count_us + 4 * sigma_us
-        else:
+        else: # const or flat_top
             new_count_us = count_us + sigma_us
 
         if new_count_us <= self.timestep_us: # fit entire pulse
             # print('full pulse')
             if type == 'gauss':
                 self.setup_and_pulse(ch=ch, style='arb', freq=freq_reg, phase=phase, gain=gain, waveform=waveform)
+            elif type == 'flat_top':
+                sigma_ramp_cycles = 3
+                flat_length_cycles = self.us2cycles(sigma_us, gen_ch=ch) - sigma_ramp_cycles*4
+                self.setup_and_pulse(ch=ch, style='flat_top', freq=freq_reg, phase=phase, gain=gain, length=flat_length_cycles, waveform=f"{waveform}_ramp")
             elif type == 'const':
                 self.setup_and_pulse(ch=ch, style='const', freq=freq_reg, phase=phase, gain=gain, length=self.us2cycles(sigma_us, gen_ch=ch))
 
@@ -79,9 +87,37 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 cut_length_cycles = self.us2cycles(cut_length_us, gen_ch=ch)
                 if cut_length_cycles > 3: # pulse length needs to be at least 2 cycles, add another cycle for buffer
                     self.setup_and_pulse(ch=ch, style='const', freq=freq_reg, phase=phase, gain=gain, length=cut_length_cycles)
+            elif type == 'flat_top' :
+                sigma_ramp_cycles = 3
+                flat_length_cycles = self.us2cycles(cut_length_us, gen_ch=ch) - sigma_ramp_cycles*4
+                if flat_length_cycles >= 0:
+                    self.setup_and_pulse(ch=ch, style='flat_top', freq=freq_reg, phase=phase, gain=gain, length=flat_length_cycles, waveform=f"{waveform}_ramp")
 
         # else: already done with protocol for this timestep
         return new_count_us
+
+    def collect_counts_post_select(self, angle=None, threshold=None, postselect=True, postselect_q=1):
+        if not postselect: return self.collect_counts(angle, threshold)
+
+        avgi, avgq = self.get_shots(angle=angle)
+        # collect shots for all adcs, then sorts into e, g based on >/< threshold and angle rotation
+        shots = np.array([np.heaviside(avgi[i] - threshold[i], 0) for i in range(len(self.adc_chs))])
+
+        qA, qB = self.cfg.expt.tomo_qubits
+        shots_psq0 = [[], []] # postselect qubit measured as 0
+        shots_psq1 = [[], []] # postselect qubit measured as 1
+        for i_shot, shot_psq in enumerate(shots[postselect_q]):
+            if shot_psq:
+                shots_psq1[0].append(shots[qA][i_shot])
+                shots_psq1[1].append(shots[qB][i_shot])
+            else:
+                shots_psq0[0].append(shots[qA][i_shot])
+                shots_psq0[1].append(shots[qB][i_shot])
+        
+        counts_psq0 = sort_counts(shotsA=shots_psq0[0], shotsB=shots_psq0[1])
+        counts_psq1 = sort_counts(shotsA=shots_psq1[0], shotsB=shots_psq1[1])
+        return (counts_psq0, counts_psq1)
+
 
     def state_prep_pulse(self, qubits=None, **kwargs):
         cfg=AttrDict(self.cfg)
@@ -92,26 +128,38 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         init_state = self.cfg.expt.init_state
 
-        if init_state == '|0>(|0>+|1>)':
+        if init_state == '|0>|0+1>':
             self.Y_pulse(q=1, play=True, pihalf=True)
             self.sync_all()
 
-        elif init_state == '|1>(|0>+|1>)':
+        elif init_state == '|1>|0>':
+            self.Y_pulse(q=0, play=True, pihalf=False)
+            self.sync_all()
+
+        elif init_state == '|1>|0+1>':
             self.Y_pulse(q=0, play=True)
-            self.sync_all()
+            self.sync_all(0)
 
-            pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0], gen_ch=self.qubit_chs[1]) // 2
+            # pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0], gen_ch=self.qubit_chs[1])
             phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
-            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
+            # self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
+            # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0] // 2, waveform='qubit1_ZZ0_half')
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
             self.sync_all()
 
-        elif init_state == '(|0>+|1>)(|0>+|1>)':
+        elif init_state == '|1>|1>':
+            self.Y_pulse(q=0, play=True)
+            self.sync_all(0)
+
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
+            self.sync_all()
+
+        elif init_state == '|0+1>|0+1>':
             self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
             self.sync_all()
 
             freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-            gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
             sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
             pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
             phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
@@ -119,12 +167,29 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
             self.sync_all()
 
-        elif init_state == '(|0>+i|1>)(|0>+|1>)':
+        elif init_state == '|0+1>|0>':
+            self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
+            self.sync_all()
+
+        elif init_state == '|0+1>|1>':
+            self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
+            self.sync_all()
+
+            ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
+            waveform = f'qubit0_ZZ1'
+            freq = self.freq2reg(self.cfg.device.qubit.f_ge[0] + ZZs[0, 1], gen_ch=self.qubit_chs[0])
+            gain = self.cfg.device.qubit.pulses.pi_ge.gain[0] //2
+            sigma_cycles = self.us2cycles(self.pi_sigmas_us[0], gen_ch=self.qubit_chs[0])
+            self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
+            self.sync_all()
+
+        elif init_state == '|0+i1>|0+1>':
             self.X_pulse(q=0, play=True, pihalf=True, neg=True) # -> 0+i1
             self.sync_all()
 
             freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-            gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
             sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
             pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
             phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
@@ -148,7 +213,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         self.sync_all()
 
         # apply Eg-Gf with qA=2: 2. gfgg -> ggeg [path 1]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=self.deg2reg(-90, gen_ch=self.swap_chs[2]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
 
@@ -166,7 +231,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         self.sync_all()
 
         # apply Eg-Gf with qA=3: 5. gfgg -> ggge [path 2]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=self.deg2reg(-90, gen_ch=self.swap_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
 
@@ -177,6 +242,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
+        print(f'Total protocol time (us): {count_us}')
+
+        if self.cfg.expt.post_select:
+            self.setup_measure(qubit=1, basis='X', play=True, flag=None)
 
         # # ================= #
         # # Reverse protocol
@@ -230,17 +299,18 @@ class QramProtocolExperiment(Experiment):
     Qram protocol over time sweep
     Experimental Config
     expt = dict(
-       start: start protocol time [us],
-       step: time step, 
-       expts: number of different time experiments, 
-       reps: number of reps per time step,
-       tomo_2q: True/False whether to do 2q state tomography on state at last time step
-       tomo_qubits: the qubits on which to do the 2q state tomo
-       singleshot_reps: reps per state for singleshot calibration
-       post_process: 'threshold' (uses single shot binning), 'scale' (scale by ge_avgs), or None
-       thresholds: (optional) don't rerun singleshot and instead use this
-       ge_avgs: (optional) don't rerun singleshot and instead use this
-       angles: (optional) don't rerun singleshot and instead use this
+        start: start protocol time [us],
+        step: time step, 
+        expts: number of different time experiments, 
+        reps: number of reps per time step,
+        tomo_2q: True/False whether to do 2q state tomography on state at last time step
+        tomo_qubits: the qubits on which to do the 2q state tomo
+        singleshot_reps: reps per state for singleshot calibration
+        post_process: 'threshold' (uses single shot binning), 'scale' (scale by ge_avgs), or None
+        calib_apply_q1_pi2: initialize Q1 in 0+1 for all calibrations
+        thresholds: (optional) don't rerun singleshot and instead use this
+        ge_avgs: (optional) don't rerun singleshot and instead use this
+        angles: (optional) don't rerun singleshot and instead use this
     )
     """
 
@@ -266,9 +336,11 @@ class QramProtocolExperiment(Experiment):
         data={"xpts":[], "avgi":[[],[],[],[]], "avgq":[[],[],[],[]], "avgi_err":[[],[],[],[]], "avgq_err":[[],[],[],[]], "amps":[[],[],[],[]], "phases":[[],[],[],[]]}
 
         self.meas_order = ['ZZ', 'ZX', 'ZY', 'XZ', 'XX', 'XY', 'YZ', 'YX', 'YY']
+        # self.meas_order = ['ZZ']
         self.calib_order = ['gg', 'ge', 'eg', 'ee'] # should match with order of counts for each tomography measurement 
         self.tomo_qubits = self.cfg.expt.tomo_qubits
-        data.update({'counts_tomo':[], 'counts_calib':[]})
+        if self.cfg.expt.post_select: data.update({'counts_tomo_ps0':[], 'counts_tomo_ps1':[],'counts_calib':[]})
+        else: data.update({'counts_tomo':[], 'counts_calib':[]})
 
         # ================= #
         # Get single shot calibration for qubits
@@ -294,7 +366,7 @@ class QramProtocolExperiment(Experiment):
             calib_prog_dict = dict()
             for prep_state in tqdm(self.calib_order):
                 # print(prep_state)
-                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=sscfg.expt.calib_apply_q1_pi2)
                 err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
                 err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
                 calib_prog_dict.update({prep_state:err_tomo})
@@ -325,7 +397,7 @@ class QramProtocolExperiment(Experiment):
                 data['counts_calib'].append(counts)
 
 
-            if self.cfg.expt.expts > 1: # Do single shot for non-tomo qubits also
+            if self.cfg.expt.expts > 1 or (self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits): # Do single shot for non-tomo qubits also
                 
                 sscfg.expt.tomo_qubits = []
                 for q in range(4):
@@ -371,6 +443,7 @@ class QramProtocolExperiment(Experiment):
 
         adc_chs = self.cfg.hw.soc.adcs.readout.ch
         self.pulse_dict = dict()
+        if 'post_select' not in self.cfg.expt: cfg.expt.post_select = False
 
         for time_i, timestep in enumerate(tqdm(timesteps, disable=not progress)):
             self.cfg.expt.timestep = float(timestep)
@@ -387,9 +460,12 @@ class QramProtocolExperiment(Experiment):
                     # print('basis', basis)
                     # print(progs2json([tomo_prog.dump_prog()]))
                     # print()
-                    tomo_prog.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
-                    counts = tomo_prog.collect_counts(angle=angles_q, threshold=thresholds_q)
-                    data['counts_tomo'].append(counts)
+                    avgi, avgq = tomo_prog.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                    counts = tomo_prog.collect_counts_post_select(angle=angles_q, threshold=thresholds_q, postselect=self.cfg.expt.post_select, postselect_q=1)
+                    if cfg.expt.post_select:
+                        data['counts_tomo_ps0'].append(counts[0])
+                        data['counts_tomo_ps1'].append(counts[1])
+                    else: data['counts_tomo'].append(counts)
                     self.pulse_dict.update({basis:tomo_prog.pulse_dict})
 
             else:
@@ -407,7 +483,7 @@ class QramProtocolExperiment(Experiment):
 
                 data['xpts'].append(float(timestep))
 
-        if cfg.expt.expts > 1:
+        if self.cfg.expt.expts > 1:
             data['end_times'] = protocol_prog.end_times_us
             print('end times', protocol_prog.end_times_us)
 
@@ -423,7 +499,7 @@ class QramProtocolExperiment(Experiment):
             data=self.data
         return data
 
-    def display(self, data=None, err=True, **kwargs):
+    def display(self, data=None, err=True, saveplot=False, **kwargs):
         if data is None:
             data=self.data 
 
@@ -431,8 +507,9 @@ class QramProtocolExperiment(Experiment):
 
         if self.cfg.expt.post_process == 'threshold' or self.cfg.expt.post_process == 'scale':
             plt.figure(figsize=(14,8))
+            if saveplot: plt.style.use('dark_background')
             plt_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-            plt.title(f"Qram Protocol")
+            # plt.title(f"Qram Protocol", fontsize=20)
 
             if err:
                 plt.errorbar(xpts_ns, data["avgi"][0], fmt='o-', yerr=data["avgi_err"][0], label='Q0')
@@ -441,10 +518,10 @@ class QramProtocolExperiment(Experiment):
                 plt.errorbar(xpts_ns, data["avgi"][3], fmt='o-', yerr=data["avgi_err"][3], label='Q3')
 
             else:
-                plt.plot(xpts_ns, data["avgi"][0],'.-', label='Q0')
-                plt.plot(xpts_ns, data["avgi"][1],'.-', label='Q1')
-                plt.plot(xpts_ns, data["avgi"][2],'.-', label='Q2')
-                # plt.plot(xpts_ns, data["avgi"][3],'.-', label='Q3')
+                plt.plot(xpts_ns, data["avgi"][0],'-', marker='o', markersize=8, label='Q0')
+                plt.plot(xpts_ns, data["avgi"][1],'-', marker='*', markersize=12, label='Q1')
+                plt.plot(xpts_ns, data["avgi"][2],'-', marker='s', markersize=7, label='Q2')
+                plt.plot(xpts_ns, data["avgi"][3],'-', marker='^', markersize=8, label='Q3')
 
             # plt.fill_between(xpts_ns, data["avgi"][0] - data["avgi_err"][0], data["avgi"][0] + data["avgi_err"][0], color=plt_colors[0], alpha=0.4, linestyle='-', edgecolor=plt_colors[0])
             # plt.fill_between(xpts_ns, data["avgi"][1] - data["avgi_err"][1], data["avgi"][1] + data["avgi_err"][1], color=plt_colors[1], alpha=0.4, linestyle='-', edgecolor=plt_colors[1])
@@ -457,10 +534,11 @@ class QramProtocolExperiment(Experiment):
 
             if self.cfg.expt.post_process == 'threshold':
                 plt.ylim(-0.02, 1.02)
-            plt.legend()
-            plt.xlabel('Time [ns]')
-            plt.ylabel("G/E Population")
-            plt.grid(linewidth=0.3)
+            plt.legend(fontsize=26)
+            plt.xlabel('Time [ns]', fontsize=26)
+            plt.ylabel("Population", fontsize=26)
+            plt.tick_params(labelsize=24)
+            # plt.grid(linewidth=0.3)
 
         else:
             plt.figure(figsize=(14,20))
@@ -485,7 +563,14 @@ class QramProtocolExperiment(Experiment):
             plt.plot(xpts_ns, data["avgq"][3],'o-')
 
         plt.tight_layout()
+
+        if saveplot:
+            plot_filename = 'qram_protocol.png'
+            plt.savefig(plot_filename, format='png', bbox_inches='tight', transparent = True)
+            print('Saved', plot_filename)
+
         plt.show()
+
 
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

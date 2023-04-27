@@ -84,6 +84,18 @@ class T1Program(RAveragerProgram):
 
     def body(self):
         cfg=AttrDict(self.cfg)
+
+
+        # print('WARNING: DOING SOME FUNKY THINGS STILL!!')
+        # freq = self.freq2reg(801.6560698688288, gen_ch=0)
+        # waveform = f'q2_pi'
+        # sigma_cycles = self.us2cycles(0.047, gen_ch=0)
+        # self.add_gauss(ch=0, name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+        # gain = 20682
+        # self.setup_and_pulse(ch=0, style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
+        # self.sync_all()
+        # self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+
         self.pulse(ch=self.qubit_ch)
         self.sync_all() # align channels
         self.sync(self.q_rp, self.r_wait) # wait for the time stored in the wait variable register

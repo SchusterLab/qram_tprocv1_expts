@@ -90,6 +90,12 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
         self.safe_regwi(self.q_rps[qA], self.r_freq_A_update, self.f_start)
 
         # add qubit pulses to respective channels
+        if self.cfg.expt.pulse_type == 'flat_top':
+            self.add_gauss(ch=self.qubit_chs[qA], name="qubit", sigma=3, length=3*4)
+        elif self.cfg.expt.pulse_type == 'gauss':
+            length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA])
+            self.add_gauss(ch=self.qubit_chs[qA], name="qubit", sigma=length, length=length*4)
+
         self.add_gauss(ch=self.qubit_chs[qB], name="pi_qubitB", sigma=self.pi_sigmaB, length=self.pi_sigmaB*4)
 
         # add readout pulses to respective channels
@@ -110,13 +116,13 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
             self.sync_all(5)
 
         # sweep qubit A frequency
-        self.set_pulse_registers(
-            ch=self.qubit_chs[qA],
-            style="const",
-            freq=0, # freq set by update below
-            phase=0,
-            gain=cfg.expt.gain,
-            length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA]))
+        length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA])
+        if self.cfg.expt.pulse_type == 'flat_top':
+            self.set_pulse_registers(ch=self.qubit_chs[qA], style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.gain, length=length, waveform="qubit") # play probe pulse
+        elif self.cfg.expt.pulse_type == 'gauss':
+            self.set_pulse_registers(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_start, gain=cfg.expt.gain, waveform="qubit") # play probe pulse
+        elif self.cfg.expt.pulse_type == 'const':
+            self.set_pulse_registers(ch=self.qubit_chs[qA], style="const", freq=self.f_start, phase=0, gain=cfg.expt.gain, length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA]))
         self.mathi(self.q_rps[qA], self.r_freq_A, self.r_freq_A_update, "+", 0)
         self.pulse(ch=self.qubit_chs[qA])
         self.sync_all(5)

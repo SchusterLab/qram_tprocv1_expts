@@ -206,7 +206,7 @@ def fithanger(xdata, ydata, fitparams=None):
     #     [np.max(xdata), 1e9, 1e9, 2*np.pi, (max(np.abs(ydata))-min(np.abs(ydata)))*10, np.max(np.abs(ydata))]
     #     )
     bounds = (
-        [np.min(xdata), -np.inf, -np.inf, -np.inf, 0, min(ydata), -np.inf],
+        [np.min(xdata), 0, 0, -np.inf, 0, min(ydata), -np.inf],
         [np.max(xdata), np.inf, np.inf, np.inf, np.inf, max(ydata), np.inf],
         )
     for i, param in enumerate(fitparams):
@@ -217,7 +217,7 @@ def fithanger(xdata, ydata, fitparams=None):
     pOpt = fitparams
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
-        pOpt, pCov = sp.optimize.curve_fit(hangerS21func_sloped, xdata, ydata, p0=fitparams) #, bounds=bounds)
+        pOpt, pCov = sp.optimize.curve_fit(hangerS21func_sloped, xdata, ydata, p0=fitparams, bounds=bounds)
         print(pOpt)
         # return pOpt, pCov
     except RuntimeError: 

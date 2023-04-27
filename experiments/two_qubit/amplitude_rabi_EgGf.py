@@ -73,6 +73,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                 gen_chs.append(self.qubit_chs[q])
 
         # declare swap dac indexed by qA (since the the drive is always applied to qB) mixer_freq = 0
+        mixer_freq = 0
         if self.swap_ch_types[qA] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.swap.mixer_freq[qA]
         if self.swap_chs[qA] not in gen_chs: 
@@ -84,13 +85,19 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
             self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # get gain register for swap ch
-        if self.swap_ch_types[qA] == 'int4':
-            self.r_gain_swap = self.sreg(self.swap_chs[qA], "addr")
-        else: self.r_gain_swap = self.sreg(self.swap_chs[qA], "gain")
+        # if self.swap_ch_types[qA] == 'int4':
+        #     self.r_gain_swap = self.sreg(self.swap_chs[qA], "addr")
+        # else: self.r_gain_swap = self.sreg(self.swap_chs[qA], "gain")
+        assert self.swap_ch_types[qA] == 'full'
+        self.r_gain_swap = self.sreg(self.swap_chs[qA], "gain")
         # register to hold the current sweep gain
         self.r_gain_swap_update = 4
         # initialize gain
         self.safe_regwi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap_update, self.cfg.expt.start)
+        if cfg.expt.pulse_type.lower() == "flat_top": # the gain for the const section of a flat top pulse needs to be set to 2*the ramp gain
+            self.r_gain_swap_const = self.sreg(self.swap_chs[qA], "gain2")
+            self.r_gain_swap_update_const = 5
+            self.safe_regwi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap_update_const, self.cfg.expt.start//2)
 
         self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
         self.pi_ef_sigmaB = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qB], self.qubit_chs[qB])
@@ -102,7 +109,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         if cfg.expt.pulse_type.lower() == "gauss" and cfg.expt.pi_EgGf_sigma > 0:
             self.add_gauss(ch=self.swap_chs[qA], name="pi_EgGf_swap", sigma=self.pi_EgGf_sigma, length=self.pi_EgGf_sigma*4)
         elif cfg.expt.pulse_type.lower() == "flat_top" and cfg.expt.pi_EgGf_sigma > 0:
-            self.add_gauss(ch=self.swap_chs[qA], name="pi_EgGf_swap", sigma=5, length=20)
+            self.add_gauss(ch=self.swap_chs[qA], name="pi_EgGf_swap", sigma=3, length=3*4)
 
         # add readout pulses to respective channels
         if self.res_ch_types[0] == 'mux4':
@@ -133,7 +140,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                     gain=0, # gain set by update
                     waveform="pi_EgGf_swap")
             elif pulse_type == 'flat_top':
-                length = self.us2cycles(cfg.expt.pi_EgGf_sigma, gen_ch=self.swap_chs[qA])-5*4
+                length = self.us2cycles(cfg.expt.pi_EgGf_sigma, gen_ch=self.swap_chs[qA])-3*4
                 if length > 0:
                     self.set_pulse_registers(
                         ch=self.swap_chs[qA],
@@ -143,6 +150,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                         gain=0, # gain set by update
                         length=length,
                         waveform="pi_EgGf_swap")
+                self.mathi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap_const, self.r_gain_swap_update_const, "+", 0)
             else: # const
                 self.set_pulse_registers(
                     ch=self.swap_chs[qA],
@@ -173,6 +181,8 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         step = self.cfg.expt.step
         if self.swap_ch_types[qA] == 'int4': step = step << 16
         self.mathi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap_update, self.r_gain_swap_update, '+', step) # update test gain
+        if self.cfg.expt.pulse_type.lower() == "flat_top": # the gain for the const section of a flat top pulse needs to be set to 2*the ramp gain
+            self.mathi(self.ch_page(self.swap_chs[qA]), self.r_gain_swap_update_const, self.r_gain_swap_update_const, '+', step//2) # update test gain
 
 class AmplitudeRabiEgGfExperiment(Experiment):
     """
@@ -558,7 +568,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         pass
             
 
-    def display(self, data=None, fit=True, plot_freq=None, plot_gain=None, **kwargs):
+    def display(self, data=None, fit=True, plot_freq=None, plot_gain=None, saveplot=False, **kwargs):
         if data is None:
             data=self.data 
 
@@ -568,37 +578,66 @@ class EgGfFreqGainChevronExperiment(Experiment):
         y_sweep = outer_sweep
         x_sweep = inner_sweep
 
-        plt.figure(figsize=(14,8))
+        if saveplot: plt.style.use('dark_background')
+        plt.figure(figsize=(14,10))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Gain")
 
-
-        plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
+        if saveplot:
+            plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})')
+            ax = plt.gca()
+            ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+            ax.tick_params(axis='both', which='major', labelsize=16)
+        else: plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
-        plt.colorbar(label='I [ADC level]')
+        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
+        else: plt.colorbar(label='I [ADC level]')
 
-        plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
+        if saveplot:
+            plt.subplot(223)
+            ax = plt.gca()
+            ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+            ax.set_xlabel("Pulse Amplitude [arb. units]", fontsize=18)
+            ax.tick_params(axis='both', which='major', labelsize=16)
+        else: plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
-        plt.colorbar(label='Q [ADC level]')
+        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
+        else: plt.colorbar(label='Q [ADC level]')
 
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
+        if saveplot:
+            ax = plt.gca()
+            ax.tick_params(axis='both', which='major', labelsize=16)
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
-        plt.colorbar(label='I [ADC level]')
+        if saveplot:
+            plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
+        else: plt.colorbar(label='I [ADC level]')
 
-        plt.subplot(224, xlabel="Gain [DAC units]")
+        if saveplot:
+            plt.subplot(224)
+            ax = plt.gca()
+            ax.set_xlabel("Pulse Amplitude [arb. units]", fontsize=18)
+            ax.tick_params(axis='both', which='major', labelsize=16)
+        else: plt.subplot(224, xlabel="Gain [DAC units]")
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
-        plt.colorbar(label='Q [ADC level]')
-
+        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
+        else: plt.colorbar(label='Q [ADC level]')
 
         plt.tight_layout()
+
+        if saveplot:
+            plot_filename = f'gain_freq_chevron_EgGf{self.cfg.expt.qubits[0]}{self.cfg.expt.qubits[1]}.png'
+            plt.savefig(plot_filename, format='png', bbox_inches='tight', transparent = True)
+            print('Saved', plot_filename)
+
         plt.show()
 
     def save_data(self, data=None):

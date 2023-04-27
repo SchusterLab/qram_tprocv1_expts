@@ -8,6 +8,8 @@ from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
 
+# ====================================================== #
+
 class AmplitudeRabiProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
@@ -89,15 +91,17 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.gain_ge_init = self.cfg.device.qubit.pulses.pi_ge.gain[qTest]
         # define pi2sigma as the pulse that we are calibrating with ramsey
         self.pi_test_sigma = self.us2cycles(cfg.expt.sigma_test, gen_ch=self.qubit_chs[qTest])
-        self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
+        if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
         if self.checkZZ:
             self.pisigma_ge_qA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
             self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qA], gen_ch=self.qubit_chs[qTest])
             self.f_ge_init_reg = self.f_Q1_ZZ_reg[qA] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
             self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
-            self.f_pi_test_reg = self.f_Q1_ZZ_reg[qA] # freq we are trying to calibrate
+            if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_Q1_ZZ_reg[qA] # freq we are trying to calibrate
         if self.checkEF:
             self.f_pi_test_reg = self.f_ef_reg[qTest] # freq we are trying to calibrate
+        if 'f_pi_test' in self.cfg.expt:
+            self.f_pi_test_reg = self.freq2reg(self.cfg.expt.f_pi_test, gen_ch=self.qubit_chs[qTest])
         
         # add qubit and readout pulses to respective channels
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
@@ -126,15 +130,24 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if self.checkZZ: qA, qTest = self.qubits
         else: qTest = self.qubits[0]
 
+        # Phase reset all channels
+        for ch in self.gen_chs.keys():
+            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+            self.sync_all()
+        self.sync_all(10)
+
         # initializations as necessary
-        if self.checkZZ:
+        if self.checkZZ:                    
             self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
-            self.sync_all(5)
+            self.sync_all(0)
         if self.checkEF and self.pulse_ge:
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
-            self.sync_all(5)
+            self.sync_all(0)
 
         if self.pi_test_sigma > 0:
+            print(self.f_pi_test_reg)
             if cfg.expt.pulse_type.lower() == "gauss":
                 self.set_pulse_registers(
                     ch=self.qubit_chs[qTest],
@@ -150,7 +163,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
                     freq=self.f_pi_test_reg,
                     phase=0,
                     gain=0, # gain set by update
-                    length=self.sigma_test)
+                    length=self.us2cycles(self.cfg.expt.sigma_test))
         self.mathi(self.q_rps[qTest], self.r_gain, self.r_gain2, "+", 0)
         self.pulse(ch=self.qubit_chs[qTest])
 
@@ -174,7 +187,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         step = self.cfg.expt.step
         if self.qubit_ch_types[qTest] == 'int4': step = step << 16
         self.mathi(self.q_rps[qTest], self.r_gain2, self.r_gain2, '+', step) # update test gain
-
+        
 # ====================================================== #
                       
 class AmplitudeRabiExperiment(Experiment):
@@ -208,6 +221,9 @@ class AmplitudeRabiExperiment(Experiment):
                 elif not(isinstance(value, list)):
                     subcfg.update({key: [value]*num_qubits_sample})
 
+        # print('FUNKY WARNING')
+        # qA, qTest = self.cfg.expt.qubits
+
         if self.cfg.expt.checkZZ:
             assert len(self.cfg.expt.qubits) == 2
             qA, qTest = self.cfg.expt.qubits
@@ -216,13 +232,20 @@ class AmplitudeRabiExperiment(Experiment):
         else: qTest = self.cfg.expt.qubits[0]
 
         if 'sigma_test' not in self.cfg.expt:
-            if not self.cfg.expt.checkZZ:
+            if self.cfg.expt.checkZZ:
+                self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qA]
+            elif self.cfg.expt.checkEF:
+                self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
+            else: 
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest]
-            else: self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qA]
         
         amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
+        # print(amprabi)
+        # from qick.helpers import progs2json
+        # print(progs2json([amprabi.dump_prog()]))
         
         xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)
+        # print(amprabi)
 
         # shots_i = amprabi.di_buf[adc_ch].reshape((self.cfg.expt.expts, self.cfg.expt.reps)) / amprabi.readout_length_adc
         # shots_i = np.average(shots_i, axis=1)
@@ -230,6 +253,9 @@ class AmplitudeRabiExperiment(Experiment):
         # shots_q = amprabi.dq_buf[adc_ch] / amprabi.readout_length_adc
         # print(np.std(shots_i), np.std(shots_q))
         
+        # print('WARNING DOING SOMETHING FUNKY')
+        # avgi = avgi[qTest][0]
+        # avgq = avgq[qTest][0]
         avgi = avgi[0][0]
         avgq = avgq[0][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
@@ -249,7 +275,11 @@ class AmplitudeRabiExperiment(Experiment):
             # Remove the first and last point from fit in case weird edge measurements
             xdata = data['xpts']
             fitparams=None
-            # fitparams=[None, 1 / (max(xdata) - min(xdata)), None, None, None, None]
+
+            ydata = data["amps"]
+            print(abs(xdata[np.argwhere(ydata==max(ydata))[0,0]] - xdata[np.argwhere(ydata==min(ydata))[0,0]]))
+            fitparams=[max(ydata)-min(ydata), 1/2 / abs(xdata[np.argwhere(ydata==max(ydata))[0,0]] - xdata[np.argwhere(ydata==min(ydata))[0,0]]), None, None, None, None]
+            # fitparams=[max(ydata)-min(ydata), 1/2 / (max(xdata) - min(xdata)), None, None, None, None]
 
             p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
             p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
@@ -342,19 +372,24 @@ class AmplitudeRabiChevronExperiment(Experiment):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
     def acquire(self, progress=False, debug=False):
-        q_ind = self.cfg.expt.qubit
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
-                if isinstance(value, list):
-                    subcfg.update({key: value[q_ind]})
-                elif isinstance(value, dict):
+                if isinstance(value, dict):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
-                            if isinstance(value3, list):
-                                value2.update({key3: value3[q_ind]})                                
-        
-        if 'sigma_test' not in self.cfg.expt:
-            self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+
+        if self.cfg.expt.checkZZ:
+            assert len(self.cfg.expt.qubits) == 2
+            qA, qTest = self.cfg.expt.qubits
+            assert qA != 1
+            assert qTest == 1
+        else: qTest = self.cfg.expt.qubits[0]
 
         freqpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
         data={"xpts":[], "freqpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
@@ -363,14 +398,21 @@ class AmplitudeRabiChevronExperiment(Experiment):
         self.cfg.expt.start = self.cfg.expt.start_gain
         self.cfg.expt.step = self.cfg.expt.step_gain
         self.cfg.expt.expts = self.cfg.expt.expts_gain
+        if 'sigma_test' not in self.cfg.expt:
+            if self.cfg.expt.checkZZ:
+                self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qA]
+            elif self.cfg.expt.checkEF:
+                self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
+            else:
+                self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest]
         for freq in tqdm(freqpts):
-            self.cfg.device.qubit.f_ge = freq
+            self.cfg.expt.f_pi_test = freq
             amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
         
             xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False, debug=debug)
         
-            avgi = avgi[adc_ch][0]
-            avgq = avgq[adc_ch][0]
+            avgi = avgi[0][0]
+            avgq = avgq[0][0]
             amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
             phases = np.angle(avgi+1j*avgq) # Calculating the phase        
 

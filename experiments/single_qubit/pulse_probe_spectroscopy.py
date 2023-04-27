@@ -30,7 +30,6 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
 
         self.q_rp=self.ch_page(self.qubit_ch) # get register page for qubit_ch
-        self.r_freq=self.sreg(self.qubit_ch, "freq") # get frequency register for qubit_ch    
         self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
         
         self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
@@ -69,17 +68,39 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         self.f_step = self.freq2reg(cfg.expt.step, gen_ch=self.qubit_ch)
 
         # add qubit and readout pulses to respective channels
-        self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_start, phase=0, gain=cfg.expt.gain, length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch))
+        if self.cfg.expt.pulse_type == 'flat_top':
+            self.add_gauss(ch=self.qubit_ch, name="qubit", sigma=3, length=3*4)
+        elif self.cfg.expt.pulse_type == 'gauss':
+            length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch)
+            self.add_gauss(ch=self.qubit_ch, name="qubit", sigma=length, length=length*4)
+        elif self.cfg.expt.pulse_type == 'const':
+            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_start, phase=0, gain=cfg.expt.gain, length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch))
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
         else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
 
+        # initialize registers
+        if self.qubit_ch_type == 'int4':
+            self.r_freq = self.sreg(self.qubit_ch, "freq") # get freq register for qubit_ch    
+        else: self.r_freq = self.sreg(self.qubit_ch, "freq") # get freq register for qubit_ch    
+        self.r_freq2 = 4
+        self.safe_regwi(self.q_rp, self.r_freq2, self.f_start)
+
         self.synci(200) # give processor some time to configure pulses
     
     def body(self):
         cfg=AttrDict(self.cfg)
+
+        length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch)
+        if self.cfg.expt.pulse_type == 'flat_top':
+            self.set_pulse_registers(ch=self.qubit_ch, style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.gain, length=length, waveform="qubit") # play probe pulse
+            self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
+        elif self.cfg.expt.pulse_type == 'gauss':
+            self.set_pulse_registers(ch=self.qubit_ch, style="arb", phase=0, freq=self.f_start, gain=cfg.expt.gain, waveform="qubit") # play probe pulse
+            self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
         self.pulse(ch=self.qubit_ch) # play probe pulse
+
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
         self.measure(pulse_ch=self.res_ch, 
              adcs=[self.adc_ch],
@@ -88,7 +109,9 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
              syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
     
     def update(self):
-        self.mathi(self.q_rp, self.r_freq, self.r_freq, '+', self.f_step) # update frequency list index
+        self.mathi(self.q_rp, self.r_freq2, self.r_freq2, '+', self.f_step) # update freq
+
+        # self.mathi(self.q_rp, self.r_freq, self.r_freq, '+', self.f_step) # update frequency list index
  
 # ====================================================== #
 

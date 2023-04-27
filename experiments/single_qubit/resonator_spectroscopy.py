@@ -2,112 +2,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm_notebook as tqdm
 import time
+from copy import deepcopy
 
 from qick import *
 from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 
 import experiments.fitting as fitter
-
-"""
-Measures the resonant frequency of the readout resonator when the qubit is in its ground state: sweep readout pulse frequency and look for the frequency with the maximum measured amplitude.
-
-The resonator frequency is stored in the parameter cfg.device.readouti.frequency.
-
-Note that harmonics of the clock frequency (6144 MHz) will show up as "infinitely"  narrow peaks!
-"""
-class ResonatorSpectroscopyProgram(AveragerProgram):
-    def __init__(self, soccfg, cfg):
-        self.cfg = AttrDict(cfg)
-        self.cfg.update(self.cfg.expt)
-
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-        
-        super().__init__(soccfg, self.cfg)
-
-    def initialize(self):
-        cfg = AttrDict(self.cfg)
-        self.cfg.update(self.cfg.expt)
-        
-        self.adc_ch = cfg.hw.soc.adcs.readout.ch
-        self.res_ch = cfg.hw.soc.dacs.readout.ch
-        self.res_ch_type = cfg.hw.soc.dacs.readout.type
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch
-        self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
-
-        self.frequency = cfg.expt.frequency
-        self.freqreg = self.freq2reg(self.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
-        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
-        if self.cfg.expt.pulse_f: 
-            self.f_ef = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
-        self.res_gain = cfg.device.readout.gain
-        self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
-        self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
-        self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
-
-        mask = None
-        mixer_freq = 0 # MHz
-        mux_freqs = None # MHz
-        mux_gains = None
-        ro_ch = self.adc_ch
-        if self.res_ch_type == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-        elif self.res_ch_type == 'mux4':
-            assert self.res_ch == 6
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs = [0]*4
-            mux_freqs[cfg.expt.qubit] = self.frequency
-            mux_gains = [0]*4
-            mux_gains[cfg.expt.qubit] = self.res_gain
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
-        # print(f'readout freq {mixer_freq} +/- {self.frequency}')
-
-        mixer_freq = 0
-        if self.qubit_ch_type == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
-
-        self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=self.frequency, gen_ch=self.res_ch)
-
-        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma, gen_ch=self.qubit_ch)
-        self.pi_gain = cfg.device.qubit.pulses.pi_ge.gain
-        if self.cfg.expt.pulse_f:
-            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
-            self.pi_ef_gain = cfg.device.qubit.pulses.pi_ef.gain
-        
-        if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
-            self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
-        if self.cfg.expt.pulse_f:
-            self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
-
-        if self.res_ch_type == 'mux4':
-            self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.freqreg, phase=0, gain=self.res_gain, length=self.readout_length_dac)
-        self.synci(200) # give processor some time to configure pulses
-
-    def body(self):
-        # pass
-        cfg=AttrDict(self.cfg)
-        if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=self.pi_gain, waveform="pi_qubit")
-            self.sync_all() # align channels
-        if self.cfg.expt.pulse_f:
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef, phase=0, gain=self.pi_ef_gain, waveform="pi_ef_qubit")
-            self.sync_all() # align channels
-        self.measure(
-            pulse_ch=self.res_ch,
-            adcs=[self.adc_ch],
-            adc_trig_offset=cfg.device.readout.trig_offset,
-            wait=True,
-            syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
-
-# ====================================================== #
+from experiments.single_qubit.single_shot import HistogramProgram
 
 class ResonatorSpectroscopyExperiment(Experiment):
     """
-    Resonator Spectroscopy Experiment
+    Resonator Spectroscopy Experiment - just reuses histogram experiment because somehow it's better
     Experimental Config
     expt = dict(
         start: start frequency (MHz), 
@@ -137,12 +43,18 @@ class ResonatorSpectroscopyExperiment(Experiment):
 
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
         for f in tqdm(xpts, disable=not progress):
-            self.cfg.expt.frequency = f
-            rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
+            # self.cfg.expt.frequency = f
+            cfg = AttrDict(deepcopy(self.cfg))
+            cfg.device.readout.frequency = f
+            rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
+            # rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
             # print(rspec)
             avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-            avgi = avgi[0][0]
-            avgq = avgq[0][0]
+            # avgi = avgi[0][0]
+            # avgq = avgq[0][0]
+            datai, dataq = rspec.collect_shots()
+            avgi = np.average(datai)
+            avgq = np.average(dataq)
             amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
             phase = np.angle(avgi+1j*avgq) # Calculating the phase
 
@@ -172,6 +84,8 @@ class ResonatorSpectroscopyExperiment(Experiment):
             data['fit'], data['fit_err'] = fitter.fithanger(xdata, ydata, fitparams=fitparams)
             if isinstance(data['fit'], (list, np.ndarray)):
                 f0, Qi, Qe, phi, scale, a0, slope = data['fit']
+                if 'lo' in self.cfg.hw:
+                    f0 = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + f0)
                 if verbose:
                     print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
                     print(f'Freq with maximum transmission: {xdata[np.argmax(ydata)]}')
@@ -209,8 +123,11 @@ class ResonatorSpectroscopyExperiment(Experiment):
             for peak in data['minpeaks']:
                 plt.axvline(peak[0], linestyle='--', color='0.2')
                 print(f'Found peak [MHz]: {peak[0]}')
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + 812.37), c='k', ls='--')
-        # plt.axvline(7687.5, c='k', ls='--')
+        # plt.axvline(5787.75)
+        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency + 0.75), c='k', ls='--')
+        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency + 0.1), c='k', ls='--')
+        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency - 0.8), c='k', ls='--') # |0>|1>
+        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency - 0.7), c='k', ls='--') # |0>|0+1>
 
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')
@@ -267,12 +184,18 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
             data["phases"].append([])
 
             for f in tqdm(xpts, disable=True):
-                self.cfg.expt.frequency = f
-                rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-                self.prog = rspec
+                cfg = AttrDict(deepcopy(self.cfg))
+                cfg.device.readout.frequency = f
+                rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
                 avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-                avgi = avgi[0][0]
-                avgq = avgq[0][0]
+                datai, dataq = rspec.collect_shots()
+                avgi = np.average(datai)
+                avgq = np.average(dataq)
+                # rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
+                self.prog = rspec
+                # avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                # avgi = avgi[0][0]
+                # avgq = avgq[0][0]
                 amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
                 phase = np.angle(avgi+1j*avgq) # Calculating the phase
                 data["avgi"][-1].append(avgi)
@@ -321,6 +244,9 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         y_sweep = outer_sweep
         x_sweep = inner_sweep
 
+        # for iy, y in enumerate(y_sweep):
+        #     plt.plot(x_sweep, amps[iy])
+
         # THIS IS CORRECT EXTENT LIMITS FOR 2D PLOTS
         plt.figure(figsize=(10,8))
         plt.pcolormesh(x_sweep, y_sweep, amps, cmap='viridis', shading='auto')
@@ -335,13 +261,13 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
             print(f'High power peak [MHz]: {fit_highpow[2]}')
             print(f'Low power peak [MHz]: {fit_lowpow[2]}')
             print(f'Lamb shift [MHz]: {data["lamb_shift"]}')
-            
-        plt.title(f"Resonator Spectroscopy Power Sweep")
+
+        # plt.title(f"Resonator Spectroscopy Power Sweep")
         plt.xlabel("Resonator Frequency [MHz]")
         plt.ylabel("Resonator Gain [DAC level]")
-        # plt.clim(vmin=-0.2, vmax=0.2)
-        plt.clim(vmin=-10, vmax=5)
-        plt.colorbar(label='Amps-Avg [ADC level]')
+        # # plt.clim(vmin=-0.2, vmax=0.2)
+        # # plt.clim(vmin=-10, vmax=5)
+        # plt.colorbar(label='Amps-Avg [ADC level]')
         plt.show()
         
     def save_data(self, data=None):
