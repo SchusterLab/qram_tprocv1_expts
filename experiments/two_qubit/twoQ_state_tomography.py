@@ -296,7 +296,7 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
         # self.X_pulse(q=qubits[1], pihalf=False, play=True)
 
         # initialize to Eg
-        self.X_pulse(q=1, play=True, pihalf=True)
+        self.X_pulse(q=1, play=True, pihalf=False)
         # self.Xef_pulse(q=1, play=True, pihalf=False)
 
         # # apply Eg -> Gf pulse on B: expect to end in Gf
@@ -337,12 +337,6 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
         qubits = self.cfg.expt.tomo_qubits
         qA, qB = qubits
         self.cfg.expt.state_prep_kwargs = None
-
-        # if self.qubit_ch_types[qB] == 'int4':
-        #     self.r_gain = self.sreg(self.qubit_chs[qB], "addr") # get gain register for qubit_ch    
-        # else: self.r_gain = self.sreg(self.qubit_chs[qB], "gain") # get gain register for qubit_ch    
-        # self.r_gain2 = 4
-        # self.safe_regwi(self.q_rps[qB], self.r_gain2, self.cfg.expt.start)
 
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
         self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
@@ -624,7 +618,10 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
     def state_prep_pulse(self, **kwargs):
         # pass in kwargs via cfg.expt.state_prep_kwargs
         # self.X_pulse(q=self.qubit, play=True, pihalf=True, neg=False)
-        self.Y_pulse(q=self.qubit, play=True, pihalf=True, neg=False)
+        self.X_pulse(q=1, play=True, pihalf=False, neg=False)
+        self.sync_all()
+        # self.X_pulse(q=0, play=True, pihalf=True, neg=False)
+        self.sync_all()
 
         # self.Y_pulse(q=0, play=True)
         # self.sync_all()

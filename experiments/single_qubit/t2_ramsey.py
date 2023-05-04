@@ -230,18 +230,21 @@ class RamseyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=True, fit_twofreq=False, **kwargs):
         if data is None:
             data=self.data
 
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
+            # fitparams=[yscale0, freq0, phase_deg0, decay0, y00, x00, yscale1, freq1, phase_deg1, y01] # two fit freqs
             # Remove the first and last point from fit in case weird edge measurements
             fitparams = None
             # fitparams=[8, 0.5, 0, 20, None, None]
-            p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
-            p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
-            p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
+            if fit_twofreq: fitfunc = fitter.fittwofreq_decaysin
+            else: fitfunc = fitter.fitdecaysin
+            p_avgi, pCov_avgi = fitfunc(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
+            p_avgq, pCov_avgq = fitfunc(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
+            p_amps, pCov_amps = fitfunc(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
             data['fit_amps'] = p_amps
@@ -249,12 +252,21 @@ class RamseyExperiment(Experiment):
             data['fit_err_avgq'] = pCov_avgq
             data['fit_err_amps'] = pCov_amps
 
+            # print('p avgi', p_avgi)
+            # print('p avgq', p_avgq)
+            # print('p amps', p_amps)
+
             if isinstance(p_avgi, (list, np.ndarray)): data['f_adjust_ramsey_avgi'] = sorted((self.cfg.expt.ramsey_freq - p_avgi[1], -self.cfg.expt.ramsey_freq - p_avgi[1]), key=abs)
             if isinstance(p_avgq, (list, np.ndarray)): data['f_adjust_ramsey_avgq'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[1], -self.cfg.expt.ramsey_freq - p_avgq[1]), key=abs)
             if isinstance(p_amps, (list, np.ndarray)): data['f_adjust_ramsey_amps'] = sorted((self.cfg.expt.ramsey_freq - p_amps[1], -self.cfg.expt.ramsey_freq - p_amps[1]), key=abs)
+
+            if fit_twofreq:
+                data['f_adjust_ramsey_avgi2'] = sorted((self.cfg.expt.ramsey_freq - p_avgi[7], -self.cfg.expt.ramsey_freq - p_avgi[6]), key=abs)
+                data['f_adjust_ramsey_avgq2'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[7], -self.cfg.expt.ramsey_freq - p_avgq[6]), key=abs)
+                data['f_adjust_ramsey_amps2'] = sorted((self.cfg.expt.ramsey_freq - p_amps[7], -self.cfg.expt.ramsey_freq - p_amps[6]), key=abs)
         return data
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, fit_twofreq=False, **kwargs):
         if data is None:
             data=self.data
 
@@ -271,6 +283,9 @@ class RamseyExperiment(Experiment):
 
         title = ('EF' if self.checkEF else '') + 'Ramsey' + (f'with Q{qA} in e' if self.checkZZ else '') 
 
+        if fit_twofreq: fitfunc = fitter.twofreq_decaysin
+        else: fitfunc = fitter.decaysin
+
         # plt.figure(figsize=(10, 6))
         # plt.subplot(111,title=f"{title} (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
         #             xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
@@ -280,7 +295,7 @@ class RamseyExperiment(Experiment):
         #     if isinstance(p, (list, np.ndarray)): 
         #         pCov = data['fit_err_amps']
         #         captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-        #         plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p), label=captionStr)
+        #         plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *p), label=captionStr)
         #         plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
         #         plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
         #         plt.legend()
@@ -302,7 +317,7 @@ class RamseyExperiment(Experiment):
             if isinstance(p, (list, np.ndarray)): 
                 pCov = data['fit_err_avgi']
                 captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-                plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p), label=captionStr)
+                plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *p), label=captionStr)
                 plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
                 plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
                 plt.legend()
@@ -312,6 +327,10 @@ class RamseyExperiment(Experiment):
                 print('Suggested new pi pulse frequency from fit I [MHz]:\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgi"][0]}\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgi"][1]}')
+                if fit_twofreq:
+                    print('Beating frequency from fit I [MHz]:\n',
+                          f'\t{f_pi_test + data["f_adjust_ramsey_avgi2"][0]}\n',
+                          f'\t{f_pi_test + data["f_adjust_ramsey_avgi2"][1]}')
                 print(f'T2 Ramsey from fit I [us]: {p[3]}')
         plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
         plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
@@ -320,7 +339,7 @@ class RamseyExperiment(Experiment):
             if isinstance(p, (list, np.ndarray)): 
                 pCov = data['fit_err_avgq']
                 captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-                plt.plot(data["xpts"][:-1], fitter.decaysin(data["xpts"][:-1], *p), label=captionStr)
+                plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *p), label=captionStr)
                 plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], p[5], p[3]), color='0.2', linestyle='--')
                 plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], p[5], p[3]), color='0.2', linestyle='--')
                 plt.legend()
@@ -329,6 +348,10 @@ class RamseyExperiment(Experiment):
                 print('Suggested new pi pulse frequencies from fit Q [MHz]:\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgq"][0]}\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgq"][1]}')
+                if fit_twofreq:
+                    print('Beating frequency from fit Q [MHz]:\n',
+                          f'\t{f_pi_test + data["f_adjust_ramsey_avgq2"][0]}\n',
+                          f'\t{f_pi_test + data["f_adjust_ramsey_avgq2"][1]}')
                 print(f'T2 Ramsey from fit Q [us]: {p[3]}')
 
         plt.tight_layout()

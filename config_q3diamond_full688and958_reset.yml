@@ -1,30 +1,34 @@
 device:
     qubit:
-        T1: [30, 65, 50, 150] # [us]
-        f_ge: [4140.533743739655, 3463.728373773443, 4800.1199711068375, 4415.307783242773] # [MHz]
-        f_Q1_ZZ: [3458.544130078918, 0, 3462.6979341831325, 3462.534273503226] # [MHz] frequency of Q1 when other qubits are in e
+        T1: [30, 110, 105, 150] # [us]
+        f_ge: [4140.530270731964, 3463.7994265949183, 4800.079246546452, 4415.18623279066] # [MHz]
+        f_Q1_ZZ: [3458.614151840509, 0, 3462.64898922516, 3462.481397860399] # [MHz] frequency of Q1 when other qubits are in e
         f_ef: [3914.7570214638718, 3363.398427976613, 4610.7977211230145, 4243.1626645869358] # [MHz]
-        f_EgGf: [2682.783, 0, 2019, 2408.2] # [MHz] expect to be ge_1 + ef_1 - ge_0
+        f_EgGf: [2682.783, 0, 2024.7, 2407.3] # [MHz] expect to be ge_1 + ef_1 - ge_0
         # f_EgGf: [2686.2, 0, 2026.1, 2411.05] # [MHz] expect to be ge_1 + ef_1 - ge_0
         gs: [54.38663964, 52.60236201, 41.1249601,   6.26475719,  2.73059709,  6.00700312] # [MHz] g01, g12, g13, g02, g03, g23 from theoretical comparison for ZZ shift
         ZZs: [0.0, -5.114594559749094, -0.18282363920479838, -0.498164234703836, -5.102823962105504, 0.0, -0.9444087654687792, -1.0606959776605436, -0.18631446427480114, -0.953190326496042, 0.0, -0.4841473294491152, -0.5065394094099247, -1.0909347449496636, -0.40800300690079894, 0.0] # make sure to reshape to 4x4: (QA freq when QB is in e) - (QA freq when QB is in g). rows = qA, cols = qB
 
         pulses:
             pi_ge:
-                gain: [22226, 21672, 23287, 22760]
-                sigma: [0.03099, 0.01781, 0.01679, 0.01824] # [us]
+                # gain: [22226, 21672, 8131, 22760]
+                # sigma: [0.03099, 0.01781, 0.070, 0.01824] # [us]
+                # gain: [22882, 7596, 8131, 22760]
+                # sigma: [0.03157, 0.050, 0.070, 0.01824] # [us]
+                gain: [22882, 22776, 8131, 22760]
+                sigma: [0.03157, 0.040, 0.070, 0.01824] # [us]
                 type: 'gauss'
             pi_ef:
                 gain: [13782, 21716, 23173, 22120]
                 sigma: [0.02117, 0.015, 0.015, 0.015] # [us]
                 type: 'gauss'
             pi_Q1_ZZ: # pi pulse length for Q1 when other qubits are in e
-                gain:  [21703, 0, 21713, 24537]
-                sigma: [0.01776, 0, 0.01754, 0.01723] # [us]
+                gain:  [24516, 0, 21704, 22104]
+                sigma: [0.01692, 0, 0.01761, 0.01763] # [us]
                 type: 'gauss'
             pi_EgGf:
-                gain: [5600, 0, 10000, 4750]
-                sigma: [0.238, 0, 0.265, 0.391] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
+                gain: [5600, 0, 4900, 4750]
+                sigma: [0.238, 0, 0.418, 0.370] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
                 # gain: [2325, 0, 3300, 2400]
                 # sigma: [0.660, 0, 0.771, 0.809] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
                 type: 'flat_top'
@@ -35,11 +39,11 @@ device:
         lo_sideband: [1, -1, 1, 1] # whether taking the +/- sideband after LO
         # frequency: [-73.132 , -813.39, 819.7247 , 88.406] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
         # gain: [0.65, 0.95, 0.95, 0.65] # [MUX units: range -1 to 1, signed amplitude]
-        frequency: [-72.926, -813.508, 819.7247 , 88.406] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
+        frequency: [-72.926, -813.508, 819.6947 , 88.406] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
         gain: [0.25, 0.95, 0.95, 0.25] # [MUX units: range -1 to 1, signed amplitude]
         # gain: [0.25, 0.25, 0.95, 0.25] # [MUX units: range -1 to 1, signed amplitude]
         readout_length: [8, 8, 8, 8] # [us]
-        relax_delay: [200, 350, 250, 400] # [us]
+        relax_delay: [200, 400, 400, 600] # [us]
         # relax_delay: [76, 287, 111, 318] # [us]
     
 hw:
@@ -49,7 +53,8 @@ hw:
         # For mux4, all 4 readouts are on the same DAC (ch 6). Need to make sure none of the
         # 4 muxed readout freqs are not in the same bin, which are fs/16 wide
             qubit:
-                ch: [0, 2, 0, 0]
+                # ch: [0, 2, 0, 0]
+                ch: [0, 1, 0, 0]
                 type: 'full'
                 nyquist: [2, 2, 2, 2]
                 mixer_freq: [0, 0, 0, 0]

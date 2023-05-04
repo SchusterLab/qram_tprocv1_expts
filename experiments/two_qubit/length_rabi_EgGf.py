@@ -617,7 +617,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
                 # if self.cfg.expt.measure_f: plt.colorbar(label='Population Not G -> G')
                 else: plt.colorbar(label='Population G -> Not G')
             else: plt.colorbar(label='I [ADC level]')
-        # if self.cfg.expt.post_process is not None: plt.clim(0, 1)
+        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
         # plt.clim(0.1, 0.4)
 
         if saveplot:
@@ -636,7 +636,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
                     plt.colorbar(label='Population Not F -> F')
                 else: plt.colorbar(label='Population error')
             else: plt.colorbar(label='Q [ADC level]')
-        # if self.cfg.expt.post_process is not None: plt.clim(0, 1)
+        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
         # plt.clim(0.4, 0.8)
 
         plt.tight_layout()
