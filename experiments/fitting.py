@@ -281,6 +281,10 @@ def rb_func(depth, p, a, b):
 def rb_error(p, d): # d = dim of system = 2^(number of qubits)
     return 1 - (p + (1-p)/d)
 
+# return covariance of rb error
+def error_fit_err(cov_p, d):
+    return cov_p*(1/d-1)**2
+
 # Run both regular RB and interleaved RB to calculate this
 def rb_gate_fidelity(p_rb, p_irb, d):
     return 1 - (d-1)*(1-p_irb/p_rb) / d
@@ -301,7 +305,9 @@ def fitrb(xdata, ydata, fitparams=None):
     pOpt = fitparams
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
-        pOpt, pCov = sp.optimize.curve_fit(rb_func, xdata, ydata, p0=fitparams) #, bounds=bounds)
+        pOpt, pCov = sp.optimize.curve_fit(rb_func, xdata, ydata, p0=fitparams, bounds=bounds)
+        print(pOpt)
+        print(pCov[0][0], pCov[1][1], pCov[2][2])
         # return pOpt, pCov
     except RuntimeError: 
         print('Warning: fit failed!')

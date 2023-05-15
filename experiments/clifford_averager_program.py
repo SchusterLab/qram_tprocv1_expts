@@ -31,11 +31,11 @@ class CliffordAveragerProgram(AveragerProgram):
     If play is True, registers will automatically be set regardless of set_reg flag.
     If play is False, registers will be set based on value of set_reg flag, but pulse will not be played.
     """
-    def handle_const_pulse(self, name, ch=None, length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_const_pulse(self, name, waveformname=None, ch=None, length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
         """
         Load/play a constant pulse of given length.
         """
-        if name is not None and reload: # and name not in self.pulse_dict.keys():
+        if name is not None and (name not in self.pulse_dict.keys() or reload):
             assert ch is not None
             self.pulse_dict.update({name:dict(ch=ch, name=name, type='const', length=length, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
         if play or set_reg:
@@ -47,40 +47,51 @@ class CliffordAveragerProgram(AveragerProgram):
             if phase_deg is not None: params['phase_deg'] = phase_deg
             if gain is not None: params['gain'] = gain
             self.set_pulse_registers(ch=params['ch'], style='const', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], length=params['length'], phrst=phrst)
-            if play: self.pulse(ch=params['ch'])
+            if play:
+                self.pulse(ch=params['ch'])
+                self.sync_all()
 
-    def handle_gauss_pulse(self, name, ch=None, sigma=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_gauss_pulse(self, name, waveformname=None, ch=None, sigma=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
         """
         Load/play a gaussian pulse of length 4 sigma on channel ch
         """
-        if name is not None and reload: # and name not in self.pulse_dict.keys():
-            assert ch is not None
-            assert sigma is not None
-            self.pulse_dict.update({name:dict(ch=ch, name=name, type='gauss', sigma=sigma, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
-            self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*4)
-            # print('added gauss pulse', name, 'on ch', ch)
+        if name not in self.pulse_dict.keys() or reload:
+            assert None not in [ch, sigma]
+            if waveformname is None: waveformname = name
+            self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='gauss', sigma=sigma, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
+            if reload or waveformname not in self.pulses[ch].keys():
+                self.add_gauss(ch=ch, name=waveformname, sigma=sigma, length=sigma*4)
+                # print('added gauss pulse', name, 'on ch', ch)
         if play or set_reg:
-            assert name in self.pulse_dict.keys()
             # if not (ch == sigma == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
             params = self.pulse_dict[name].copy()
             if freq_MHz is not None: params['freq_MHz'] = freq_MHz
             if phase_deg is not None: params['phase_deg'] = phase_deg
             if gain is not None: params['gain'] = gain
-            self.set_pulse_registers(ch=params['ch'], style='arb', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['name'], phrst=phrst)
+            self.set_pulse_registers(ch=params['ch'], style='arb', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['waveformname'], phrst=phrst)
             if play:
                 # print('playing gauss pulse', params['name'], 'on ch', params['ch'])
                 self.pulse(ch=params['ch'])
+                self.sync_all()
             
-    def handle_flat_top_pulse(self, ch=None, name=None, sigma=3, flat_length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_flat_top_pulse(self, name, waveformname=None, ch=None, sigma=3, flat_length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
         """
         Plays a gaussian ramp up (2*sigma), a constant pulse of length flat_length+4*sigma,
-        plus a gaussian ramp down (2*sigma) on channel ch. By default: sigma=3 clock cycles
+        plus a gaussian ramp down (2*sigma) on channel ch.
+        By default: sigma=3 clock cycles
         """
-        if name is not None and reload: # and name not in self.pulse_dict.keys():
+        if name not in self.pulse_dict.keys() or reload:
             assert None not in [ch, sigma, flat_length]
-            self.pulse_dict.update({name:dict(ch=ch, name=name, type='flat_top', sigma=sigma, flat_length=flat_length, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
-            self.add_gauss(ch=ch, name=name, sigma=sigma, length=sigma*4)
+            if waveformname is None: waveformname = name
+            self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='flat_top', sigma=sigma, flat_length=flat_length, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
+            if reload or waveformname not in self.pulses[ch].keys():
+                # print('all waveforms')
+                # for i_ch in range(len(self.pulses)):
+                #     print(self.pulses[i_ch].keys())
+                self.add_gauss(ch=ch, name=waveformname, sigma=sigma, length=sigma*4)
+                # print('added', waveformname, 'ch', ch)
+                # print(self.gen_chs.keys())
         if play or set_reg:
             # if not (ch == name == sigma == length == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
@@ -89,8 +100,10 @@ class CliffordAveragerProgram(AveragerProgram):
             if freq_MHz is not None: params['freq_MHz'] = freq_MHz
             if phase_deg is not None: params['phase_deg'] = phase_deg
             if gain is not None: params['gain'] = gain
-            self.set_pulse_registers(ch=params['ch'], style='flat_top', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['name'], length=params['flat_length'], phrst=phrst)
-            if play: self.pulse(ch=params['ch'])
+            self.set_pulse_registers(ch=params['ch'], style='flat_top', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['waveformname'], length=params['flat_length'], phrst=phrst)
+            if play:
+                self.pulse(ch=params['ch'])
+                self.sync_all()
     
     def handle_mux4_pulse(self, name, ch=None, mask=None, length=None, reload=True, play=False, set_reg=False, flag=None):
         """
@@ -106,39 +119,45 @@ class CliffordAveragerProgram(AveragerProgram):
             if mask is not None: params['mask'] = mask
             if length is not None: params['length'] = length
             self.set_pulse_registers(ch=params['ch'], style='const', length=length, mask=mask)
-            if play: self.pulse(ch=params['ch'])
+            if play:
+                self.pulse(ch=params['ch'])
+                self.sync_all()
 
     """
     Clifford pulse defns. extra_phase is given in deg. flag can be used to identify certain pulses.
     If play=False, just loads pulse.
     """
     # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=False, neg=False, extra_phase=0, play=False, name='X', flag=None, phrst=0):
+    def X_pulse(self, q, pihalf=False, divide_len=False, neg=False, extra_phase=0, play=False, name='X', flag=None, phrst=0, reload=True):
         # q: qubit number in config
         f_ge = self.cfg.device.qubit.f_ge[q]
         gain = self.cfg.device.qubit.pulses.pi_ge.gain[q]
         phase_deg = self.overall_phase[q] + extra_phase
         sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
+        waveformname = 'pi_ge'
         if pihalf:
-            if divide_len: sigma = sigma // 2
+            if divide_len:
+                sigma = sigma // 2
+                waveformname += 'half'
             else: gain = gain // 2
             name += 'half'
         if neg: phase_deg -= 180
         type = self.cfg.device.qubit.pulses.pi_ge.type[q]
         if type == 'const':
-            self.handle_const_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], length=sigma, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst) 
+            self.handle_const_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', length=sigma, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         elif type == 'gauss':
-            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], sigma=sigma, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst) 
+            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q],waveformname=f'{waveformname}_q{q}', sigma=sigma, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         elif type == 'flat_top':
+            assert False, 'flat top not checked yet'
             flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.length[q], gen_ch=self.qubit_chs[q]) - 3*4
-            self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], sigma=sigma, flat_length=flat_length, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst) 
+            self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma, flat_length=flat_length, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         else: assert False, f'Pulse type {type} not supported.'
 
-    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, flag=None, phrst=0):
+    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, phrst=phrst)
+        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, phrst=phrst, reload=reload)
 
-    def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
+    def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, reload=None):
         dac_type = self.qubit_ch_types[q]
         assert not dac_type == 'mux4', "Currently cannot set phase for mux4!"
         phase_adjust = 180
@@ -174,8 +193,6 @@ class CliffordAveragerProgram(AveragerProgram):
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-        self.prog_gen_chs = []
-
         # declare res dacs, add readout pulses
         if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
             assert np.all([ch == 6 for ch in self.res_chs])
@@ -184,7 +201,6 @@ class CliffordAveragerProgram(AveragerProgram):
             mux_gains = self.cfg.device.readout.gain
             self.declare_gen(ch=6, nqz=self.cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=self.cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
             self.handle_mux4_pulse(name=f'measure', ch=6, length=max(self.readout_lengths_dac), mask=mask, play=False, set_reg=True)
-            self.prog_gen_chs.append(6)
         else:
             for q in self.qubits:
                 mixer_freq = 0
@@ -192,7 +208,6 @@ class CliffordAveragerProgram(AveragerProgram):
                     mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[q]
                 self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
                 self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq_MHz=self.cfg.device.readout.frequency[q], phase=0, gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)
-                self.prog_gen_chs.append(self.res_chs[q])
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
@@ -203,18 +218,15 @@ class CliffordAveragerProgram(AveragerProgram):
         self.pi_Q1_ZZ_types = self.cfg.device.qubit.pulses.pi_Q1_ZZ.type
 
         # declare qubit dacs, add qubit pi_ge pulses
-        for q in self.qubits:
+        for q in range(len(self.pi_ge_types)):
             mixer_freq = 0
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            if self.qubit_chs[q] not in self.prog_gen_chs:
+            if self.qubit_chs[q] not in self.gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
-            self.X_pulse(q=q, play=False)
-            self.prog_gen_chs.append(self.qubit_chs[q])
+            self.X_pulse(q=q, play=False, reload=True)
 
-            # assume ge and ef pulses are gauss
-            pi_sigma_cycles = self.us2cycles(self.pi_sigmas_us[q], gen_ch=self.qubit_chs[q])
-            self.add_gauss(ch=self.qubit_chs[q], name=f"qubit{q}", sigma=pi_sigma_cycles, length=pi_sigma_cycles*4)
+            # assume ef pulses are gauss
             pi_ef_sigma_cycles = self.us2cycles(self.pi_ef_sigmas_us[q], gen_ch=self.qubit_chs[q])
             self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=pi_ef_sigma_cycles, length=pi_ef_sigma_cycles*4)
             if q != 1:
@@ -276,7 +288,7 @@ class CliffordAveragerProgram(AveragerProgram):
     #     else: return avgi, avgq
 
     """
-    Collect shots for all adcs, rotates by given angle (degrees), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
+    Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
     Returns avgi, avgq, avgi_err, avgq_err which avgi/q are avg over shot_avg and avgi/q_err is (std dev of each group of shots)/sqrt(shot_avg)
     """
     def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, return_err=False):
@@ -287,7 +299,7 @@ class CliffordAveragerProgram(AveragerProgram):
             self.di_buf[i]*np.cos(np.pi/180*angle[i]) - self.dq_buf[i]*np.sin(np.pi/180*angle[i])
             for i, ch in enumerate(self.ro_chs)])
         bufi = np.array([bufi[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
-        if threshold is not None and not avg_shots: # categorize single shots
+        if threshold is not None: # categorize single shots
             bufi = np.array([np.heaviside(bufi[ch] - threshold[ch], 0) for ch in range(len(self.adc_chs))])
         avgi = np.average(bufi, axis=1) # [num_chs]
         bufi_err = np.std(bufi, axis=1) / np.sqrt(buf_len) # [num_chs]
@@ -320,15 +332,15 @@ class CliffordAveragerProgram(AveragerProgram):
         avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress, debug=False)
         if post_process == None: 
             avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
-            return avgi_rot, avgi_err
+            if angle is None: return avgi_rot, avgq_rot
+            else: return avgi_rot, avgi_err
         elif post_process == 'threshold':
             assert threshold is not None
-            popln, avgq_rot, popln_err, avgq_err = self.get_shots(angle=angle, threshold=threshold, avg_shots=False, verbose=verbose, return_err=True)
+            popln, avgq_rot, popln_err, avgq_err = self.get_shots(angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, return_err=True)
             return popln, popln_err
         elif post_process == 'scale':
             assert ge_avgs is not None
             avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
-            avgi, avgi_err = avgi_rot, avgi_err
 
             ge_avgs_rot = [None]*4
             for q, angle_q in enumerate(angle):
@@ -338,10 +350,11 @@ class CliffordAveragerProgram(AveragerProgram):
                     Ie_q*np.cos(np.pi/180*angle_q) - Qe_q*np.sin(np.pi/180*angle_q)
                 ]
             ge_avgs_rot = np.asarray(ge_avgs_rot)
-            avgi -= ge_avgs_rot[:,0]
-            avgi /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
+            # print(avgi_rot, ge_avgs_rot)
+            avgi_rot -= ge_avgs_rot[:,0]
+            avgi_rot /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
             avgi_err /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
-            return avgi, avgi_err
+            return avgi_rot, avgi_err
         else:
             assert False, 'Undefined post processing flag, options are None, threshold, scale'
 
@@ -351,32 +364,40 @@ class CliffordAveragerProgram(AveragerProgram):
 Take care of extra clifford pulses for qutrits.
 """
 class QutritAveragerProgram(CliffordAveragerProgram):
-    def Xef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, flag=None):
-        # q: qubit number in config
-        f_ef = self.cfg.device.qubit.f_ef[q]
+    def Xef_pulse(self, q, pihalf=False, divide_len=True, name='X_ef', neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+        ch = self.qubit_chs[q]
+        f_ef_MHz = self.cfg.device.qubit.f_ef[q]
         gain = self.cfg.device.qubit.pulses.pi_ef.gain[q]
         phase_deg = self.overall_phase[q] + extra_phase
-        sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q])
-        if pihalf: gain = gain//2
+        sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=ch)
+        waveformname = 'pi_ef'
+        if pihalf:
+            if divide_len:
+                sigma_cycles = sigma_cycles // 2
+                waveformname += 'half'
+            else: gain = gain // 2
+            name += 'half'
         if neg: phase_deg -= 180
         type = self.cfg.device.qubit.pulses.pi_ef.type[q]
         if type == 'const':
-            self.handle_const_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], length=sigma, freq_MHz=f_ef, phase_deg=phase_deg, gain=gain, play=play, flag=flag) 
+            self.handle_const_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', length=sigma_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         elif type == 'gauss':
-            self.handle_gauss_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, freq_MHz=f_ef, phase_deg=phase_deg, gain=gain, play=play, flag=flag) 
+            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         elif type == 'flat_top':
-            flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.length[q], gen_ch=self.qubit_chs[q]) - 3*4
-            self.handle_flat_top_pulse(name=f'qubit{q}', ch=self.qubit_chs[q], sigma=sigma, flat_length=flat_length, freq_MHz=f_ef, phase_deg=phase_deg, gain=gain, play=play, flag=flag) 
+            sigma_ramp_cycles = 3
+            flat_length_cycles = sigma_cycles - sigma_ramp_cycles*4
+            self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_ramp_cycles, flat_length=flat_length_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         else: assert False, f'Pulse type {type} not supported.'
     
-    def Yef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
-        self.Xef_pulse(q, pihalf=pihalf, neg=not neg, extra_phase=90+extra_phase, play=play)
+    def Yef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+        # the sign of the 180 does not matter, but the sign of the pihalf does!
+        self.Xef_pulse(q, pihalf=pihalf, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y_ef', flag=flag, phrst=phrst, reload=reload)
 
     def initialize(self):
         super().initialize()
         # declare qubit ef pulses 
         # print(self.gen_chs)
-        for q in self.qubits:
+        for q in range(self.num_qubits_sample):
             self.Xef_pulse(q=q, play=False)
 
 # ===================================================================== #
@@ -420,30 +441,39 @@ WARNING: this means if you try to call X pulse it will play the Eg-Gf pulse, not
 class CliffordEgGfAveragerProgram(QutritAveragerProgram):
     # self.overall_phase keeps track of the EgGf phase insetad of the e-g pulse phase
 
-    def XEgGf_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, flag=None):
+    def XEgGf_pulse(self, q, pihalf=False, divide_len=True, name='X_EgGf', neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
         # q refers to qA for the swap (qB is always qubit 1), where qA qB are Eg->Gf
-        f_EgGf_MHz = self.cfg.device.qubit.f_ge[q]
+        ch = self.swap_chs[q]
+        f_EgGf_MHz = self.cfg.device.qubit.f_EgGf[q]
         gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[q]
         phase_deg = self.overall_phase[q] + extra_phase
-        sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[q], gen_ch=self.swap_chs[q])
-        if pihalf: gain = gain//2
+        sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[q], gen_ch=ch)
+        waveformname = 'pi_EgGf'
+        if pihalf:
+            if divide_len:
+                sigma_cycles = sigma_cycles // 2
+                waveformname += 'half'
+            else: gain = gain // 2
+            name += 'half'
         if neg: phase_deg -= 180
         type = self.cfg.device.qubit.pulses.pi_EgGf.type[q]
         if type == 'const':
-            self.handle_const_pulse(name=f'EgGf{q}', ch=self.swap_chs[q], length=sigma, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag) 
+            self.handle_const_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', length=sigma_cycles, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         elif type == 'gauss':
-            self.handle_gauss_pulse(name=f'EgGf{q}', ch=self.swap_chs[q], sigma=sigma, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag) 
+            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         elif type == 'flat_top':
-            length = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[q], gen_ch=self.swap_chs[q])
-            self.handle_flat_top_pulse(name=f'EgGf{q}', ch=self.swap_chs[q], sigma=5, length=length, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag) 
+            sigma_ramp_cycles = 3
+            flat_length_cycles = sigma_cycles - sigma_ramp_cycles*4
+            self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_ramp_cycles, flat_length=flat_length_cycles, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         else: assert False, f'Pulse type {type} not supported.'
+        # print('ch keys', self.gen_chs.keys())
 
-    def YEgGf_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
+    def YEgGf_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.XEgGf_pulse(q, pihalf=pihalf, neg=not neg, extra_phase=90+extra_phase, play=play)
+        self.XEgGf_pulse(q, pihalf=pihalf, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y_EgGf', flag=flag, phrst=phrst, reload=reload)
 
-    def ZEgGf_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False):
-        dac_type = self.qubit_ch_types[q]
+    def ZEgGf_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, reload=None):
+        dac_type = self.swap_ch_types[q]
         assert not dac_type == 'mux4', "Currently cannot set phase for mux4!"
         phase_adjust = 180
         if pihalf: phase_adjust = 90 # the sign of the 180 does not matter, but the sign of the pihalf does!
@@ -454,3 +484,13 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
         self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
         super().initialize()
+        for q in self.qubits:
+            if q==1: continue
+            mixer_freq = 0
+            if self.swap_ch_types[q] == 'int4':
+                mixer_freq = self.cfg.hw.soc.dacs.swap.mixer_freq[q]
+            if self.swap_chs[q] not in self.gen_chs:
+                self.declare_gen(ch=self.swap_chs[q], nqz=self.cfg.hw.soc.dacs.swap.nyquist[q], mixer_freq=mixer_freq)
+            # else: print('nqz', self.gen_chs[self.swap_chs[q]]['nqz'])
+            self.XEgGf_pulse(q=q, play=False)
+        self.sync_all(100)

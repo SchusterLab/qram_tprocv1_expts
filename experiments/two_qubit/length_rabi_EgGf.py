@@ -33,6 +33,7 @@ class LengthRabiEgGfProgram(CliffordAveragerProgram):
             mixer_freq = self.cfg.hw.soc.dacs.swap.mixer_freq[qA]
         if self.swap_chs[qA] not in self.gen_chs: 
             self.declare_gen(ch=self.swap_chs[qA], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+        # else: print(self.gen_chs[self.swap_chs[qA]]['nqz'])
 
         # update sigma in outer loop over averager program
         self.sigma_test = self.us2cycles(self.cfg.expt.sigma_test, gen_ch=self.swap_chs[qA])
@@ -58,7 +59,8 @@ class LengthRabiEgGfProgram(CliffordAveragerProgram):
         self.sync_all(10)
 
         # initialize qubit A to E: expect to end in Eg
-        self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_regs[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform=f"qubit{qA}") #, phrst=1)
+        # self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_regs[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform=f"qubit{qA}") #, phrst=1)
+        self.X_pulse(q=qA, pihalf=False, play=True)
         self.sync_all(5)
 
         # apply Eg -> Gf pulse on B: expect to end in Gf
@@ -111,7 +113,7 @@ class LengthRabiEgGfProgram(CliffordAveragerProgram):
 
 # ===================================================================== #
         
-class LengthRabiEgGfExperiment(Experiment):
+class LengthRabiefExperiment(Experiment):
     """
     Length Rabi EgGf Experiment
     Experimental Config
@@ -197,7 +199,7 @@ class LengthRabiEgGfExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f'Qubit  ({q})')
-                    fid, threshold, angle = hist(data=shot_data, plot=False, verbose=False)
+                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                     thresholds_q[q] = threshold[0]
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     angles_q[q] = angle
@@ -233,6 +235,9 @@ class LengthRabiEgGfExperiment(Experiment):
             if not self.cfg.expt.measure_f:
                 self.cfg.expt.setup_measure = 'qB_ef' # measure g vs. f (e)
                 lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
+                print(lengthrabi)
+                from qick.helpers import progs2json
+                print(progs2json([lengthrabi.dump_prog()]))
                 avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
 
                 data['avgi'][0].append(avgi[adcA_ch])
@@ -381,6 +386,8 @@ class LengthRabiEgGfExperiment(Experiment):
             print(f'\tPi/2 length from avgi data (qubit A) [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+
         plt.subplot(223, xlabel="Length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns[0:-1], data["avgq"][0][0:-1],'o-')
         if fit:
@@ -410,6 +417,8 @@ class LengthRabiEgGfExperiment(Experiment):
             print(f'\tPi/2 length from avgi data (qubit B) [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+
         plt.subplot(224, xlabel="Length [ns]")
         plt.plot(xpts_ns[0:-1], data["avgq"][1][0:-1],'o-')
         if fit:
@@ -492,7 +501,6 @@ class EgGfFreqLenChevronExperiment(Experiment):
             expt_prog.go(analyze=False, display=False, progress=False, save=False)
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data['avgi'][q_ind].append(expt_prog.data['avgi'][q_ind])
-                data['avgq'][q_ind].append(expt_prog.data['avgq'][q_ind])
                 data['amps'][q_ind].append(expt_prog.data['amps'][q_ind])
                 data['phases'][q_ind].append(expt_prog.data['phases'][q_ind])
             if time.time() - start_time < 120 and expt_prog.cfg.expt.post_process is not None: # redo the single shot calib every 2 minutes

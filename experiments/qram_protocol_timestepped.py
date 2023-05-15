@@ -141,7 +141,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.sync_all(0)
 
             # pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0], gen_ch=self.qubit_chs[1])
-            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            phase = self.deg2reg(-30, gen_ch=self.qubit_chs[1])
+            # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
             # self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
             # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0] // 2, waveform='qubit1_ZZ0_half')
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
@@ -250,8 +251,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         self.sync_all()
         print(f'Total protocol time (us): {count_us}')
 
-        # if self.cfg.expt.post_select:
-        #     self.setup_measure(qubit=1, basis='X', play=True, flag=None)
+        if self.cfg.expt.post_select:
+            self.setup_measure(qubit=1, basis='X', play=True, flag=None)
 
         # # ================= #
         # # Reverse protocol

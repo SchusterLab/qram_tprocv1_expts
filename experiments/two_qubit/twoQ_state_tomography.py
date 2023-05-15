@@ -221,115 +221,10 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
     def state_prep_pulse(self, qubits, **kwargs):
         qA, qB = self.cfg.expt.tomo_qubits
         
-        # self.X_pulse(q=qA, pihalf=False, play=True)
-        # self.Xef_pulse(q=qA, pihalf=False, play=True)
-        # self.sync_all()
-        # assert qB == 1
-
-        # self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
-        # self.sync_all()
-
-        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-        # gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
-        # pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
-        # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-        # self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
-        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
-        # self.sync_all()
-
-        # self.Y_pulse(q=qA, pihalf=True, play=True)
-        # self.sync_all()
-
-        # self.X_pulse(q=qA, pihalf=False, play=True, phrst=False)
-        # # self.Y_pulse(q=qA, pihalf=True, play=True, divide_len=False)
-        # self.sync_all(15)
-
-        # # self.Y_pulse(q=qB, pihalf=True, neg=False, play=True, phrst=False)
-        # ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-        # waveform = f'qubit{qB}_ZZ{qA}'
-        # if qB == 1:
-        #     freq = self.f_Q1_ZZ_regs[qA]
-        #     gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] // 2
-        #     sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[qA], gen_ch=self.qubit_chs[qB])
-        # else:
-        #     freq = self.freq2reg(self.cfg.device.qubit.f_ge[qB] + ZZs[qB, qA], gen_ch=self.qubit_chs[qB])
-        #     gain = self.cfg.device.qubit.pulses.pi_ge.gain[qB] // 2
-        #     sigma_cycles = self.us2cycles(self.pi_sigmas_us[qB], gen_ch=self.qubit_chs[qB])
-        # self.add_gauss(ch=self.qubit_chs[qB], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-        # self.setup_and_pulse(ch=self.qubit_chs[qB], style='arb', freq=freq, phase=self.deg2reg(0, gen_ch=self.qubit_chs[qB]), gain=gain, waveform=waveform)
-        # self.sync_all(15)
-
-        # # self.setup_and_pulse(ch=self.qubit_chs[qB], style='arb', freq=freq, phase=self.deg2reg(0, gen_ch=self.qubit_chs[qB]), gain=gain, waveform=waveform)
-
-        # print('freq', freq, self.freq2reg(3458.5946219528296, gen_ch=self.qubit_chs[qB]))
-        # print('freq2', self.cfg.device.qubit.f_ge[qB], self.freq2reg(self.cfg.device.qubit.f_ge[qB] - (3463.808810074577 -3458.5946219528296), gen_ch=self.qubit_chs[qB]))
-        # self.set_pulse_registers(
-        #     ch=self.qubit_chs[qB],
-        #     style="arb",
-        #     freq=self.freq2reg(self.cfg.device.qubit.f_ge[qB], gen_ch=self.qubit_chs[qB]),
-        #     phase=0,
-        #     gain=0, # gain set by update
-        #     waveform=f'X_q{qB}')
-        # self.mathi(self.q_rps[qB], self.r_gain, self.r_gain2, "+", 0)
-        # self.pulse(ch=self.qubit_chs[qB])
-        # self.setup_and_pulse(ch=self.qubit_chs[qB], style='arb', freq=self.freq2reg(self.cfg.device.qubit.f_ge[qB], gen_ch=self.qubit_chs[qB]), phase=self.deg2reg(0, gen_ch=self.qubit_chs[qB]), gain=gain, waveform=f'qubit{qB}')
-
-        # self.X_pulse(q=qB, pihalf=True, play=True, divide_len=True)
-        # self.sync_all()
-        # self.X_pulse(q=qB, pihalf=True, play=True, divide_len=False)
-        # self.sync_all(15)
-
-        # # pass in kwargs via cfg.expt.state_prep_kwargs
-        # self.Y_pulse(q=0, play=True, pihalf=True)
-
-        # # self.X_pulse(q=qubits[0], play=True, pihalf=False)
-        # self.sync_all()
-        # self.pi_Q1_ZZ_sigmas_us = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma
-        # pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0], gen_ch=self.qubit_chs[1]) // 2
-        # self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi_Q1_ZZ_sigma_cycles, length=4*pi_Q1_ZZ_sigma_cycles)
-        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
-
-
-        # self.X_pulse(q=qubits[0], pihalf=False, play=True)
-        # self.sync_all()
-        # self.X_pulse(q=qubits[1], pihalf=False, play=True)
-
-        # initialize to Eg
-        self.X_pulse(q=1, play=True, pihalf=False)
-        # self.Xef_pulse(q=1, play=True, pihalf=False)
-
-        # # apply Eg -> Gf pulse on B: expect to end in Gf
-        # type = self.cfg.device.qubit.pulses.pi_EgGf.type[qA]
-        # pulse = self.handle_const_pulse
-        # if type == 'gauss': pulse = self.handle_gauss_pulse
-        # elif type == 'flat_top': pulse = self.handle_flat_top_pulse
-        # pulse(name=f'pi_EgGf_{qubits[0]}{qubits[1]}', reload=False, play=True)
-
-        # type = self.cfg.device.qubit.pulses.pi_EgGf.type[2]
-        # pulse = self.handle_const_pulse
-        # if type == 'gauss': pulse = self.handle_gauss_pulse
-        # elif type == 'flat_top': pulse = self.handle_flat_top_pulse
-        # pulse(name=f'pi_EgGf_31', reload=False, play=True)
-
-        # self.setup_and_pulse(ch=self.swap_chs[qA], style='flat_top', freq=self.freq2reg(self.cfg.device.qubit.f_EgGf[qA], gen_ch=self.swap_chs[qA]), phase=self.deg2reg(0, gen_ch=self.swap_chs[qA]), gain=self.cfg.device.qubit.pulses.pi_EgGf.gain[qA], length=self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qA], gen_ch=self.swap_chs[qA]))
-        # self.sync_all()
-        # self.setup_and_pulse(ch=self.swap_chs[qA], style='const', freq=self.freq2reg(self.cfg.device.qubit.f_EgGf[qA], gen_ch=self.swap_chs[qA]), phase=self.deg2reg(-90, gen_ch=self.swap_chs[qA]), gain=self.cfg.device.qubit.pulses.pi_EgGf.gain[qA], length=self.us2cycles(0.80*self.cfg.device.qubit.pulses.pi_EgGf.sigma[qA], gen_ch=self.swap_chs[qA]))
-        # self.sync_all()
-        # self.setup_and_pulse(ch=self.swap_chs[qA], style='const', freq=self.freq2reg(self.cfg.device.qubit.f_EgGf[qA], gen_ch=self.swap_chs[qA]), phase=self.deg2reg(-90, gen_ch=self.swap_chs[qA]), gain=self.cfg.device.qubit.pulses.pi_EgGf.gain[qA], length=self.us2cycles(0.80*self.cfg.device.qubit.pulses.pi_EgGf.sigma[qA], gen_ch=self.swap_chs[qA]))
-        # self.sync_all()
-
-        # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
-        # self.X_pulse(q=qubits[0], play=True) # G->E on qubits[0]
-        # self.sync_all() # necessary for ZZ?
-        # self.handle_gauss_pulse(name=f'ef_qubit{qB}', reload=False, play=True) # f->e on qubits[1]
-        # self.sync_all()
-    
-    # def update(self):
-    #     qA, qB = self.cfg.expt.tomo_qubits
-    #     step = self.cfg.expt.step
-    #     if self.qubit_ch_types[qB] == 'int4': step = step << 16
-    #     self.mathi(self.q_rps[qB], self.r_gain2, self.r_gain2, '+', step) # update test gain
+        self.Y_pulse(q=0, play=True, pihalf=True)
+        self.sync_all()
+        self.Y_pulse(q=2, play=True, pihalf=True)
+        self.sync_all()
 
     def initialize(self):
 
@@ -423,7 +318,7 @@ class EgGfStateTomographyExperiment(Experiment):
         Ie, Qe = e_prog.get_shots(verbose=False)
         shot_data = dict(Ig=Ig[qA], Qg=Qg[qA], Ie=Ie[qA], Qe=Qe[qA])
         print(f'Qubit  ({qA})')
-        fid, thresholdA, angleA = hist(data=shot_data, plot=True, verbose=False)
+        fid, thresholdA, angleA = hist(data=shot_data, plot=progress, verbose=False)
         threshold[qA] = thresholdA[0]
         angle[qA] = angleA
 
@@ -432,7 +327,7 @@ class EgGfStateTomographyExperiment(Experiment):
         Ie, Qe = e_prog.get_shots(verbose=False)
         shot_data = dict(Ig=Ig[qB], Qg=Qg[qB], Ie=Ie[qB], Qe=Qe[qB])
         print(f'Qubit  ({qB})')
-        fid, thresholdB, angleB = hist(data=shot_data, plot=True, verbose=False)
+        fid, thresholdB, angleB = hist(data=shot_data, plot=progress, verbose=False)
         threshold[qB] = thresholdB[0]
         angle[qB] = angleB
 
@@ -537,6 +432,15 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
         # Collect single shots and measure throughout pulses
         self.basis = self.cfg.expt.basis
 
+        # Phase reset all channels
+        for ch in self.gen_chs.keys():
+            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+            self.sync_all()
+        self.sync_all(1000)
+
+
         # Prep state to characterize
         kwargs = self.cfg.expt.state_prep_kwargs
         if kwargs is None: kwargs = dict()
@@ -560,6 +464,7 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
 
         # get the shots for the qubits we care about
         shots = np.array(shots[self.adc_chs[self.qubit]])
+        print('shots order', self.qubit)
 
         # print(self.adc_chs[qubits[0]], angle, self.ro_chs) 
         # print('shots 0', shots[0])
@@ -615,13 +520,24 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         reps: number averages per measurement basis iteration
     )
     """
+    def handle_next_pulse(self, count_us, ch, freq_reg, type, phase, gain, sigma_us, waveform):
+        if type == 'gauss':
+            self.setup_and_pulse(ch=ch, style='arb', freq=freq_reg, phase=phase, gain=gain, waveform=waveform)
+        elif type == 'flat_top':
+            sigma_ramp_cycles = 3
+            flat_length_cycles = self.us2cycles(sigma_us, gen_ch=ch) - sigma_ramp_cycles*4
+            self.setup_and_pulse(ch=ch, style='flat_top', freq=freq_reg, phase=phase, gain=gain, length=flat_length_cycles, waveform=f"{waveform}_ramp")
+        elif type == 'const':
+            self.setup_and_pulse(ch=ch, style='const', freq=freq_reg, phase=phase, gain=gain, length=self.us2cycles(sigma_us, gen_ch=ch))
+
     def state_prep_pulse(self, **kwargs):
+        cfg = self.cfg
         # pass in kwargs via cfg.expt.state_prep_kwargs
         # self.X_pulse(q=self.qubit, play=True, pihalf=True, neg=False)
-        self.X_pulse(q=1, play=True, pihalf=False, neg=False)
-        self.sync_all()
+        # self.X_pulse(q=1, play=True, pihalf=True, neg=False)
+        # self.sync_all()
         # self.X_pulse(q=0, play=True, pihalf=True, neg=False)
-        self.sync_all()
+        # self.sync_all()
 
         # self.Y_pulse(q=0, play=True)
         # self.sync_all()
@@ -632,9 +548,99 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
         # self.sync_all()
 
+        # # init state: |0+1>|0>
+        # self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
+        # self.sync_all()
+
+        # # init state: |0+1>|1>
+        # self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
+        # self.sync_all()
+
+        # ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
+        # waveform = f'qubit0_ZZ1'
+        # freq = self.freq2reg(self.cfg.device.qubit.f_ge[0] + ZZs[0, 1], gen_ch=self.qubit_chs[0])
+        # gain = self.cfg.device.qubit.pulses.pi_ge.gain[0] //2
+        # sigma_cycles = self.us2cycles(self.pi_sigmas_us[0], gen_ch=self.qubit_chs[0])
+        # self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+        # self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
+        # self.sync_all()
+
+        # init state: |1>|1>
+        self.Y_pulse(q=0, play=True)
+        self.sync_all(0)
+
+        self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
+        self.sync_all()
+
+        # ================= #
+        # Begin protocol
+        # ================= #
+
+        count_us = 0
+
+        # apply Eg-Gf with qA=0: 1. eggg -> gfgg [path 1]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        self.sync_all()
+
+        # apply Eg-Gf with qA=2: 2. gfgg -> ggeg [path 1]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=self.deg2reg(-90, gen_ch=self.swap_chs[2]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
+        self.sync_all()
+
+        # 3. apply pi pulse on Q1 - need to average pi pulses corresponding to eegg -> eggg (pi_Q1_ZZ with qB=0), ggeg -> geeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [divisional pi pulse between two paths of protocol]
+        # freq_reg = self.f_Q1_ZZ_regs[0]
+        # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
+        # sigma_us = self.pi_Q1_ZZ_sigmas_us[0]
+        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
+        # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_sigmas_us[1]])
+        freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
+        self.sync_all()
+
+        # apply Eg-Gf with qA=0: 4. eggg -> gfgg [path 2]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        self.sync_all()
+
+        # apply Eg-Gf with qA=3: 5. gfgg -> ggge [path 2]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=self.deg2reg(-90, gen_ch=self.swap_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
+        self.sync_all()
+
+        # 6. apply pi pulse on Q1 - need to average pi pulses corresponding to ggge -> gege (pi_Q1_ZZ with qB=3), geeg -> ggeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [path 2, which should also affect path 1: geeg -> ggeg]
+        # freq_reg = self.f_Q1_ZZ_regs[3]
+        # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3]
+        # sigma_us = self.pi_Q1_ZZ_sigmas_us[3]
+        freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[3], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
+        self.sync_all()
+        print(f'Total protocol time (us): {count_us}')
+
     def initialize(self):
         super().initialize()
         self.cfg.expt.state_prep_kwargs = None
+        self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
+        self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
+        self.f_EgGf_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf, self.swap_chs)]
+
+        # get aliases for the sigmas we need in clock cycles
+        self.pi_EgGf_types = self.cfg.device.qubit.pulses.pi_EgGf.type
+        assert all(type == 'flat_top' for type in self.pi_EgGf_types)
+        self.pi_EgGf_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma
+
+        # initialize ef pulse on qB
+        qB = 1
+        for q in range(4):
+            if q != 1:
+                pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
+                if self.pi_EgGf_types[q] == 'gauss':
+                    self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}", sigma=pi_EgGf_sigma_cycles, length=pi_EgGf_sigma_cycles*4)
+                elif self.pi_EgGf_types[q] == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
+        self.sync_all(200)
 
 # ===================================================================== #
 
@@ -691,12 +697,13 @@ class StateTomography1QExperiment(Experiment):
         e_prog = calib_prog_dict['e']
         Ie, Qe = e_prog.get_shots(verbose=False)
         shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-        fid, thresholdq, angleq = hist(data=shot_data, plot=True, verbose=False)
+        fid, thresholdq, angleq = hist(data=shot_data, plot=progress, verbose=False)
         threshold[q] = thresholdq
         angle[q] = angleq
 
-        print('thresholds', threshold)
-        print('angles', angle)
+        if progress:
+            print('thresholds', threshold)
+            print('angles', angle)
 
         # Process the shots taken for the confusion matrix with the calibration angles
         for prep_state in self.calib_order:
@@ -709,6 +716,7 @@ class StateTomography1QExperiment(Experiment):
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.basis = basis
             tomo = StateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
+            print(tomo)
             tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
             counts = tomo.collect_counts(angle=angle, threshold=threshold)
             data['counts_tomo'].append(counts)
