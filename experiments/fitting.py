@@ -313,3 +313,23 @@ def fitrb(xdata, ydata, fitparams=None):
         print('Warning: fit failed!')
         # return 0, 0
     return pOpt, pCov
+
+# ====================================================== #
+# Adiabatic pi pulse functions
+# beta ~ slope of the frequency sweep (also adjusts width)
+# mu ~ width of frequency sweep (also adjusts slope)
+# period: delta frequency sweeps through zero at period/2
+# amp_max
+
+def adiabatic_amp(t, amp_max, beta, period):
+    return amp_max / np.cosh(beta*(2*t/period - 1))
+
+def adiabatic_phase(t, mu, beta, period):
+    return mu * np.log(adiabatic_amp(t, amp_max=1, beta=beta, period=period))
+
+def adiabatic_iqamp(t, amp_max, mu, beta, period):
+    amp = np.abs(adiabatic_amp(t, amp_max=amp_max, beta=beta, period=period))
+    phase = adiabatic_phase(t, mu=mu, beta=beta, period=period)
+    iamp = amp * (np.cos(phase) + 1j*np.sin(phase))
+    qamp = amp * (-np.sin(phase) + 1j*np.cos(phase))
+    return np.real(iamp), np.real(qamp)

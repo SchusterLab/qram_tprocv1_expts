@@ -13,6 +13,7 @@ import experiments.fitting as fitter
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram
 from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, sort_counts
+from experiments.three_qubit.threeQ_state_tomo import AbstractStateTomo3QProgram, ErrorMitigationStateTomo3QProgram, sort_counts_3q, make_3q_calib_order, make_3q_meas_order
 
 class QramProtocolProgram(AbstractStateTomo2QProgram):
     def initialize(self):
@@ -33,9 +34,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             mixer_freq = 0
             if self.swap_ch_types[qA] == 'int4':
                 mixer_freq = self.cfg.hw.soc.dacs.swap.mixer_freq[qA]
-            if self.swap_chs[qA] not in self.prog_gen_chs: 
+            if self.swap_chs[qA] not in self.gen_chs: 
                 self.declare_gen(ch=self.swap_chs[qA], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
-            self.prog_gen_chs.append(self.swap_chs[qA])
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_EgGf_types = self.cfg.device.qubit.pulses.pi_EgGf.type
@@ -54,6 +54,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 elif self.pi_EgGf_types[q] == 'flat_top':
                     sigma_ramp_cycles = 3
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
+        
+        self.X_pulse(q=1, adiabatic=True, reload=True, play=False) # initialize adiabatic pulse waveform
 
         self.sync_all(200)
 
@@ -73,6 +75,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 self.setup_and_pulse(ch=ch, style='flat_top', freq=freq_reg, phase=phase, gain=gain, length=flat_length_cycles, waveform=f"{waveform}_ramp")
             elif type == 'const':
                 self.setup_and_pulse(ch=ch, style='const', freq=freq_reg, phase=phase, gain=gain, length=self.us2cycles(sigma_us, gen_ch=ch))
+            elif type == 'adiabatic': assert False, 'have not implemented time stepping for adiabatic pulses'
 
         elif count_us < self.timestep_us: # fit part of pulse
             cut_length_us = self.timestep_us - count_us
@@ -92,6 +95,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 flat_length_cycles = self.us2cycles(cut_length_us, gen_ch=ch) - sigma_ramp_cycles*4
                 if flat_length_cycles >= 0:
                     self.setup_and_pulse(ch=ch, style='flat_top', freq=freq_reg, phase=phase, gain=gain, length=flat_length_cycles, waveform=f"{waveform}_ramp")
+            elif type == 'adiabatic': assert False, 'have not implemented time stepping for adiabatic pulses'
 
         # else: already done with protocol for this timestep
         return new_count_us
@@ -128,7 +132,14 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         init_state = self.cfg.expt.init_state
 
-        if init_state == '|0>|0+1>':
+        if init_state == '|0>|0>':
+            pass
+
+        elif init_state == '|0>|1>':
+            self.Y_pulse(q=1, play=True)
+            self.sync_all()
+
+        elif init_state == '|0>|0+1>':
             self.Y_pulse(q=1, play=True, pihalf=True)
             self.sync_all()
 
@@ -219,15 +230,16 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         self.sync_all()
 
         # 3. apply pi pulse on Q1 - need to average pi pulses corresponding to eegg -> eggg (pi_Q1_ZZ with qB=0), ggeg -> geeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [divisional pi pulse between two paths of protocol]
-        freq_reg = self.f_Q1_ZZ_regs[0]
+        # freq_reg = self.f_Q1_ZZ_regs[0]
         gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
         sigma_us = self.pi_Q1_ZZ_sigmas_us[0]
-        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
         # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
         # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=self.deg2reg(-90, gen_ch=self.qubit_chs[1]), gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
+        # self.Y_pulse(q=1, pihalf=False, adiabatic=True, play=True)
 
         # apply Eg-Gf with qA=0: 4. eggg -> gfgg [path 2]
         count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
@@ -240,19 +252,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         self.sync_all()
 
         # 6. apply pi pulse on Q1 - need to average pi pulses corresponding to ggge -> gege (pi_Q1_ZZ with qB=3), geeg -> ggeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [path 2, which should also affect path 1: geeg -> ggeg]
-        freq_reg = self.f_Q1_ZZ_regs[3]
+        # freq_reg = self.f_Q1_ZZ_regs[3]
         gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3]
         sigma_us = self.pi_Q1_ZZ_sigmas_us[3]
-        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
         # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
         # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[3], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
         count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
-        print(f'Total protocol time (us): {count_us}')
+        # print(f'Total protocol time (us): {count_us}')
+        # self.Y_pulse(q=1, pihalf=False, adiabatic=True, play=True)
 
-        if self.cfg.expt.post_select:
-            self.setup_measure(qubit=1, basis='X', play=True, flag=None)
+        # if self.cfg.expt.post_select:
+        #     self.setup_measure(qubit=1, basis='X', play=True, flag=None)
 
         # # ================= #
         # # Reverse protocol
@@ -582,6 +595,126 @@ class QramProtocolExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         self.cfg.all_qubits = [1,2,3,4]
+        super().save_data(data=data)
+        # print(self.pulse_dict)
+        with self.datafile() as f:
+            f.attrs['pulse_dict'] = json.dumps(self.pulse_dict, cls=NpEncoder)
+            f.attrs['meas_order'] = json.dumps(self.meas_order, cls=NpEncoder)
+            f.attrs['calib_order'] = json.dumps(self.calib_order, cls=NpEncoder)
+        return self.fname
+
+# ===================================================================== #
+
+class QramProtocol3QTomoProgram(QramProtocolProgram, AbstractStateTomo3QProgram):
+    def initialize(self):
+        super().initialize()
+    
+    def body(self):
+        AbstractStateTomo3QProgram.body(self)
+    
+    def collect_counts(self, angle=None, threshold=None):
+        return AbstractStateTomo3QProgram.collect_counts(self, angle, threshold)
+
+class QramProtocol3QTomoExperiment(Experiment):
+    def __init__(self, soccfg=None, path='', prefix='QramProtocol3QTomo', config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+        self.cfg.all_qubits = range(4)
+
+    def acquire(self, progress=False, debug=False):
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        qubits = self.cfg.expt.tomo_qubits
+        qA, qB, qC = qubits
+
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+        
+        self.meas_order = make_3q_meas_order()
+        self.calib_order = make_3q_calib_order() # should match with order of counts for each tomography measurement 
+        data={'counts_tomo':[], 'counts_calib':[]}
+        self.pulse_dict = dict()
+
+        # Error mitigation measurements: prep in gg, ge, eg, ee to recalibrate measurement angle and measure confusion matrix
+        calib_prog_dict = dict()
+        for prep_state in tqdm(self.calib_order):
+            # print(prep_state)
+            cfg = AttrDict(deepcopy(self.cfg))
+            cfg.expt.reps = self.cfg.expt.singleshot_reps
+            cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+            err_tomo = ErrorMitigationStateTomo3QProgram(soccfg=self.soccfg, cfg=cfg)
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            calib_prog_dict.update({prep_state:err_tomo})
+
+        g_prog = calib_prog_dict['ggg']
+        Ig, Qg = g_prog.get_shots(verbose=False)
+        thresholds_q = [0]*num_qubits_sample
+        angles_q = [0]*num_qubits_sample
+        for iq, q in enumerate(qubits):
+            state = 'ggg'
+            state = state[:iq] + 'e' + state[iq+1:]
+            e_prog = calib_prog_dict[state]
+            Ie, Qe = e_prog.get_shots(verbose=False)
+            shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+            print(f'Qubit  ({q})')
+            fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+            thresholds_q[q] = threshold[0]
+            angles_q[q] = angle
+
+        print('thresholds', thresholds_q)
+        print('angles', angles_q)
+
+        # Process the shots taken for the confusion matrix with the calibration angles
+        for prep_state in self.calib_order:
+            counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+            data['counts_calib'].append(counts)
+
+        # Tomography measurements
+        for basis in tqdm(self.meas_order):
+            # print(basis)
+            cfg = AttrDict(deepcopy(self.cfg))
+            cfg.expt.basis = basis
+            cfg.expt.timestep = np.inf
+
+            tomo = QramProtocol3QTomoProgram(soccfg=self.soccfg, cfg=cfg)
+            # print(tomo)
+            # from qick.helpers import progs2json
+            # print(progs2json([tomo.dump_prog()]))
+            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+
+            # print(basis)
+            adc_chs = self.cfg.hw.soc.adcs.readout.ch
+            # avgi, avgq = tomo.get_shots(angle=None, avg_shots=True)
+            # for q in self.cfg.expt.tomo_qubits:
+            #     print('q', q, 'avgi', avgi[adc_chs[q]])
+            #     print('q', q, 'avgq', avgq[adc_chs[q]])
+            #     print('q', q, 'amps', np.abs(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
+
+            counts = tomo.collect_counts(angle=angles_q, threshold=thresholds_q)
+            data['counts_tomo'].append(counts)
+            self.pulse_dict.update({basis:tomo.pulse_dict})
+
+        self.data=data
+        return data
+
+    def analyze(self, data=None, **kwargs):
+        if data is None: data = self.data
+        print('Analyze function does nothing, use the analysis notebook.')
+        return data
+
+    def display(self, qubit, data=None, fit=True, **kwargs):
+        if data is None: data=self.data 
+        print('Display function does nothing, use the analysis notebook.')
+    
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
         super().save_data(data=data)
         # print(self.pulse_dict)
         with self.datafile() as f:

@@ -11,6 +11,20 @@ import experiments.fitting as fitter
 # ====================================================== #
 
 class AmplitudeRabiProgram(RAveragerProgram):
+    # mu, beta are dimensionless
+    def add_adiabatic(self, ch, name, mu, beta, period_us, length_us):
+        period = self.us2cycles(period_us, gen_ch=ch)
+        length = self.us2cycles(length_us, gen_ch=ch)
+
+        gencfg = self.soccfg['gens'][ch]
+        maxv = gencfg['maxv']*gencfg['maxv_scale']
+        samps_per_clk = gencfg['samps_per_clk']
+        length = np.round(length) * samps_per_clk
+        period *= samps_per_clk
+        t = np.arange(0, length)
+        iamp, qamp = fitter.adiabatic_iqamp(t, amp_max=1, mu=mu, beta=beta, period=period)
+        self.add_pulse(ch=ch, name=name, idata=maxv*iamp, qdata=maxv*qamp)
+
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
@@ -106,10 +120,17 @@ class AmplitudeRabiProgram(RAveragerProgram):
         # add qubit and readout pulses to respective channels
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test", sigma=self.pi_test_sigma, length=self.pi_test_sigma*4)
+        elif cfg.expt.pulse_type.lower() == 'adiabatic' and self.pi_test_sigma > 0:
+            assert 'beta' in self.cfg.expt and 'mu' in self.cfg.expt
+            self.add_adiabatic(ch=self.qubit_chs[qTest], name='pi_test', mu=self.cfg.expt.mu, beta=self.cfg.expt.beta, period_us=self.cfg.expt.sigma_test, length_us=self.cfg.expt.sigma_test)
+
         if self.checkZZ:
             self.add_gauss(ch=self.qubit_chs[qA], name="pi_qubitA", sigma=self.pisigma_ge_qA, length=self.pisigma_ge_qA*4)
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
+
+        # !!! REMOVE !!!
+        # self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
 
         # add readout pulses to respective channels
         if self.res_ch_types[qTest] == 'mux4':
@@ -139,6 +160,10 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.sync_all(10)
 
         # initializations as necessary
+        # !!! REMOVE!!!
+        # print('gain', self.gain_ge_init)
+        # self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
+
         if self.checkZZ:                    
             self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
             self.sync_all(0)
@@ -147,8 +172,8 @@ class AmplitudeRabiProgram(RAveragerProgram):
             self.sync_all(0)
 
         if self.pi_test_sigma > 0:
-            print(self.f_pi_test_reg)
-            if cfg.expt.pulse_type.lower() == "gauss":
+            # print(self.f_pi_test_reg)
+            if cfg.expt.pulse_type.lower() in ("gauss", "adiabatic"):
                 self.set_pulse_registers(
                     ch=self.qubit_chs[qTest],
                     style="arb",
@@ -467,6 +492,11 @@ class AmplitudeRabiChevronExperiment(Experiment):
 
         plt.tight_layout()
         plt.show()
+
+        plt.plot(y_sweep, data['amps'][:,-1])
+        plt.title(f'Gain {x_sweep[-1]}')
+        plt.show()
+
         
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

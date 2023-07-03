@@ -222,9 +222,9 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
         qA, qB = self.cfg.expt.tomo_qubits
         
         self.Y_pulse(q=0, play=True, pihalf=True)
-        self.sync_all()
-        self.Y_pulse(q=2, play=True, pihalf=True)
-        self.sync_all()
+        # self.sync_all()
+        # self.Y_pulse(q=2, play=True, pihalf=True)
+        # self.sync_all()
 
     def initialize(self):
 
@@ -274,7 +274,7 @@ class EgGfStateTomographyExperiment(Experiment):
     )
     """
 
-    def __init__(self, soccfg=None, path='', prefix='EgGfStateTomography', config_file=None, progress=None):
+    def __init__(self, soccfg=None, path='', prefix='EgGfStateTomography2Q', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
     def acquire(self, progress=False, debug=False):
@@ -533,8 +533,9 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
     def state_prep_pulse(self, **kwargs):
         cfg = self.cfg
         # pass in kwargs via cfg.expt.state_prep_kwargs
-        # self.X_pulse(q=self.qubit, play=True, pihalf=True, neg=False)
-        # self.X_pulse(q=1, play=True, pihalf=True, neg=False)
+        # self.Y_pulse(q=self.qubit, play=True, pihalf=False, neg=False)
+        self.Y_pulse(q=0, play=True, pihalf=False, neg=False)
+        self.Y_pulse(q=2, play=True, pihalf=False, neg=False)
         # self.sync_all()
         # self.X_pulse(q=0, play=True, pihalf=True, neg=False)
         # self.sync_all()
@@ -565,58 +566,58 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         # self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
         # self.sync_all()
 
-        # init state: |1>|1>
-        self.Y_pulse(q=0, play=True)
-        self.sync_all(0)
+        # # init state: |1>|1>
+        # self.Y_pulse(q=0, play=True)
+        # self.sync_all(0)
 
-        self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
-        self.sync_all()
+        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
+        # self.sync_all()
 
-        # ================= #
-        # Begin protocol
-        # ================= #
+        # # ================= #
+        # # Begin protocol
+        # # ================= #
 
-        count_us = 0
+        # count_us = 0
 
-        # apply Eg-Gf with qA=0: 1. eggg -> gfgg [path 1]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
-        self.sync_all()
+        # # apply Eg-Gf with qA=0: 1. eggg -> gfgg [path 1]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        # self.sync_all()
 
-        # apply Eg-Gf with qA=2: 2. gfgg -> ggeg [path 1]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=self.deg2reg(-90, gen_ch=self.swap_chs[2]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
-        self.sync_all()
+        # # apply Eg-Gf with qA=2: 2. gfgg -> ggeg [path 1]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=self.deg2reg(-90, gen_ch=self.swap_chs[2]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
+        # self.sync_all()
 
-        # 3. apply pi pulse on Q1 - need to average pi pulses corresponding to eegg -> eggg (pi_Q1_ZZ with qB=0), ggeg -> geeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [divisional pi pulse between two paths of protocol]
-        # freq_reg = self.f_Q1_ZZ_regs[0]
-        # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
-        # sigma_us = self.pi_Q1_ZZ_sigmas_us[0]
-        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-        # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_sigmas_us[1]])
-        freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
-        gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-        sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
-        self.sync_all()
+        # # 3. apply pi pulse on Q1 - need to average pi pulses corresponding to eegg -> eggg (pi_Q1_ZZ with qB=0), ggeg -> geeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [divisional pi pulse between two paths of protocol]
+        # # freq_reg = self.f_Q1_ZZ_regs[0]
+        # # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
+        # # sigma_us = self.pi_Q1_ZZ_sigmas_us[0]
+        # # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
+        # # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        # # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_sigmas_us[1]])
+        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
+        # self.sync_all()
 
-        # apply Eg-Gf with qA=0: 4. eggg -> gfgg [path 2]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
-        self.sync_all()
+        # # apply Eg-Gf with qA=0: 4. eggg -> gfgg [path 2]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        # self.sync_all()
 
-        # apply Eg-Gf with qA=3: 5. gfgg -> ggge [path 2]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=self.deg2reg(-90, gen_ch=self.swap_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
-        self.sync_all()
+        # # apply Eg-Gf with qA=3: 5. gfgg -> ggge [path 2]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=self.deg2reg(-90, gen_ch=self.swap_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
+        # self.sync_all()
 
-        # 6. apply pi pulse on Q1 - need to average pi pulses corresponding to ggge -> gege (pi_Q1_ZZ with qB=3), geeg -> ggeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [path 2, which should also affect path 1: geeg -> ggeg]
-        # freq_reg = self.f_Q1_ZZ_regs[3]
-        # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3]
-        # sigma_us = self.pi_Q1_ZZ_sigmas_us[3]
-        freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
-        gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-        sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[3], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
-        self.sync_all()
-        print(f'Total protocol time (us): {count_us}')
+        # # 6. apply pi pulse on Q1 - need to average pi pulses corresponding to ggge -> gege (pi_Q1_ZZ with qB=3), geeg -> ggeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [path 2, which should also affect path 1: geeg -> ggeg]
+        # # freq_reg = self.f_Q1_ZZ_regs[3]
+        # # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3]
+        # # sigma_us = self.pi_Q1_ZZ_sigmas_us[3]
+        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[3], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
+        # self.sync_all()
+        # print(f'Total protocol time (us): {count_us}')
 
     def initialize(self):
         super().initialize()

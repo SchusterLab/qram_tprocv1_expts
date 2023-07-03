@@ -2,8 +2,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from qick import *
 
-from slab import Experiment, dsfit, AttrDict
+from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 
 """
 Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2 pulses.
@@ -74,7 +76,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 # print('playing gauss pulse', params['name'], 'on ch', params['ch'])
                 self.pulse(ch=params['ch'])
                 self.sync_all()
-            
+
     def handle_flat_top_pulse(self, name, waveformname=None, ch=None, sigma=3, flat_length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
         """
         Plays a gaussian ramp up (2*sigma), a constant pulse of length flat_length+4*sigma,
@@ -104,7 +106,7 @@ class CliffordAveragerProgram(AveragerProgram):
             if play:
                 self.pulse(ch=params['ch'])
                 self.sync_all()
-    
+
     def handle_mux4_pulse(self, name, ch=None, mask=None, length=None, reload=True, play=False, set_reg=False, flag=None):
         """
         Load/play a constant pulse of given length on the mux4 channel.
@@ -123,18 +125,65 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.pulse(ch=params['ch'])
                 self.sync_all()
 
+    # mu, beta are dimensionless
+    def add_adiabatic(self, ch, name, mu, beta, period_us):
+        period = self.us2cycles(period_us, gen_ch=ch)
+        gencfg = self.soccfg['gens'][ch]
+        maxv = gencfg['maxv']*gencfg['maxv_scale']
+        samps_per_clk = gencfg['samps_per_clk']
+        length = np.round(period) * samps_per_clk
+        period *= samps_per_clk
+        t = np.arange(0, length)
+        iamp, qamp = fitter.adiabatic_iqamp(t, amp_max=1, mu=mu, beta=beta, period=period)
+        self.add_pulse(ch=ch, name=name, idata=maxv*iamp, qdata=maxv*qamp)
+
+    def handle_adiabatic_pulse(self, name, waveformname=None, ch=None, mu=None, beta=None, period_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+        """
+        Load/play an adiabatic pi pulse on channel ch
+        """
+        if name not in self.pulse_dict.keys() or reload:
+            assert None not in [ch, mu, beta, period_us]
+            if waveformname is None: waveformname = name
+            self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='adiabatic', mu=mu, beta=beta, period_us=period_us, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
+            if reload or waveformname not in self.pulses[ch].keys():
+                self.add_adiabatic(ch=ch, name=waveformname, mu=mu, beta=beta, period_us=period_us)
+                # print('added gauss pulse', name, 'on ch', ch)
+        if play or set_reg:
+            # if not (ch == sigma == None):
+            #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
+            params = self.pulse_dict[name].copy()
+            if freq_MHz is not None: params['freq_MHz'] = freq_MHz
+            if phase_deg is not None: params['phase_deg'] = phase_deg
+            if gain is not None: params['gain'] = gain
+            self.set_pulse_registers(ch=params['ch'], style='arb', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['waveformname'], phrst=phrst)
+            if play:
+                # print('playing gauss pulse', params['name'], 'on ch', params['ch'])
+                self.pulse(ch=params['ch'])
+                self.sync_all()
+
     """
     Clifford pulse defns. extra_phase is given in deg. flag can be used to identify certain pulses.
     If play=False, just loads pulse.
     """
     # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=False, neg=False, extra_phase=0, play=False, name='X', flag=None, phrst=0, reload=True):
+    def X_pulse(self, q, pihalf=False, divide_len=False, neg=False, extra_phase=0, play=False, name='X', flag=None, adiabatic=False, phrst=0, reload=True):
         # q: qubit number in config
         f_ge = self.cfg.device.qubit.f_ge[q]
-        gain = self.cfg.device.qubit.pulses.pi_ge.gain[q]
-        phase_deg = self.overall_phase[q] + extra_phase
-        sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
-        waveformname = 'pi_ge'
+        if not adiabatic: 
+            gain = self.cfg.device.qubit.pulses.pi_ge.gain[q]
+            phase_deg = self.overall_phase[q] + extra_phase
+            sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
+            waveformname = 'pi_ge'
+            type = self.cfg.device.qubit.pulses.pi_ge.type[q]
+        else:
+            gain = self.cfg.device.qubit.pulses.pi_ge_adiabatic.gain[q]
+            phase_deg = self.overall_phase[q] + extra_phase
+            period_us = self.cfg.device.qubit.pulses.pi_ge_adiabatic.period[q]
+            mu = self.cfg.device.qubit.pulses.pi_ge_adiabatic.mu[q]
+            beta = self.cfg.device.qubit.pulses.pi_ge_adiabatic.beta[q]
+            if 'adiabatic' not in name : name = name + '_adiabatic'
+            waveformname = 'pi_ge_adiabatic'
+            type = 'adiabatic'
         if pihalf:
             if divide_len:
                 sigma = sigma // 2
@@ -142,20 +191,22 @@ class CliffordAveragerProgram(AveragerProgram):
             else: gain = gain // 2
             name += 'half'
         if neg: phase_deg -= 180
-        type = self.cfg.device.qubit.pulses.pi_ge.type[q]
         if type == 'const':
             self.handle_const_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', length=sigma, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         elif type == 'gauss':
             self.handle_gauss_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q],waveformname=f'{waveformname}_q{q}', sigma=sigma, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
+        elif type == 'adiabatic':
+            assert not pihalf, 'Cannot do pihalf pulse with adiabatic'
+            self.handle_adiabatic_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', mu=mu, beta=beta, period_us=period_us, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         elif type == 'flat_top':
             assert False, 'flat top not checked yet'
             flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.length[q], gen_ch=self.qubit_chs[q]) - 3*4
             self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma, flat_length=flat_length, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         else: assert False, f'Pulse type {type} not supported.'
 
-    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, phrst=phrst, reload=reload)
+        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, adiabatic=adiabatic, phrst=phrst, reload=reload)
 
     def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, reload=None):
         dac_type = self.qubit_ch_types[q]

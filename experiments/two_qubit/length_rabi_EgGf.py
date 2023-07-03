@@ -113,7 +113,7 @@ class LengthRabiEgGfProgram(CliffordAveragerProgram):
 
 # ===================================================================== #
         
-class LengthRabiefExperiment(Experiment):
+class LengthRabiEgGfExperiment(Experiment):
     """
     Length Rabi EgGf Experiment
     Experimental Config
@@ -235,9 +235,9 @@ class LengthRabiefExperiment(Experiment):
             if not self.cfg.expt.measure_f:
                 self.cfg.expt.setup_measure = 'qB_ef' # measure g vs. f (e)
                 lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-                print(lengthrabi)
-                from qick.helpers import progs2json
-                print(progs2json([lengthrabi.dump_prog()]))
+                # print(lengthrabi)
+                # from qick.helpers import progs2json
+                # print(progs2json([lengthrabi.dump_prog()]))
                 avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
 
                 data['avgi'][0].append(avgi[adcA_ch])
@@ -283,7 +283,7 @@ class LengthRabiefExperiment(Experiment):
                 # print(gpop_qB, epop_qB, fpop_qB)
 
                 data['avgi'][0].append(epop_qA) # let "avgi" be the e vs not e signal
-                data['avgq'][0].append(0) # not measuring f state of qA, so just put 0
+                data['avgq'][0].append(np.zeros_like(epop_qA)) # not measuring f state of qA, so just put 0
 
                 data['avgi'][1].append(epop_qB) # let "avgi" be e vs. not e signal
                 # data['avgi'][1].append(gpop_qB) # let "avgi" be g vs. not g signal
@@ -501,6 +501,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
             expt_prog.go(analyze=False, display=False, progress=False, save=False)
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data['avgi'][q_ind].append(expt_prog.data['avgi'][q_ind])
+                data['avgq'][q_ind].append(expt_prog.data['avgq'][q_ind])
                 data['amps'][q_ind].append(expt_prog.data['amps'][q_ind])
                 data['phases'][q_ind].append(expt_prog.data['phases'][q_ind])
             if time.time() - start_time < 120 and expt_prog.cfg.expt.post_process is not None: # redo the single shot calib every 2 minutes
@@ -545,6 +546,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
         inner_sweep = data['lenpts'][1:]
         outer_sweep = data['freqpts'][1:]
         data = deepcopy(data)
+        # print(data['avgq'][0])
         data['avgi'] = (data['avgi'][0][1:, 1:], data['avgi'][1][1:, 1:])
         data['avgq'] = (data['avgq'][0][1:, 1:], data['avgq'][1][1:, 1:])
 
