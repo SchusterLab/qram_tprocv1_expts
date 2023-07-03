@@ -6,3 +6,4 @@ call copy %1\*.yml .
 call copy %1\experiments\*.py .\experiments
 call copy %1\experiments\single_qubit\* .\experiments\single_qubit
 call copy %1\experiments\two_qubit\* .\experiments\two_qubit
+call copy %1\experiments\three_qubit\* .\experiments\three_qubit
