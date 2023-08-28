@@ -380,7 +380,7 @@ class SimultaneousRBExperiment(Experiment):
                 # print('variation', var)
                 qubit_list = np.random.choice(self.cfg.expt.qubits, size=len(gate_list)-1)
 
-                if self.cfg.expt.use_EgGf_subspace: randbench = RBEgGfProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qA=self.cfg.expt.qubits[0])
+                if self.cfg.expt.use_EgGf_subspace: randbench = RBEgGfProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubits=self.cfg.expt.qubits, qDrive=self.cfg.expt.qDrive)
                 else: randbench = SimultaneousRBProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubit_list=qubit_list)
                 # print(randbench)
                 # from qick.helpers import progs2json
@@ -391,18 +391,24 @@ class SimultaneousRBExperiment(Experiment):
                 # angles_q = thresholds_q = ge_avgs_q = None
 
                 # print(gate_list)
-                try:
-                    avgi, avgi_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
-                    for iq, q in enumerate(qubits):
-                        avgi = avgi[adc_chs[q]]
-                        data["avgi"][iq][-1].append(avgi)
-                        # print(depth, var, iq, avgi)
-                        data["avgi_err"][iq][-1].append(avgi_err[adc_chs[q]])
-                    data['xpts'][-1].append(depth)
-                except Exception as e:
-                    print(e)
-                    print('Varation', var, 'failed in depth', depth)
-                    continue
+                avgi, avgi_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
+                for iq, q in enumerate(qubits):
+                    data["avgi"][iq][-1].append(avgi[adc_chs[q]])
+                    # print(depth, var, iq, avgi)
+                    data["avgi_err"][iq][-1].append(avgi_err[adc_chs[q]])
+                data['xpts'][-1].append(depth)
+                # try:
+                #     avgi, avgi_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
+                #     for iq, q in enumerate(qubits):
+                #         avgi = avgi[adc_chs[q]]
+                #         data["avgi"][iq][-1].append(avgi)
+                #         # print(depth, var, iq, avgi)
+                #         data["avgi_err"][iq][-1].append(avgi_err[adc_chs[q]])
+                #     data['xpts'][-1].append(depth)
+                # except Exception as e:
+                #     print(e)
+                #     print('Varation', var, 'failed in depth', depth)
+                #     continue
 
 
                 # print(1-data['avgi'][0][-1], gate_list)
@@ -491,7 +497,7 @@ class SimultaneousRBExperiment(Experiment):
         plt.figure(figsize=(8,6))
         irb = 'gate_char' in self.cfg.expt and self.cfg.expt.gate_char is not None
         use_EgGf = self.cfg.expt.use_EgGf_subspace
-        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} {"EgGf" if use_EgGf else ""} RB on {("qA " + str(self.cfg.expt.qubits[0])) if use_EgGf else ("Q" + str(qubit))}'
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} {"EgGf" if use_EgGf else ""} RB on {(str(self.cfg.expt.qubits[0]) + ", " + str(self.cfg.expt.qubits[1])) if use_EgGf else ("Q" + str(qubit))}'
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population in g")
         depths = data['xpts']
@@ -532,14 +538,27 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
     RB program for single qubit gates, treating the Eg/Gf subspace as the TLS
     """
 
-    def __init__(self, soccfg, cfg, gate_list, qA):
+    def __init__(self, soccfg, cfg, gate_list, qubits, qDrive):
         # gate_list should include the total gate!
         # qA should specify the the qubit that is not q1 for the Eg-Gf swap
         self.gate_list = gate_list
-        self.qA = qA
+        self.cfg = cfg
+
+        qA, qB = qubits
+        qSort = qA
+        if qA == 1: qSort = qB
+        qDrive = 1
+        if 'qDrive' in self.cfg.expt and self.cfg.expt.qDrive is not None:
+            qDrive = self.cfg.expt.qDrive
+        qNotDrive = -1
+        if qA == qDrive: qNotDrive = qB
+        else: qNotDrive = qA
+        self.qDrive = qDrive
+        self.qNotDrive = qNotDrive
+        self.qSort = qSort
         super().__init__(soccfg, cfg)
 
-    def cliffordEgGf(self, qubit, pulse_name:str, extra_phase=0, inverted=False, play=False):
+    def cliffordEgGf(self, qDrive, qNotDrive, pulse_name:str, extra_phase=0, inverted=False, play=False):
         """
         Convert a clifford pulse name (in the Eg-Gf subspace) into the function that performs the pulse.
         If inverted, play the inverse of this gate (the extra phase is added on top of the inversion)
@@ -562,7 +581,7 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
 
             neg = '-' in gate
             if inverted: neg = not neg
-            pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False)
+            pulse_func(qDrive=qDrive, qNotDrive=qNotDrive, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False)
             # print(self.overall_phase[qubit])
 
     def body(self):
@@ -577,7 +596,7 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         self.sync_all(10)
 
         # Get into the Eg-Gf subspace
-        self.X_pulse(self.qA, extra_phase=-self.overall_phase[self.qA], pihalf=False, play=True) # this is the g->e pulse from CliffordAveragerProgram, always have the "overall phase" of the normal qubit subspace be 0 because it is just a state prep pulse
+        self.X_pulse(self.qNotDrive, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True) # this is the g->e pulse from CliffordAveragerProgram, always have the "overall phase" of the normal qubit subspace be 0 because it is just a state prep pulse
         self.sync_all(5)
 
         # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[self.qA], phase=self.deg2reg(-90, gen_ch=self.qA), gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[self.qA] // 2, waveform=f'qubit1_ZZ{self.qA}')
@@ -585,7 +604,7 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
 
         # Do all the gates given in the initialize except for the total gate
         for i in range(len(self.gate_list) - 1):
-            self.cliffordEgGf(qubit=self.qA, pulse_name=self.gate_list[i], play=True)
+            self.cliffordEgGf(qDrive=self.qDrive, qNotDrive=self.qNotDrive, pulse_name=self.gate_list[i], play=True)
             self.sync_all()
 
         # self.Xef_pulse(q=1, play=True)
@@ -593,11 +612,11 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         # self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", freq=self.f_ef_regs[qB], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qB], waveform=f"pi_ef_qubit{qB}") #, phrst=1)
 
         # Do the inverse by applying the total gate with pi phase
-        self.cliffordEgGf(qubit=self.qA, pulse_name=self.gate_list[-1], inverted=True, play=True)
+        self.cliffordEgGf(qDrive=self.qDrive, qNotDrive=self.qNotDrive, pulse_name=self.gate_list[-1], inverted=True, play=True)
         self.sync_all(5)
 
         # Go back to measurement subspace
-        self.X_pulse(self.qA, extra_phase=-self.overall_phase[self.qA], play=True)
+        self.X_pulse(self.qNotDrive, extra_phase=-self.overall_phase[self.qSort], play=True)
 
         measure_chs = self.res_chs
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]

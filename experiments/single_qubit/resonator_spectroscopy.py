@@ -239,6 +239,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
         amps = data['amps']
         for amps_gain in amps:
+            # amps_gain = (amps_gain - np.average(amps_gain)) / np.average(amps_gain)
             amps_gain -= np.average(amps_gain)
         
         y_sweep = outer_sweep

@@ -34,7 +34,7 @@ def hist(data, plot=True, span=None, verbose=True):
         if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
-        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(16, 10))
+        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10, 6))
         fig.tight_layout()
 
         axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.')
@@ -44,7 +44,7 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[0,0].scatter(xe, ye, color='k', marker='o')
         if plot_f: axs[0,0].scatter(xf, yf, color='k', marker='o')
 
-        axs[0,0].set_xlabel('I [ADC levels]')
+        # axs[0,0].set_xlabel('I [ADC levels]')
         axs[0,0].set_ylabel('Q [ADC levels]')
         axs[0,0].legend(loc='upper right')
         axs[0,0].set_title('Unrotated')
@@ -89,7 +89,7 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[0,1].scatter(xe, ye, color='k', marker='o')    
         if plot_f: axs[0, 1].scatter(xf, yf, color='k', marker='o')    
 
-        axs[0,1].set_xlabel('I [ADC levels]')
+        # axs[0,1].set_xlabel('I [ADC levels]')
         axs[0,1].legend(loc='upper right')
         axs[0,1].set_title('Rotated')
         axs[0,1].axis('equal')

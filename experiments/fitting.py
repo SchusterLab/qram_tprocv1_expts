@@ -33,12 +33,23 @@ def get_best_fit(data, fitfunc=None, prefixes=['fit'], check_measures=('amps', '
             ss_tot_checks = np.array([np.sum((np.mean(ydata_check) - ydata_check)**2) for ydata_check in ydata])
             # R^2 value
             r2 = 1- ss_res_checks / ss_tot_checks
+
+            # override r2 value if fit is bad
+            for icheck, fit_err_check in enumerate(fit_errs):
+                for i, fit_err in enumerate(np.diag(fit_err_check)):
+                    if fit_err == np.inf: r2[icheck] = np.inf
             i_best = np.argmin(r2)
             
         else:
             # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
             # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i] / fit[compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
-            i_best = np.argmin([np.average(np.sqrt(np.abs(np.diag(fit_err) / fit))) for fit, fit_err in zip(fits, fit_errs)])
+            errs = [np.average(np.sqrt(np.abs(np.diag(fit_err))) / np.abs(fit)) for fit, fit_err in zip(fits, fit_errs)]
+            # print([np.sqrt(np.abs(np.diag(fit_err))) / np.abs(fit) for fit, fit_err in zip(fits, fit_errs)])
+            for i_err, err in enumerate(errs):
+                if err == np.nan: errs[i_err] = np.inf
+            # print(errs)
+            i_best = np.argmin(errs)
+            # print(i_best)
 
     best_data = [fits[i_best], fit_errs[i_best]]
     best_meas = check_measures[i_best]
@@ -130,11 +141,13 @@ def fitsin(xdata, ydata, fitparams=None):
 # ====================================================== #
 
 def decaysin(x, *p):
-    yscale, freq, phase_deg, decay, y0, x0 = p
+    yscale, freq, phase_deg, decay, y0 = p
+    x0 = -(phase_deg+180)/360/freq
+    # x0 = 0
     return yscale * np.sin(2*np.pi*freq*x + phase_deg*np.pi/180) * np.exp(-(x-x0)/decay) + y0
 
 def fitdecaysin(xdata, ydata, fitparams=None):
-    if fitparams is None: fitparams = [None]*6
+    if fitparams is None: fitparams = [None]*5
     fourier = np.fft.fft(ydata)
     fft_freqs = np.fft.fftfreq(len(ydata), d=xdata[1]-xdata[0])
     fft_phases = np.angle(fourier)
@@ -150,10 +163,9 @@ def fitdecaysin(xdata, ydata, fitparams=None):
     if fitparams[2] is None: fitparams[2]=max_phase*180/np.pi
     if fitparams[3] is None: fitparams[3]=max(xdata) - min(xdata)
     if fitparams[4] is None: fitparams[4]=np.mean(ydata)
-    if fitparams[5] is None: fitparams[5]=xdata[0]
     bounds = (
-        [0.75*fitparams[0], 0.1/(max(xdata)-min(xdata)), -360, 0.3*(max(xdata)-min(xdata)), np.min(ydata), xdata[0]-(xdata[-1]-xdata[0])],
-        [1.25*fitparams[0], 15/(max(xdata)-min(xdata)), 360, np.inf, np.max(ydata), xdata[-1]+(xdata[-1]-xdata[0])]
+        [0.75*fitparams[0], 0.1/(max(xdata)-min(xdata)), -360, 0.3*(max(xdata)-min(xdata)), np.min(ydata)],
+        [1.25*fitparams[0], 15/(max(xdata)-min(xdata)), 360, np.inf, np.max(ydata)]
         )
     for i, param in enumerate(fitparams):
         if not (bounds[0][i] < param < bounds[1][i]):

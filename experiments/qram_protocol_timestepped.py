@@ -25,22 +25,35 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
         self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-
         self.f_EgGf_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf, self.swap_chs)]
 
-        # declare swap dac indexed by qA (since the the drive is always applied to qB)
-        for qA in self.all_qubits:
-            if qA == 1: continue
+        self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
+        self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
+        self.f_EgGf_Q_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf_Q, self.swap_chs)]
+
+        # declare swap dac indexed by qSort
+        for qSort in self.all_qubits:
+            if qSort == 1: continue
             mixer_freq = 0
-            if self.swap_ch_types[qA] == 'int4':
-                mixer_freq = self.cfg.hw.soc.dacs.swap.mixer_freq[qA]
-            if self.swap_chs[qA] not in self.gen_chs: 
-                self.declare_gen(ch=self.swap_chs[qA], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qA], mixer_freq=mixer_freq)
+            if self.swap_ch_types[qSort] == 'int4':
+                mixer_freq = self.cfg.hw.soc.dacs.swap.mixer_freq[qSort]
+            if self.swap_chs[qSort] not in self.gen_chs: 
+                self.declare_gen(ch=self.swap_chs[qSort], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qSort], mixer_freq=mixer_freq)
+
+            mixer_freq=0
+            if self.swap_Q_ch_types[qSort] == 'int4':
+                mixer_freq = self.cfg.hw.soc.dacs.swap_Q.mixer_freq[qSort]
+            if self.swap_Q_chs[qSort] not in self.gen_chs: 
+                self.declare_gen(ch=self.swap_Q_chs[qSort], nqz=self.cfg.hw.soc.dacs.swap_Q.nyquist[qSort], mixer_freq=mixer_freq)
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_EgGf_types = self.cfg.device.qubit.pulses.pi_EgGf.type
         assert all(type == 'flat_top' for type in self.pi_EgGf_types)
         self.pi_EgGf_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma
+
+        self.pi_EgGf_Q_types = self.cfg.device.qubit.pulses.pi_EgGf_Q.type
+        assert all(type == 'flat_top' for type in self.pi_EgGf_Q_types)
+        self.pi_EgGf_Q_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma
 
         # update timestep in outer loop over averager program
         self.timestep_us = cfg.expt.timestep
@@ -48,14 +61,18 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         # add qubit pulses to respective channels
         for q in self.all_qubits:
             if q != 1:
-                pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
                 if self.pi_EgGf_types[q] == 'gauss':
+                    pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}", sigma=pi_EgGf_sigma_cycles, length=pi_EgGf_sigma_cycles*4)
                 elif self.pi_EgGf_types[q] == 'flat_top':
                     sigma_ramp_cycles = 3
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
+
+                if self.pi_EgGf_Q_types[q] == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    self.add_gauss(ch=self.swap_Q_chs[q], name=f"pi_EgGf_Q_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
         
-        self.X_pulse(q=1, adiabatic=True, reload=True, play=False) # initialize adiabatic pulse waveform
+        # self.X_pulse(q=1, adiabatic=True, reload=True, play=False) # initialize adiabatic pulse waveform
 
         self.sync_all(200)
 
@@ -152,8 +169,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.sync_all(0)
 
             # pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0], gen_ch=self.qubit_chs[1])
-            phase = self.deg2reg(-30, gen_ch=self.qubit_chs[1])
-            # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            # phase = self.deg2reg(-30, gen_ch=self.qubit_chs[1])
+            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
             # self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
             # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0] // 2, waveform='qubit1_ZZ0_half')
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
@@ -187,11 +204,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
             self.sync_all()
 
-            ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
             waveform = f'qubit0_ZZ1'
-            freq = self.freq2reg(self.cfg.device.qubit.f_ge[0] + ZZs[0, 1], gen_ch=self.qubit_chs[0])
-            gain = self.cfg.device.qubit.pulses.pi_ge.gain[0] //2
-            sigma_cycles = self.us2cycles(self.pi_sigmas_us[0], gen_ch=self.qubit_chs[0])
+            freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[0], gen_ch=self.qubit_chs[0])
+            gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
+            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0], gen_ch=self.qubit_chs[0])
             self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
             self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
             self.sync_all()
@@ -213,59 +229,91 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             assert False, 'Init state not valid'
 
         # ================= #
-        # Begin protocol
+        # Begin protocol v2
         # ================= #
 
         count_us = 0
         self.end_times_us = []
 
-        # apply Eg-Gf with qA=0: 1. eggg -> gfgg [path 1]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        # X 1. apply Eg-Gf with qDrive=2: eegg -> egfg [path 1]
+        # 1. apply Eg-Gf with qDrive=2: gegg -> ggfg [path 1]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
 
-        # apply Eg-Gf with qA=2: 2. gfgg -> ggeg [path 1]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=self.deg2reg(-90, gen_ch=self.swap_chs[2]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
+        # # X 2. apply Eg-Gf with qDrive=3: gegg -> gggf [path 2]
+        # # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[3], freq_reg=self.f_EgGf_Q_regs[3], type=self.pi_EgGf_Q_types[3], phase=self.deg2reg(0, gen_ch=self.swap_Q_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[3], sigma_us=self.pi_EgGf_Q_sigmas_us[3], waveform='pi_EgGf_Q_swap3')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+
+        # 3. apply ef pulse on Q2 (at this point guaranteed no excitation in Q1) [path 1]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
 
-        # 3. apply pi pulse on Q1 - need to average pi pulses corresponding to eegg -> eggg (pi_Q1_ZZ with qB=0), ggeg -> geeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [divisional pi pulse between two paths of protocol]
-        # freq_reg = self.f_Q1_ZZ_regs[0]
-        gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
-        sigma_us = self.pi_Q1_ZZ_sigmas_us[0]
-        freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
-        # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=self.deg2reg(-90, gen_ch=self.qubit_chs[1]), gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-        # self.Y_pulse(q=1, pihalf=False, adiabatic=True, play=True)
+        # # 4. apply ef pulse on Q3 (at this point guaranteed no excitation in Q1) [path 2]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.f_ef_regs[3], type=self.pi_ef_types[3], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[3], sigma_us=self.pi_ef_sigmas_us[3], waveform='pi_ef_q3')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
 
-        # apply Eg-Gf with qA=0: 4. eggg -> gfgg [path 2]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        # apply Eg-Gf with qA=3: 5. gfgg -> ggge [path 2]
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=self.deg2reg(-90, gen_ch=self.swap_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        # 6. apply pi pulse on Q1 - need to average pi pulses corresponding to ggge -> gege (pi_Q1_ZZ with qB=3), geeg -> ggeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [path 2, which should also affect path 1: geeg -> ggeg]
-        # freq_reg = self.f_Q1_ZZ_regs[3]
-        gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3]
-        sigma_us = self.pi_Q1_ZZ_sigmas_us[3]
-        freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
-        # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-        # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[3], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-        # print(f'Total protocol time (us): {count_us}')
-        # self.Y_pulse(q=1, pihalf=False, adiabatic=True, play=True)
-
-        # if self.cfg.expt.post_select:
+        # if 'post_select' in self.cfg.expt and self.cfg.expt.post_select:
         #     self.setup_measure(qubit=1, basis='X', play=True, flag=None)
+
+        # # ================= #
+        # # Begin protocol v1
+        # # ================= #
+
+        # count_us = 0
+        # self.end_times_us = []
+
+        # # apply Eg-Gf with qA=0: 1. eggg -> gfgg [path 1]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+
+        # # apply Eg-Gf with qA=2: 2. gfgg -> ggeg [path 1]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[2], freq_reg=self.f_EgGf_regs[2], type=self.pi_EgGf_types[2], phase=self.deg2reg(-90, gen_ch=self.swap_chs[2]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[2], sigma_us=self.pi_EgGf_sigmas_us[2], waveform='pi_EgGf_swap2')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+
+        # # 3. apply pi pulse on Q1 - need to average pi pulses corresponding to eegg -> eggg (pi_Q1_ZZ with qB=0), ggeg -> geeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [divisional pi pulse between two paths of protocol]
+        # # freq_reg = self.f_Q1_ZZ_regs[0]
+        # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
+        # sigma_us = self.pi_Q1_ZZ_sigmas_us[0]
+        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        # # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        # # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[0], phase=self.deg2reg(-90, gen_ch=self.qubit_chs[1]), gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ0')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+        # # self.Y_pulse(q=1, pihalf=False, adiabatic=True, play=True)
+
+        # # apply Eg-Gf with qA=0: 4. eggg -> gfgg [path 2]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[0], freq_reg=self.f_EgGf_regs[0], type=self.pi_EgGf_types[0], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf.gain[0], sigma_us=self.pi_EgGf_sigmas_us[0], waveform='pi_EgGf_swap0')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+
+        # # apply Eg-Gf with qA=3: 5. gfgg -> ggge [path 2]
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_chs[3], freq_reg=self.f_EgGf_regs[3], type=self.pi_EgGf_types[3], phase=self.deg2reg(-90, gen_ch=self.swap_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf.gain[3], sigma_us=self.pi_EgGf_sigmas_us[3], waveform='pi_EgGf_swap3')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+
+        # # 6. apply pi pulse on Q1 - need to average pi pulses corresponding to ggge -> gege (pi_Q1_ZZ with qB=3), geeg -> ggeg (pi_Q1_ZZ with qB=2), gegg -> gggg (pi on Q1) [path 2, which should also affect path 1: geeg -> ggeg]
+        # # freq_reg = self.f_Q1_ZZ_regs[3]
+        # gain = cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3]
+        # sigma_us = self.pi_Q1_ZZ_sigmas_us[3]
+        # freq_reg = int(np.average([self.f_Q1_ZZ_regs[3], self.f_Q1_ZZ_regs[2], self.f_ge_regs[1]]))
+        # # gain = int(np.average([cfg.device.qubit.pulses.pi_Q1_ZZ.gain[3], cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+        # # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[3], self.pi_Q1_ZZ_sigmas_us[2], self.pi_sigmas_us[1]])
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=freq_reg, type=self.pi_Q1_ZZ_types[3], phase=0, gain=gain, sigma_us=sigma_us, waveform='qubit1_ZZ3')
+        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all()
+        # # print(f'Total protocol time (us): {count_us}')
+        # # self.Y_pulse(q=1, pihalf=False, adiabatic=True, play=True)
+
+        # # if self.cfg.expt.post_select:
+        # #     self.setup_measure(qubit=1, basis='X', play=True, flag=None)
 
         # # ================= #
         # # Reverse protocol

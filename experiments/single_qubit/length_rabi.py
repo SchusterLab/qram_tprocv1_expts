@@ -141,8 +141,10 @@ class LengthRabiProgram(AveragerProgram):
 
         # play pi pulse that we want to calibrate
         if self.pi_test_sigma > 0:
+            # print(self.pi_test_sigma, self.gain_pi_test)
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
-        self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
+            # pass
+        self.sync_all(5)
 
         if self.checkEF: # map excited back to qubit ground state for measurement
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")

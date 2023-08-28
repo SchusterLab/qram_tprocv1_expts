@@ -221,7 +221,16 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
     def state_prep_pulse(self, qubits, **kwargs):
         qA, qB = self.cfg.expt.tomo_qubits
         
-        self.Y_pulse(q=0, play=True, pihalf=True)
+        # self.Y_pulse(q=0, play=True)
+        # self.sync_all()
+        # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
+        # self.sync_all()
+
+        # self.X_pulse(q=0, play=True, pihalf=True, neg=True)
+        # self.X_pulse(q=1, play=True)
+        # self.X_pulse(q=1, special='pulseiq', play=True, **kwargs)
+        # self.Y_pulse(q=0, play=True, pihalf=True)
         # self.sync_all()
         # self.Y_pulse(q=2, play=True, pihalf=True)
         # self.sync_all()
@@ -231,7 +240,7 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
         super().initialize()
         qubits = self.cfg.expt.tomo_qubits
         qA, qB = qubits
-        self.cfg.expt.state_prep_kwargs = None
+        if 'state_prep_kwargs' not in self.cfg.expt: self.cfg.expt.state_prep_kwargs = None
 
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
         self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
@@ -344,7 +353,8 @@ class EgGfStateTomographyExperiment(Experiment):
             # print(basis)
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.basis = basis
-
+            assert 'Icontrols' in self.cfg.expt and 'Qcontrols' in self.cfg.expt and 'times_us' in self.cfg.expt
+            cfg.expt.state_prep_kwargs = dict(I_mhz_vs_us=cfg.expt.Icontrols, Q_mhz_vs_us=cfg.expt.Qcontrols, times_us=cfg.expt.times_us)
             # initialize registers
             # cfg.expt.update(dict(
             #     start=0,
@@ -533,9 +543,22 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
     def state_prep_pulse(self, **kwargs):
         cfg = self.cfg
         # pass in kwargs via cfg.expt.state_prep_kwargs
+        # self.X_pulse(q=0, play=True)
+        # self.X_pulse(q=1, play=True)
+        # self.X_pulse(q=1, special='pulseiq', play=True, **kwargs)
+
+        count_us = 0
+        self.Y_pulse(q=1, play=True)
+
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
+        self.sync_all()
+
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
+        self.sync_all()
+
         # self.Y_pulse(q=self.qubit, play=True, pihalf=False, neg=False)
-        self.Y_pulse(q=0, play=True, pihalf=False, neg=False)
-        self.Y_pulse(q=2, play=True, pihalf=False, neg=False)
+        # self.Y_pulse(q=0, play=True, pihalf=False, neg=False)
+        # self.Y_pulse(q=2, play=True, pihalf=False, neg=False)
         # self.sync_all()
         # self.X_pulse(q=0, play=True, pihalf=True, neg=False)
         # self.sync_all()
@@ -621,27 +644,40 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
 
     def initialize(self):
         super().initialize()
-        self.cfg.expt.state_prep_kwargs = None
+        if 'state_prep_kwargs' not in self.cfg.expt: self.cfg.expt.state_prep_kwargs = None
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
         self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
         self.f_EgGf_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf, self.swap_chs)]
+
+        self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
+        self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
+        self.f_EgGf_Q_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf_Q, self.swap_chs)]
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_EgGf_types = self.cfg.device.qubit.pulses.pi_EgGf.type
         assert all(type == 'flat_top' for type in self.pi_EgGf_types)
         self.pi_EgGf_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma
 
-        # initialize ef pulse on qB
-        qB = 1
+        self.pi_EgGf_Q_types = self.cfg.device.qubit.pulses.pi_EgGf_Q.type
+        assert all(type == 'flat_top' for type in self.pi_EgGf_Q_types)
+        self.pi_EgGf_Q_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma
+
+        # add qubit pulses to respective channels
         for q in range(4):
             if q != 1:
-                pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
                 if self.pi_EgGf_types[q] == 'gauss':
+                    pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}", sigma=pi_EgGf_sigma_cycles, length=pi_EgGf_sigma_cycles*4)
                 elif self.pi_EgGf_types[q] == 'flat_top':
                     sigma_ramp_cycles = 3
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_EgGf_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
+
+                if self.pi_EgGf_Q_types[q] == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    self.add_gauss(ch=self.swap_Q_chs[q], name=f"pi_EgGf_Q_swap{q}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
+
         self.sync_all(200)
+
 
 # ===================================================================== #
 
@@ -653,6 +689,7 @@ class StateTomography1QExperiment(Experiment):
     Experimental Config:
     expt = dict(
         reps: number averages per measurement basis iteration
+        singleshot_reps: number averages in single shot calibration
     )
     """
 
@@ -684,6 +721,7 @@ class StateTomography1QExperiment(Experiment):
         for prep_state in tqdm(self.calib_order):
             # print(prep_state)
             cfg = AttrDict(deepcopy(self.cfg))
+            cfg.expt.reps = self.cfg.expt.singleshot_reps
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
             err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
@@ -716,6 +754,8 @@ class StateTomography1QExperiment(Experiment):
             # print(basis)
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.basis = basis
+            if 'Icontrols' in cfg.expt and 'Qcontrols' in cfg.expt and 'times_us' in self.cfg.expt:
+                cfg.expt.state_prep_kwargs = dict(I_mhz_vs_us=cfg.expt.Icontrols, Q_mhz_vs_us=cfg.expt.Qcontrols, times_us=cfg.expt.times_us)
             tomo = StateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
             print(tomo)
             tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)

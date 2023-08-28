@@ -196,9 +196,18 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
             data=self.data
         if fit:
             xdata = data['xpts'][1:-1]
-            data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*data['amps'][1:-1])
-            data['fit_avgi'], data['fit_err_avgi'] = fitter.fitlor(xdata, signs[1]*data['avgi'][1:-1])
-            data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[2]*data['avgq'][1:-1])
+            ampsdata = data['amps'][1:-1]
+            avgidata = data['avgi'][1:-1]
+            avgqdata = data['avgq'][1:-1]
+            # if self.cfg.expt.pulseB:
+            #     imid = len(xdata) // 2
+            #     xdata = np.concatenate((xdata[:imid-8], xdata[imid+8:]))
+            #     ampsdata = np.concatenate((ampsdata[:imid-8], ampsdata[imid+8:]))
+            #     avgidata = np.concatenate((avgidata[:imid-8], avgidata[imid+8:]))
+            #     avgqdata = np.concatenate((avgqdata[:imid-8], avgqdata[imid+8:]))
+            data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*ampsdata)
+            data['fit_avgi'], data['fit_err_avgi'] = fitter.fitlor(xdata, signs[1]*avgidata)
+            data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[2]*avgqdata)
         return data
 
     def display(self, data=None, fit=True, signs=[1,1], **kwargs):
