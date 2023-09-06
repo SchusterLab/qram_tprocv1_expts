@@ -247,6 +247,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         # if count_us < self.timestep_us: self.end_times_us.append(count_us)
         # self.sync_all()
 
+        self.X_pulse(q=2, play=True)
+
         # 3. apply ef pulse on Q2 (at this point guaranteed no excitation in Q1) [path 1]
         count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
