@@ -99,6 +99,7 @@ class LengthRabiEgGfProgram(CliffordAveragerProgram):
                 self.setup_and_pulse(ch=self.swap_chs[qSort], style="arb", freq=self.f_EgGf_reg, phase=0, gain=cfg.expt.gain, waveform="pi_EgGf_swap") #, phrst=1)
             elif pulse_type == 'flat_top':
                 flat_length = self.sigma_test - 3*4
+                # print(cfg.expt.gain, flat_length, self.f_EgGf_reg)
                 if flat_length >= 3:
                     self.setup_and_pulse(
                         ch=self.swap_chs[qSort],
@@ -190,7 +191,7 @@ class LengthRabiEgGfExperiment(Experiment):
         
         lengths = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
         
-        data={"xpts":[], "avgi":[[],[]], "avgq":[[],[]], "amps":[[],[]], "phases":[[],[]], 'counts_calib':[]}
+        data={"xpts":[], "avgi":[[],[]], "avgq":[[],[]], "amps":[[],[]], "phases":[[],[]], 'counts_calib':[], 'counts_raw':[[],[]]}
 
         # ================= #
         # Get single shot calibration for 2 qubits
@@ -303,6 +304,7 @@ class LengthRabiEgGfExperiment(Experiment):
                     shots, _ = lengthrabi.get_shots(angle=angles_q, threshold=thresholds_q)
                     # 00, 01, 10, 11
                     counts = np.array([sort_counts(shots[adcA_ch], shots[adcB_ch])])
+                    data['counts_raw'][0].append(counts)
                     counts = fix_neg_counts(correct_readout_err(counts, data['counts_calib']))
                     counts = counts[0] # go back to just 1d array
                     if qDrive == qB:
@@ -322,6 +324,7 @@ class LengthRabiEgGfExperiment(Experiment):
                     shots, _ = lengthrabi.get_shots(angle=angles_q, threshold=thresholds_q)
                     # 00, 01, 10, 11
                     counts = np.array([sort_counts(shots[adcA_ch], shots[adcB_ch])])
+                    data['counts_raw'][1].append(counts)
                     # print('pre correct', counts)
                     counts = fix_neg_counts(correct_readout_err(counts, data['counts_calib']))
                     # print(counts)
@@ -344,12 +347,11 @@ class LengthRabiEgGfExperiment(Experiment):
                     epop_qB = epop_qNotDrive
                     fpop_qB = np.zeros_like(epop_qB)
 
-                data['avgi'][0].append(epop_qA) # let "avgi" be the e vs not e signal
-                data['avgq'][0].append(fpop_qA) # not measuring f state of qA, so just put 0
+                data['avgi'][0].append(epop_qA)
+                data['avgq'][0].append(fpop_qA)
 
-                data['avgi'][1].append(epop_qB) # let "avgi" be e vs. not e signal
-                # data['avgi'][1].append(gpop_qB) # let "avgi" be g vs. not g signal
-                data['avgq'][1].append(fpop_qB) # let "avgq" be f vs. not f signal
+                data['avgi'][1].append(epop_qB)
+                data['avgq'][1].append(fpop_qB) 
         
             data['xpts'].append(length)
 
@@ -364,7 +366,7 @@ class LengthRabiEgGfExperiment(Experiment):
         if data is None:
             data=self.data
         if fit:
-            # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
+            # fitparams=[yscale, freq, phase_deg, decay, y0]
             # Remove the first and last point from fit in case weird edge measurements
             fitparams = None
 
@@ -385,7 +387,8 @@ class LengthRabiEgGfExperiment(Experiment):
                 # data['fitA_err_amps'] = pCovA_amps
 
             try:
-                pB_avgi, pCovB_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][1][:-1], fitparams=None)
+                fitparams=[None, None, 0, None, None]
+                pB_avgi, pCovB_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][1][:-1], fitparams=fitparams)
                 data['fitB_avgi'] = pB_avgi   
             except Exception as e: print('Exception:', e)
             # fitparams = [20, 1/0.6, None, None, None, None]
@@ -443,10 +446,10 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.figure(figsize=(14,8))
         plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
         plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="I [adc level]")
-        plt.plot(xpts_ns[0:-1], data["avgi"][0][0:-1],'o-')
+        plt.plot(xpts_ns, data["avgi"][0],'o-')
         if fit:
             p = data['fitA_avgi']
-            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
             if p[2] > 180: p[2] = p[2] - 360
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
@@ -454,15 +457,16 @@ class LengthRabiEgGfExperiment(Experiment):
             pi2_length = pi_length/2
             print(f'Pi length from avgi data (qubit A) [us]: {pi_length}')
             print(f'\tPi/2 length from avgi data (qubit A) [us]: {pi2_length}')
+            print(f'\tDecay time [us]: {p[3]}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.subplot(223, xlabel="Length [ns]", ylabel="Q [adc levels]")
-        plt.plot(xpts_ns[0:-1], data["avgq"][0][0:-1],'o-')
+        plt.plot(xpts_ns, data["avgq"][0],'o-')
         if fit:
             p = data['fitA_avgq']
-            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
             if p[2] > 180: p[2] = p[2] - 360
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
@@ -470,15 +474,17 @@ class LengthRabiEgGfExperiment(Experiment):
             pi2_length = pi_length/2
             print(f'Pi length from avgq data (qubit A) [us]: {pi_length}')
             print(f'\tPi/2 length from avgq data (qubit A) [us]: {pi2_length}')
+            print(f'\tDecay time [us]: {p[3]}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        # plt.axvline(631)
+        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
-        plt.plot(xpts_ns[0:-1], data["avgi"][1][0:-1],'o-')
+        plt.plot(xpts_ns, data["avgi"][1],'o-')
         if fit:
             p = data['fitB_avgi']
-            plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+            plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
             if p[2] > 180: p[2] = p[2] - 360
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
@@ -486,16 +492,17 @@ class LengthRabiEgGfExperiment(Experiment):
             pi2_length = pi_length/2
             print(f'Pi length from avgi data (qubit B) [us]: {pi_length}')
             print(f'\tPi/2 length from avgi data (qubit B) [us]: {pi2_length}')
+            print(f'\tDecay time [us]: {p[3]}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.subplot(224, xlabel="Length [ns]")
-        plt.plot(xpts_ns[0:-1], data["avgq"][1][0:-1],'o-')
+        plt.plot(xpts_ns, data["avgq"][1],'o-')
         if fit:
             try:
                 p = data['fitB_avgq']
-                plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
+                plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
                 if p[2] > 180: p[2] = p[2] - 360
                 elif p[2] < -180: p[2] = p[2] + 360
                 if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
@@ -503,10 +510,11 @@ class LengthRabiEgGfExperiment(Experiment):
                 pi2_length = pi_length/2
                 print(f'Pi length from avgq data (qubit B) [us]: {pi_length}')
                 print(f'\tPi/2 length from avgq data (qubit B) [us]: {pi2_length}')
+                print(f'\tDecay time [us]: {p[3]}')
                 plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
                 plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
             except Exception as e: print('Exception:', e)
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.tight_layout()
         plt.show()

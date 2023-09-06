@@ -474,7 +474,7 @@ class SimultaneousRBExperiment(Experiment):
             # depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
             # popt, pcov = fitter.fitrb(depths[:-4], med_probs[:-4])
             # popt, pcov = fitter.fitrb(depths, med_probs)
-            print(working_depths, avg_probs)
+            # print(working_depths, avg_probs)
             # popt, pcov = fitter.fitrb(working_depths, avg_probs)
             data['std_dev_probs'][iq] = std_dev_probs
             data['med_probs'][iq] = med_probs
