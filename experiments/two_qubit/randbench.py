@@ -197,14 +197,32 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
 
             neg = '-' in gate
             if inverted: neg = not neg
-            pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
+            if 'X' in gate:
+                pulse_func(qubit, 
+                           pihalf='/2' in gate, 
+                           neg=neg, 
+                           extra_phase=extra_phase, 
+                           play=play, 
+                           reload=False,
+                           I_mhz_vs_us = self.Is, 
+                           Q_mhz_vs_us = self.Qs,
+                           times_us = self.us) # very important to not reload unless necessary to save memory on the gen
+
+            else: 
+                pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
             # print(self.overall_phase[qubit])
 
-    def __init__(self, soccfg, cfg, gate_list, qubit_list):
+    def __init__(self, soccfg, cfg, gate_list, qubit_list, special=False, Is=None, Qs=None, us=None):
         # gate_list should include the total gate!
         # qubit_list should specify the qubit on which each random gate will be applied
         self.gate_list = gate_list
         self.qubit_list = qubit_list
+        if special and (Is is None or Qs is None or us is None):
+            raise ValueError('Must provide Is and Qs for special program')
+        self.Is = Is
+        self.Qs = Qs
+        self.special = special
+        self.us = us
         super().__init__(soccfg, cfg)
 
     def body(self):
@@ -262,7 +280,12 @@ class SimultaneousRBExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='SimultaneousRB', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False, debug=False, special = False, Is = None, Qs = None, us = None):
+
+        if special and (Is is None or Qs is None or us is None):
+            raise ValueError('Must provide Is and Qs and us for special program')
+
+        
         qubits = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
@@ -381,7 +404,14 @@ class SimultaneousRBExperiment(Experiment):
                 qubit_list = np.random.choice(self.cfg.expt.qubits, size=len(gate_list)-1)
 
                 if self.cfg.expt.use_EgGf_subspace: randbench = RBEgGfProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubits=self.cfg.expt.qubits, qDrive=self.cfg.expt.qDrive)
-                else: randbench = SimultaneousRBProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubit_list=qubit_list)
+                else: randbench = SimultaneousRBProgram(soccfg=self.soccfg, 
+                                                        cfg=self.cfg, 
+                                                        gate_list=gate_list, 
+                                                        qubit_list=qubit_list,
+                                                        special=special,
+                                                        Is=Is,
+                                                        Qs=Qs,
+                                                        us=us)
                 # print(randbench)
                 # from qick.helpers import progs2json
                 # print(progs2json([randbench.dump_prog()]))
