@@ -9,7 +9,7 @@ from qick import *
 from qick.helpers import gauss
 
 from slab import Experiment, AttrDict
-from tqdm import tqdm_notebook as tqdm
+# from tqdm import tqdm_notebook as tqdm
 
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram
@@ -198,6 +198,7 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
             neg = '-' in gate
             if inverted: neg = not neg
             if 'X' in gate:
+                #print("doing the Is and Qs")
                 pulse_func(qubit, 
                            pihalf='/2' in gate, 
                            neg=neg, 
@@ -332,7 +333,8 @@ class SimultaneousRBExperiment(Experiment):
 
                 calib_prog_dict = dict()
                 calib_order = ['gg', 'ge', 'eg', 'ee']
-                for prep_state in tqdm(calib_order):
+                # for prep_state in tqdm(calib_order):
+                for prep_state in calib_order:
                     # print(prep_state)
                     sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
                     err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
@@ -350,7 +352,7 @@ class SimultaneousRBExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f'Qubit  ({q})')
-                    fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                    fid, threshold, angle = hist(data=shot_data, plot=False, verbose=False)
                     thresholds_q[q] = threshold[0]
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     angles_q[q] = angle
@@ -375,7 +377,8 @@ class SimultaneousRBExperiment(Experiment):
         data={"xpts":[], "avgi":deepcopy(a), "avgq":deepcopy(a), "amps":deepcopy(a), "phases":deepcopy(a), "avgi_err":deepcopy(a), "avgq_err":deepcopy(a)}
 
         depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
-        for depth in tqdm(depths):
+        # for depth in tqdm(depths):
+        for depth in depths:
             # print(f'depth {depth} gate list (last gate is the total gate)')
             data['xpts'].append([])
             for iq, q in enumerate(qubits):
