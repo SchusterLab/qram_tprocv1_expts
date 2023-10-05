@@ -185,7 +185,7 @@ def fitdecaysin(xdata, ydata, fitparams=None):
 
 def twofreq_decaysin(x, *p):
     yscale0, freq0, phase_deg0, decay0, y00, x00, yscale1, freq1, phase_deg1, y01 = p
-    p0 = [yscale0, freq0, phase_deg0, decay0, 0, x00]
+    p0 = [yscale0, freq0, phase_deg0, decay0, 0]
     p1 = [yscale1, freq1, phase_deg1, y01]
     return y00 + decaysin(x, *p0) * sinfunc(x, *p1)
 

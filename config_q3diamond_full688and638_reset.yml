@@ -1,19 +1,19 @@
 device:
     qubit:
-        T1: [45, 60, 55, 50] # [us]
-        f_ge: [4129.446891895333, 3454.831029052847, 4779.441948200766, 4394.480407282836] # [MHz]
+        f_ge: [4125.896624486673, 3452.4896245260456, 4781.036610190303, 4395.282433405918] # [MHz]
+        f_ef: [3900.453831863158, 3354.521139701014, 4590.177049031502, 4221.931929269591] # [MHz]
         f_Q1_ZZ: [3449.8479407210834, 0, 3453.9100412763405, 3453.7081320189013] # [MHz] frequency of Q1 when other qubits are in e
         f_Q_ZZ1: [4124.290504319941, 0, 4778.502356522805, 4393.211594838028] # [MHz] frequency of Qx when Q1 is in e
-        f_ef: [3903.416022184577, 3354.521139701014, 4590.177049031502, 4221.931929269591] # [MHz]
         f_EgGf: [2681.44696031, -1, 2028.1, 2407.9] # [MHz] expect to be ge_1 + ef_1 - ge_0
         f_EgGf_Q: [-1, -1, 5913.75, 5163.75] # [MHz] drive on Q1 to perform a swap with Qx
         gs: [54.233867058381975, 56.612917931142945, 42.87162116341841, 5.275712018852002, 2.7385639790041876, 6.807578931629736] # [MHz] g01, g12, g13, g02, g03, g23 from theoretical comparison for ZZ shift
         ZZs: [0.0, -5.11947537, -0.14716401, -0.55347891, -5.11803281, 0.0, -1.17332055, -1.13249508, -0.17856354, -1.0686238, 0.0, -0.50772987, -0.64108991, -1.26309732, -0.62827282, 0.0] # make sure to reshape to 4x4: (QA freq when QB is in e) - (QA freq when QB is in g). rows = qA, cols = qB
+        T1: [60, 57, 55, 50] # [us]
 
         pulses:
             pi_ge:
-                gain: [27232, 947, 2338, 2511]
-                sigma: [0.015, 0.015, 0.015, 0.015] # [us]
+                gain: [29351, 26882, 2806, 2572]
+                sigma: [0.015, 0.100, 0.020886833661091352, 0.015] # [us]
                 type: 'gauss'
             # pi_ge_adiabatic:
             #     gain: [-1, 25000, -1, -1]
@@ -23,8 +23,8 @@ device:
             # pi_ge_IQ:
             #     gain: 1373
             pi_ef:
-                gain: [27083, 499, 1633, 1669]
-                sigma: [0.015, 0.015, 0.015, 0.015] # [us]
+                gain: [20742, 26000, 1633, 1669]
+                sigma: [0.015, 0.100, 0.015, 0.015] # [us]
                 type: 'gauss'
             pi_Q1_ZZ: # pi pulse length for Q1 when other qubits are in e
                 gain:  [994, 0, 959, 950]
@@ -46,13 +46,13 @@ device:
     readout:
         trig_offset: 125 # [Clock ticks]
         lo_sideband: [1, -1, 1, 1] # whether taking the +/- sideband after LO
-        frequency: [-71.06906867350231, -815.202041072, 821.4880333333334, 90.15933333333334] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
+        frequency: [-69.96168182586354, -816.25952299, 822.3638666666668, 91.11933333333333] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
         # frequency: [-72.926, -813.528, 819.6947 , 88.346] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
-        gain: [0.35, 0.35, 0.95, 0.4] # [MUX units: range -1 to 1, signed amplitude]
+        gain: [0.03, 0.025, 0.4, 0.025] # [MUX units: range -1 to 1, signed amplitude]
         # gain: [0.25, 0.25, 0.95, 0.25] # [MUX units: range -1 to 1, signed amplitude]
         readout_length: 5 # [us]
         # readout_length: [8, 8, 8, 8] # [us]
-        relax_delay: [220, 500, 220, 200] # [us]
+        relax_delay: [240, 230, 220, 200] # [us]
 
 hw:
     soc:
@@ -90,5 +90,5 @@ hw:
 
 aliases: # for use in instrument manager
     # readout_LO: SC_26C1
-    # soc: Qick187
-    soc: Qick233
+    soc: Qick187
+    # soc: Qick233

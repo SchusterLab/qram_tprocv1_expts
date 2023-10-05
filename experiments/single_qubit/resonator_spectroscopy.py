@@ -30,33 +30,36 @@ class ResonatorSpectroscopyExperiment(Experiment):
 
     def acquire(self, progress=False):
         xpts=self.cfg.expt["start"] + self.cfg.expt["step"]*np.arange(self.cfg.expt["expts"])
-        q_ind = self.cfg.expt.qubit
+        self.qubit = self.cfg.expt.qubit
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
-                if isinstance(value, list):
-                    subcfg.update({key: value[q_ind]})
-                elif isinstance(value, dict):
+                if isinstance(value, dict):
                     for key2, value2 in value.items():
-                        for key3, value3 in value2.items():
-                            if isinstance(value3, list):
-                                value2.update({key3: value3[q_ind]})                                
+                        if isinstance(value2, dict):
+                            for key3, value3 in value2.items():
+                                if not(isinstance(value3, list)):
+                                    value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
 
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
         for f in tqdm(xpts, disable=not progress):
             # self.cfg.expt.frequency = f
             cfg = AttrDict(deepcopy(self.cfg))
-            cfg.device.readout.frequency = f
+            cfg.device.readout.frequency[self.qubit] = f
             rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-            # rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-            # print(rspec)
             avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-            # avgi = avgi[0][0]
-            # avgq = avgq[0][0]
             datai, dataq = rspec.collect_shots()
             avgi = np.average(datai)
             avgq = np.average(dataq)
             amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
             phase = np.angle(avgi+1j*avgq) # Calculating the phase
+            self.prog = rspec
+            # if f > 822.426:
+            #     print('amps', amp)
+            #     print('hello', rspec.cfg)
+            #     break
 
             data["xpts"].append(f)
             data["avgi"].append(avgi)
@@ -85,7 +88,10 @@ class ResonatorSpectroscopyExperiment(Experiment):
             if isinstance(data['fit'], (list, np.ndarray)):
                 f0, Qi, Qe, phi, scale, a0, slope = data['fit']
                 if 'lo' in self.cfg.hw:
-                    f0 = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + f0)
+                    print(float(self.cfg.hw.lo.readout.frequency)*1e-6)
+                    print(self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit]))
+                    print(f0)
+                    f0 = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + f0)
                 if verbose:
                     print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
                     print(f'Freq with maximum transmission: {xdata[np.argmax(ydata)]}')
@@ -109,12 +115,12 @@ class ResonatorSpectroscopyExperiment(Experiment):
             data=self.data 
 
         if 'lo' in self.cfg.hw:
-            xpts = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + data['xpts'][1:-1])
+            xpts = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'][1:-1])
         else:
             xpts = data['xpts'][1:-1]
 
         plt.figure(figsize=(16,16))
-        plt.subplot(311, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain}",  ylabel="Amps [ADC units]")
+        plt.subplot(311, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain[self.qubit]}",  ylabel="Amps [ADC units]")
         plt.plot(xpts, data['amps'][1:-1],'o-')
         if fit:
             plt.plot(xpts, fitter.hangerS21func_sloped(data["xpts"][1:-1], *data["fit"]))
@@ -124,9 +130,9 @@ class ResonatorSpectroscopyExperiment(Experiment):
                 plt.axvline(peak[0], linestyle='--', color='0.2')
                 print(f'Found peak [MHz]: {peak[0]}')
         # plt.axvline(5787.75)
-        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency + 0.75), c='k', ls='--')
-        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency + 0.1), c='k', ls='--')
-        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency - 0.8), c='k', ls='--') # |0>|1>
+        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.75), c='k', ls='--')
+        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.1), c='k', ls='--')
+        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] - 0.8), c='k', ls='--') # |0>|1>
         # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency - 0.7), c='k', ls='--') # |0>|0+1>
 
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
@@ -164,20 +170,22 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         xpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
         gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"]*np.arange(self.cfg.expt["expts_gain"])
 
-        q_ind = self.cfg.expt.qubit
+        self.qubit = self.cfg.expt.qubit
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
-                if isinstance(value, list):
-                    subcfg.update({key: value[q_ind]})
-                elif isinstance(value, dict):
+                if isinstance(value, dict):
                     for key2, value2 in value.items():
-                        for key3, value3 in value2.items():
-                            if isinstance(value3, list):
-                                value2.update({key3: value3[q_ind]})                                
+                        if isinstance(value2, dict):
+                            for key3, value3 in value2.items():
+                                if not(isinstance(value3, list)):
+                                    value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
 
         data={"xpts":[], "gainpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
         for gain in tqdm(gainpts, disable=not progress):
-            self.cfg.device.readout.gain = gain
+            self.cfg.device.readout.gain[self.qubit] = gain
             data["avgi"].append([])
             data["avgq"].append([])
             data["amps"].append([])
@@ -185,7 +193,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
             for f in tqdm(xpts, disable=True):
                 cfg = AttrDict(deepcopy(self.cfg))
-                cfg.device.readout.frequency = f
+                cfg.device.readout.frequency[self.qubit] = f
                 rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
                 avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                 datai, dataq = rspec.collect_shots()
@@ -234,7 +242,10 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         if data is None:
             data=self.data 
 
-        inner_sweep = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + data['xpts'])
+        if 'lo' in self.cfg.hw:
+            inner_sweep = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'])
+        # inner_sweep = float(self.cfg.hw.lo.readout.frequency[self.qubit])*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'])
+        else: inner_sweep = data['xpts']
         outer_sweep = data['gainpts']
 
         amps = data['amps']
@@ -268,7 +279,11 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         plt.ylabel("Resonator Gain [DAC level]")
         # # plt.clim(vmin=-0.2, vmax=0.2)
         # # plt.clim(vmin=-10, vmax=5)
-        # plt.colorbar(label='Amps-Avg [ADC level]')
+        plt.colorbar(label='Amps-Avg [ADC level]')
+        plt.show()
+
+        print(y_sweep[-1])
+        plt.plot(x_sweep, amps[-1,:])
         plt.show()
         
     def save_data(self, data=None):

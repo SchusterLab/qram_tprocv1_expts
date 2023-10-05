@@ -389,9 +389,10 @@ class HistogramExperiment(Experiment):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
                     for key2, value2 in value.items():
-                        for key3, value3 in value2.items():
-                            if not(isinstance(value3, list)):
-                                value2.update({key3: [value3]*num_qubits_sample})                                
+                        if isinstance(value2, dict):
+                            for key3, value3 in value2.items():
+                                if not(isinstance(value3, list)):
+                                    value2.update({key3: [value3]*num_qubits_sample})                                
                 elif not(isinstance(value, list)):
                     subcfg.update({key: [value]*num_qubits_sample})
 
@@ -533,9 +534,9 @@ class SingleShotOptExperiment(Experiment):
                 for l_ind, l in enumerate(lenpts):
                     shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
                     shot.cfg = self.cfg
-                    shot.cfg.device.readout.frequency = f
-                    shot.cfg.device.readout.gain = gain
-                    shot.cfg.device.readout.readout_length = l 
+                    shot.cfg.device.readout.frequency[qubit_i] = f
+                    shot.cfg.device.readout.gain[qubit_i] = gain
+                    shot.cfg.device.readout.readout_length[qubit_i] = l 
                     check_e = True
                     if 'check_f' not in self.cfg.expt: check_f = False
                     else:

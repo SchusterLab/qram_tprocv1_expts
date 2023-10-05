@@ -96,6 +96,7 @@ class ToFCalibrationExperiment(Experiment):
         tof = ToFCalibrationProgram(soccfg=self.soccfg, cfg=self.cfg)
         # from qick.helpers import progs2json
         # print(progs2json([tof.dump_prog()]))
+        # print(self.im)
         iq = tof.acquire_decimated(self.im[self.cfg.aliases.soc], load_pulses=True, progress=True)
         i, q = iq[0]
         amp = np.abs(i+1j*q) # Calculating the magnitude
