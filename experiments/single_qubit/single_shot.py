@@ -529,14 +529,16 @@ class SingleShotOptExperiment(Experiment):
         threshold = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
         angle = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
 
+        qubit = self.cfg.expt.qubit
+
         for f_ind, f in enumerate(tqdm(fpts, disable=not progress)):
             for g_ind, gain in enumerate(gainpts):
                 for l_ind, l in enumerate(lenpts):
                     shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
                     shot.cfg = self.cfg
-                    shot.cfg.device.readout.frequency[qubit_i] = f
-                    shot.cfg.device.readout.gain[qubit_i] = gain
-                    shot.cfg.device.readout.readout_length[qubit_i] = l 
+                    shot.cfg.device.readout.frequency[qubit] = f
+                    shot.cfg.device.readout.gain[qubit] = gain
+                    shot.cfg.device.readout.readout_length = l 
                     check_e = True
                     if 'check_f' not in self.cfg.expt: check_f = False
                     else:

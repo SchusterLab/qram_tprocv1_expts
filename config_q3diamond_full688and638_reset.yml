@@ -1,6 +1,6 @@
 device:
     qubit:
-        f_ge: [4125.896624486673, 3452.4896245260456, 4781.036610190303, 4395.282433405918] # [MHz]
+        f_ge: [4125.896624486673, 3452.498932939386, 4781.036610190303, 4399.091470915781] # [MHz]
         f_ef: [3900.453831863158, 3354.521139701014, 4590.177049031502, 4221.931929269591] # [MHz]
         f_Q1_ZZ: [3449.8479407210834, 0, 3453.9100412763405, 3453.7081320189013] # [MHz] frequency of Q1 when other qubits are in e
         f_Q_ZZ1: [4124.290504319941, 0, 4778.502356522805, 4393.211594838028] # [MHz] frequency of Qx when Q1 is in e
@@ -12,7 +12,7 @@ device:
 
         pulses:
             pi_ge:
-                gain: [29351, 26882, 2806, 2572]
+                gain: [29351, 26882, 2806, 2646]
                 sigma: [0.015, 0.100, 0.020886833661091352, 0.015] # [us]
                 type: 'gauss'
             # pi_ge_adiabatic:
@@ -46,9 +46,9 @@ device:
     readout:
         trig_offset: 125 # [Clock ticks]
         lo_sideband: [1, -1, 1, 1] # whether taking the +/- sideband after LO
-        frequency: [-69.96168182586354, -816.25952299, 822.3638666666668, 91.11933333333333] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
+        frequency: [-69.96168182586354, -816.19952299, 822.2763666666668, 91.33733333 ] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955) - I swapped Q0 and Q2 relative to the original EM sims
         # frequency: [-72.926, -813.528, 819.6947 , 88.346] # [MHz] max: 860 MHz, must be in separate bins = fs/16 (hi/lo power: 6.787/6.793, 5.775/5.781, 7.681/7.686, 6.949/6.955)
-        gain: [0.03, 0.025, 0.4, 0.025] # [MUX units: range -1 to 1, signed amplitude]
+        gain: [0.03, 0.05, 0.6, 0.072] # [MUX units: range -1 to 1, signed amplitude]
         # gain: [0.25, 0.25, 0.95, 0.25] # [MUX units: range -1 to 1, signed amplitude]
         readout_length: 5 # [us]
         # readout_length: [8, 8, 8, 8] # [us]
