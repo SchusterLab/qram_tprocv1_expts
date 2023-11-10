@@ -177,6 +177,7 @@ class HistogramProgram(AveragerProgram):
         self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
         
         self.f_ge_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ge, self.qubit_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
         self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
@@ -190,32 +191,38 @@ class HistogramProgram(AveragerProgram):
         ro_ch = None
         if self.res_ch_types[qubit] == 'int4':
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qubit]
-        elif self.res_ch_types[qubit] == 'mux4':
-            assert self.res_chs[qubit] == 6
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qubit]
-            mux_freqs = cfg.device.readout.frequency
-            mux_gains = cfg.device.readout.gain
-            ro_ch=self.adc_chs[qubit]
+        # elif self.res_ch_types[qubit] == 'mux4':
+        #     assert self.res_chs[qubit] == 6
+        #     mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
+        #     mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qubit]
+        #     mux_freqs = cfg.device.readout.frequency
+        #     mux_gains = cfg.device.readout.gain
+        #     ro_ch=self.adc_chs[qubit]
+       
+    
         self.declare_gen(ch=self.res_chs[qubit], nqz=cfg.hw.soc.dacs.readout.nyquist[qubit], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+       
+       
+
         self.declare_readout(ch=self.adc_chs[qubit], length=self.readout_lengths_adc[qubit], freq=cfg.device.readout.frequency[qubit], gen_ch=self.res_chs[qubit])
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
-        for q in range(self.num_qubits_sample):
-            self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+        
+       # for q in range(self.num_qubits_sample):
+           # self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # add readout pulses to respective channels
         if self.res_ch_types[qubit] == 'mux4':
             self.set_pulse_registers(ch=self.res_chs[qubit], style="const", length=self.readout_lengths_dac[qubit], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_reg[qubit], phase=0, gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
+        else: self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_regs[qubit], phase=0, gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
         self.pi_ef_sigmas_us = self.cfg.device.qubit.pulses.pi_ef.sigma
-        self.pi_Q1_ZZ_sigmas_us = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma
+        #self.pi_Q1_ZZ_sigmas_us = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma
         self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
         self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
-        self.pi_Q1_ZZ_types = self.cfg.device.qubit.pulses.pi_Q1_ZZ.type
+        #self.pi_Q1_ZZ_types = self.cfg.device.qubit.pulses.pi_Q1_ZZ.type
         
         # declare qubit dacs, add qubit pi_ge pulses
         for q in range(len(self.pi_ge_types)):
@@ -230,9 +237,9 @@ class HistogramProgram(AveragerProgram):
             # assume ef pulses are gauss
             pi_ef_sigma_cycles = self.us2cycles(self.pi_ef_sigmas_us[q], gen_ch=self.qubit_chs[q])
             self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=pi_ef_sigma_cycles, length=pi_ef_sigma_cycles*4)
-            if q != 1:
-                pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
-                self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
+            # if q != 1:
+            #     # pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
+            #     self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
 
         self.sync_all(200)
     
@@ -241,123 +248,124 @@ class HistogramProgram(AveragerProgram):
 
         qubit = self.cfg.expt.qubit
 
-        # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
-        self.sync_all(10)
+        #Phase reset all channels
+        # for ch in self.gen_chs.keys():
+        #     if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+        #         # print('resetting', ch)
+        #         self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        #     self.sync_all()
+        # self.sync_all(10)
 
-        if 'pulse_test' in self.cfg.expt and self.cfg.expt.pulse_test:
-            # qDrive = 1
-            # qNotDrive = 2
-            # qSort = 2
-            # setup_ZZ = None
+        # if 'pulse_test' in self.cfg.expt and self.cfg.expt.pulse_test:
+        #     # qDrive = 1
+        #     # qNotDrive = 2
+        #     # qSort = 2
+        #     # setup_ZZ = None
 
-            qDrive = 2
-            qNotDrive = 1
-            qSort = 2
-            setup_ZZ = None
+        #     qDrive = 2
+        #     qNotDrive = 1
+        #     qSort = 2
+        #     setup_ZZ = None
 
-            # qDrive = 3
-            # qNotDrive = 1
-            # qSort = 3
-            # setup_ZZ = 0
+        #     # qDrive = 3
+        #     # qNotDrive = 1
+        #     # qSort = 3
+        #     # setup_ZZ = 0
 
-            self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
-            self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-            self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
-            self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
+        #     self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
+        #     self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
+        #     self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
+        #     self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
 
-            if qDrive == 1:
-                swap_ch = self.swap_chs[qSort]
-                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
-                self.cfg.expt.sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort], gen_ch=swap_ch)
-                self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf[qSort], gen_ch=swap_ch)
-            else:
-                swap_ch = self.swap_Q_chs[qSort] 
-                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
-                self.cfg.expt.sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort], gen_ch=swap_ch)
-                self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=swap_ch)
-            sigma_ramp_cycles = 3
-            self.add_gauss(ch=swap_ch, name=f"pi_EgGf_swap{qSort}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
+        #     if qDrive == 1:
+        #         swap_ch = self.swap_chs[qSort]
+        #         self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
+        #         self.cfg.expt.sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort], gen_ch=swap_ch)
+        #         self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf[qSort], gen_ch=swap_ch)
+        #     else:
+        #         swap_ch = self.swap_Q_chs[qSort] 
+        #         self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+        #         self.cfg.expt.sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort], gen_ch=swap_ch)
+        #         self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=swap_ch)
+        #     sigma_ramp_cycles = 3
+        #     self.add_gauss(ch=swap_ch, name=f"pi_EgGf_swap{qSort}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
 
-            if setup_ZZ is None: setup_ZZ = 1
-            if setup_ZZ != 1:
-                assert qNotDrive == 1, 'qNotDrive != 1 and setup_ZZ != 1 not setup yet'
-                pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[setup_ZZ], gen_ch=self.qubit_chs[setup_ZZ])
-                self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_Q1_ZZ, self.qubit_chs)]
-                self.add_gauss(ch=self.qubit_chs[setup_ZZ], name=f"qubit{setup_ZZ}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
-                self.setup_and_pulse(ch=self.qubit_chs[setup_ZZ], style='arb', freq=self.f_ge_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[setup_ZZ], waveform=f'qubit{setup_ZZ}')
-                self.sync_all()
+        #     if setup_ZZ is None: setup_ZZ = 1
+        #     if setup_ZZ != 1:
+        #         pass
+        #         assert qNotDrive == 1, 'qNotDrive != 1 and setup_ZZ != 1 not setup yet'
+        #         pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[setup_ZZ], gen_ch=self.qubit_chs[setup_ZZ])
+        #         # self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_Q1_ZZ, self.qubit_chs)]
+        #         self.add_gauss(ch=self.qubit_chs[setup_ZZ], name=f"qubit{setup_ZZ}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
+        #         self.setup_and_pulse(ch=self.qubit_chs[setup_ZZ], style='arb', freq=self.f_ge_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[setup_ZZ], waveform=f'qubit{setup_ZZ}')
+        #         self.sync_all()
 
-                pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[setup_ZZ], gen_ch=self.qubit_chs[qNotDrive])
-                self.add_gauss(ch=self.qubit_chs[qNotDrive], name=f'qubit{qNotDrive}_ZZ{setup_ZZ}', sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
-                self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_Q1_ZZ_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[setup_ZZ], waveform=f'qubit{qNotDrive}_ZZ{setup_ZZ}')
-                self.sync_all()
-            else:
-                # initialize qubit A to E: expect to end in Eg
-                # self.setup_and_pulse(ch=self.qubit_chs[qSort], style="arb", phase=0, freq=self.f_ge_regs[qSort], gain=cfg.device.qubit.pulses.pi_ge.gain[qSort], waveform=f"qubit{qSort}") #, phrst=1)
-                pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qNotDrive], gen_ch=self.qubit_chs[qNotDrive])
-                self.add_gauss(ch=self.qubit_chs[qNotDrive], name=f"qubit{qNotDrive}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
-                self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_ge_regs[qNotDrive], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[qNotDrive], waveform=f'qubit{qNotDrive}')
-                self.sync_all()
+        #         # pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[setup_ZZ], gen_ch=self.qubit_chs[qNotDrive])
+        #         self.add_gauss(ch=self.qubit_chs[qNotDrive], name=f'qubit{qNotDrive}_ZZ{setup_ZZ}', sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
+        #         self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_Q1_ZZ_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[setup_ZZ], waveform=f'qubit{qNotDrive}_ZZ{setup_ZZ}')
+        #         self.sync_all()
+        #     else:
+        #         # initialize qubit A to E: expect to end in Eg
+        #         # self.setup_and_pulse(ch=self.qubit_chs[qSort], style="arb", phase=0, freq=self.f_ge_regs[qSort], gain=cfg.device.qubit.pulses.pi_ge.gain[qSort], waveform=f"qubit{qSort}") #, phrst=1)
+        #         pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qNotDrive], gen_ch=self.qubit_chs[qNotDrive])
+        #         self.add_gauss(ch=self.qubit_chs[qNotDrive], name=f"qubit{qNotDrive}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
+        #         self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_ge_regs[qNotDrive], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[qNotDrive], waveform=f'qubit{qNotDrive}')
+        #         self.sync_all()
 
-            # apply Eg -> Gf pulse on qDrive: expect to end in Gf
-            flat_length = self.cfg.expt.sigma - 3*4
-            if flat_length >= 3:
-                # print(self.cfg.expt.gain, flat_length, self.f_EgGf_reg)
-                self.setup_and_pulse(
-                    ch=swap_ch,
-                    style="flat_top",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=self.cfg.expt.gain,
-                    length=flat_length,
-                    waveform=f"pi_EgGf_swap{qSort}_ramp",
-                )
-            self.sync_all(5)
+        #     # apply Eg -> Gf pulse on qDrive: expect to end in Gf
+        #     flat_length = self.cfg.expt.sigma - 3*4
+        #     if flat_length >= 3:
+        #         # print(self.cfg.expt.gain, flat_length, self.f_EgGf_reg)
+        #         self.setup_and_pulse(
+        #             ch=swap_ch,
+        #             style="flat_top",
+        #             freq=self.f_EgGf_reg,
+        #             phase=0,
+        #             gain=self.cfg.expt.gain,
+        #             length=flat_length,
+        #             waveform=f"pi_EgGf_swap{qSort}_ramp",
+        #         )
+        #     self.sync_all(5)
 
-            # setup_measure = None
-            # if 'setup_measure' in self.cfg.expt: setup_measure = self.cfg.expt.setup_measure
+        #     # setup_measure = None
+        #     # if 'setup_measure' in self.cfg.expt: setup_measure = self.cfg.expt.setup_measure
 
-            # # take qDrive g->e: measure the population of just the e state when e/f are not distinguishable by checking the g population
-            # if setup_measure == 'qDrive_ge':
-            #     # print('playing ge pulse')
-            #     self.X_pulse(q=qDrive, play=True)
-            #     self.sync_all(5)
+        #     # # take qDrive g->e: measure the population of just the e state when e/f are not distinguishable by checking the g population
+        #     # if setup_measure == 'qDrive_ge':
+        #     #     # print('playing ge pulse')
+        #     #     self.X_pulse(q=qDrive, play=True)
+        #     #     self.sync_all(5)
         
-            # if setup_measure == None: pass # measure the real g population only
+        #     # if setup_measure == None: pass # measure the real g population only
 
-            # # take qDrive f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
-            # # if setup_measure == 'qDrive_ef':
-            # self.setup_and_pulse(ch=self.qubit_chs[qDrive], style="arb", freq=self.f_ef_regs[qDrive], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qDrive], waveform=f"pi_ef_qubit{qDrive}") #, phrst=1)
+        #     # # take qDrive f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
+        #     # # if setup_measure == 'qDrive_ef':
+        #     # self.setup_and_pulse(ch=self.qubit_chs[qDrive], style="arb", freq=self.f_ef_regs[qDrive], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qDrive], waveform=f"pi_ef_qubit{qDrive}") #, phrst=1)
 
-        else:
-            if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
-                if cfg.device.qubit.pulses.pi_ge.type[qubit] == 'gauss':
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], waveform=f"qubit{qubit}")
-                else: # const pulse
-                    pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qubit], gen_ch=self.qubit_chs[qubit])
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], length=pi_ge_sigma_cycles)
+        
+        # if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
+        #     if cfg.device.qubit.pulses.pi_ge.type[qubit] == 'gauss':
+        #         self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], waveform=f"qubit{qubit}")
+        #     else: # const pulse
+        #         pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qubit], gen_ch=self.qubit_chs[qubit])
+        #         self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], length=pi_ge_sigma_cycles)
 
-            if self.cfg.expt.pulse_f:
-                if cfg.device.qubit.pulses.pi_ef.type[qubit] == 'gauss':
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], waveform=f"pi_ef_qubit{qubit}")
-                else: # const pulse
-                    pi_ef_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pi_ef.sigma[qubit], gen_ch=self.qubit_chs[qubit])
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], length=pi_ef_sigma_cycles)
-        self.sync_all()
+        # if self.cfg.expt.pulse_f:
+        #     if cfg.device.qubit.pulses.pi_ef.type[qubit] == 'gauss':
+        #         self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], waveform=f"pi_ef_qubit{qubit}")
+        #     else: # const pulse
+        #         pi_ef_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pi_ef.sigma[qubit], gen_ch=self.qubit_chs[qubit])
+        #         self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], length=pi_ef_sigma_cycles)
+        # self.sync_all()
 
         measure_chs = self.res_chs
         if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
-            adcs=self.adc_chs,
+            pulse_ch=[measure_chs[qubit]], 
+            adcs=[self.adc_chs[qubit]],
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
-            syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(4)])))
+            syncdelay=self.us2cycles(cfg.device.readout.relax_delay[qubit]))
 
     def collect_shots(self):
         # collect shots for the relevant adc and I and Q channels

@@ -9,7 +9,7 @@ import time
 
 import experiments.fitting as fitter
 
-class PulseProbeSpectroscopyProgram(RAveragerProgram):
+class PulseProbeSpectroscopyProgramTest(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
@@ -95,9 +95,10 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch)
         if self.cfg.expt.pulse_type == 'flat_top':
             self.set_pulse_registers(ch=self.qubit_ch, style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.gain, length=length, waveform="qubit") # play probe pulse
+            self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
         elif self.cfg.expt.pulse_type == 'gauss':
             self.set_pulse_registers(ch=self.qubit_ch, style="arb", phase=0, freq=self.f_start, gain=cfg.expt.gain, waveform="qubit") # play probe pulse
-        self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
+            self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
         self.pulse(ch=self.qubit_ch) # play probe pulse
 
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
@@ -114,7 +115,7 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
  
 # ====================================================== #
 
-class PulseProbeSpectroscopyExperiment(Experiment):
+class PulseProbeSpectroscopyExperimentTest(Experiment):
     """
     PulseProbe Spectroscopy Experiment
     Experimental Config:
@@ -159,6 +160,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         if fit:
             xdata = data['xpts'][1:-1]
             data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*data['amps'][1:-1])
+                # if max('fit_amps') < max()
             data['fit_avgi'], data['fit_err_avgi'] = fitter.fitlor(xdata, signs[1]*data['avgi'][1:-1])
             data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[2]*data['avgq'][1:-1])
         return data
@@ -204,7 +206,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
 # ====================================================== #
 
 from experiments.single_qubit.resonator_spectroscopy import ResonatorSpectroscopyExperiment
-class PulseProbeVoltSweepSpectroscopyExperiment(Experiment):
+class PulseProbeVoltSweepSpectroscopyExperimentTest(Experiment):
     """
     PulseProbe Spectroscopy Experiment Sweep Voltage
     Experimental Config:

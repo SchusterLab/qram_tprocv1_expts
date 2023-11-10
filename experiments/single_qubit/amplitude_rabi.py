@@ -187,12 +187,12 @@ class AmplitudeRabiProgram(RAveragerProgram):
         else: qTest = self.qubits[0]
 
         # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
-        self.sync_all(10)
+        # for ch in self.gen_chs.keys():
+        #     if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+        #         # print('resetting', ch)
+        #         self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        #     self.sync_all()
+        # self.sync_all(10)
 
         # initializations as necessary
         if self.checkZZ:                    
@@ -298,8 +298,10 @@ class AmplitudeRabiExperiment(Experiment):
             elif self.cfg.expt.checkEF:
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
             else: 
+                print('here', self.cfg.device.qubit.pulses.pi_ge.sigma[qTest])
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest]
-        
+        print('qTest = ', self.cfg.expt.sigma_test)
+
         amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
         # print(amprabi)
         # from qick.helpers import progs2json
@@ -479,6 +481,7 @@ class AmplitudeRabiChevronExperiment(Experiment):
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
             else:
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest]
+
         for freq in tqdm(freqpts):
             self.cfg.expt.f_pi_test = freq
             amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
