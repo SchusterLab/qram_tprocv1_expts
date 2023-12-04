@@ -5,8 +5,7 @@ device:
         f_Q1_ZZ: [3445.5877321124563, 0, 3449.6936121756476, 3449.4923401580063] # [MHz] frequency of Q1 when other qubits are in e
         f_Q_ZZ1: [4109.2353064588515, 0, 4766.264226603061, 4384.890337223246] # [MHz] frequency of Qx when Q1 is in e
         f_EgGf: [2686.53594683, -1, 2033.76008793, 2414.92850999] # [MHz] expect to be ge_1 + ef_1 - ge_0; drive on Q1 to perform a swap with Qx
-        # f_EgGf_Q: [-1, -1, 5892.65, 5152.0] # drive on Qx to perform a swap with Q1. For Q2: set Q0 in g before starting. For Q3: set Q0 in e before starting
-        f_EgGf_Q: [-1, -1, 5897.7, 5152.0] # drive on Qx to perform a swap with Q1. For Q2: set Q0 in g before starting. For Q3: set Q0 in e before starting
+        f_EgGf_Q: [-1, -1, 5892.80, 5152.0] # drive on Qx to perform a swap with Q1. For Q2: set Q0 in g before starting. For Q3: set Q0 in e before starting
         gs: [53.07454288679892, 56.33900830945526, 44.06651851927302, 4.826787539590175, 2.201102542443888, 6.280490149923522] # [MHz] g01, g12, g13, g02, g03, g23 from theoretical comparison for ZZ shift
         ZZs: [0.0, -5.132149880358156, -0.11720448229698377, -0.46755316331291397, -5.132149880358156, 0.0, -1.1258892837849999, -1.2798980910865794, -0.17297849, -1.1258892837849999, 0.0, -0.5808573560734658, -0.46704822, -1.2798980910865794, -0.4730200905169113, 0.0] # make sure to reshape to 4x4: (QA freq when QB is in e) - (QA freq when QB is in g). rows = qA, cols = qB
         T1: [10, 88, 33, 75] # [us]
@@ -41,7 +40,7 @@ device:
                 type: 'flat_top'
             pi_EgGf_Q: # drive on Qx to perform a swap with Q1. For Q2: set Q0 in g before starting. For Q3: set Q0 in e before starting
                 gain: [0, 0, 29000, 21500]
-                sigma: [0, 0, 0.502, 0.450] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
+                sigma: [0, 0, 0.514, 0.450] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
                 # gain: [0, 0, 29000, 21500]
                 # sigma: [0, 0, 0.502, 0.314] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
                 type: 'flat_top'
