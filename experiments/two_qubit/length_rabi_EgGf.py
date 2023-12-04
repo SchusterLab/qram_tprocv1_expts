@@ -224,7 +224,7 @@ class LengthRabiEgGfExperiment(Experiment):
                     # print(prep_state)
                     sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
                     err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
                     calib_prog_dict.update({prep_state:err_tomo})
 
                 g_prog = calib_prog_dict['gg']
@@ -460,7 +460,7 @@ class LengthRabiEgGfExperiment(Experiment):
             print(f'\tDecay time [us]: {p[3]}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.subplot(223, xlabel="Length [ns]", ylabel="Q [adc levels]")
         plt.plot(xpts_ns, data["avgq"][0],'o-')
@@ -478,7 +478,7 @@ class LengthRabiEgGfExperiment(Experiment):
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
         # plt.axvline(631)
-        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         plt.plot(xpts_ns, data["avgi"][1],'o-')
@@ -495,7 +495,7 @@ class LengthRabiEgGfExperiment(Experiment):
             print(f'\tDecay time [us]: {p[3]}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.subplot(224, xlabel="Length [ns]")
         plt.plot(xpts_ns, data["avgq"][1],'o-')
@@ -514,7 +514,7 @@ class LengthRabiEgGfExperiment(Experiment):
                 plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
                 plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
             except Exception as e: print('Exception:', e)
-        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
 
         plt.tight_layout()
         plt.show()
@@ -611,7 +611,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
             # for length in tqdm(lenpts, disable=True):
             #     self.cfg.expt.sigma_test = float(length)
             #     lenrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-            #     avgi, avgq = lenrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
+            #     avgi, avgq = lenrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False)        
 
             #     for q_ind, q in enumerate(self.cfg.expt.qubits):
             #         data['avgi'][q_ind].append(avgi[adc_chs[q], 0])

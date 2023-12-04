@@ -44,12 +44,12 @@ hw:
                 type: ['full', 'full', 'full']
                 nyquist: [1, 1, 1]
             readout:
-                ch: 0
+                ch: 2
                 type: 'full'
                 nyquist: 1
         adcs:
             readout:
-                ch: 1
+                ch: 0
             
 aliases: # for use in instrument manager
     readout_LO: SC_26C1

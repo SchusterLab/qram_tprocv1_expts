@@ -438,7 +438,7 @@ class CliffordAveragerProgram(AveragerProgram):
     If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
     """
     def acquire_rotated(self, soc, progress, angle=None, threshold=None, ge_avgs=None, post_process=None, verbose=False):
-        avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress, debug=False)
+        avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
         if post_process == None: 
             avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
             if angle is None: return avgi_rot, avgq_rot

@@ -131,7 +131,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='PulseProbeSpectroscopy', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         q_ind = self.cfg.expt.qubit
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
@@ -144,7 +144,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
                                 value2.update({key3: value3[q_ind]})                                
 
         qspec = PulseProbeSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-        xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
         avgi = avgi[0][0]
         avgq = avgq[0][0]
         amps = np.abs(avgi+1j*avgq)
@@ -236,7 +236,7 @@ class PulseProbeVoltSweepSpectroscopyExperiment(Experiment):
         self.path = path
         self.config_file = config_file
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         q_ind = self.cfg.expt.qubit
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
@@ -295,7 +295,7 @@ class PulseProbeVoltSweepSpectroscopyExperiment(Experiment):
             print(f'readout at {readout_freq} at voltage {volt}')
 
             qspec = PulseProbeSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-            xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False, debug=debug)        
+            xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False)
             avgi = avgi[0][0]
             avgq = avgq[0][0]
             amps = np.abs(avgi+1j*avgq)

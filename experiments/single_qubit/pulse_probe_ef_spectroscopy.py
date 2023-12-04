@@ -131,7 +131,7 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='PulseProbeEFSpectroscopy', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         q_ind = self.cfg.expt.qubit
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
@@ -144,7 +144,7 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
                                 value2.update({key3: value3[q_ind]})                                
 
         qspec_ef=PulseProbeEFSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-        x_pts, avgi, avgq = qspec_ef.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        x_pts, avgi, avgq = qspec_ef.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
 
         avgi = avgi[0][0]
         avgq = avgq[0][0]

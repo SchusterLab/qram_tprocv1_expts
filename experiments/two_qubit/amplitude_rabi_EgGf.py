@@ -38,9 +38,9 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         self.qDrive = qDrive
         self.qNotDrive = qNotDrive
         self.qSort = qSort
-        print('qDrive', qDrive)
-        print('qNotDrive', qNotDrive)
-        print('qSort', qSort)
+        # print('qDrive', qDrive)
+        # print('qNotDrive', qNotDrive)
+        # print('qSort', qSort)
 
         if qDrive == 1:
             self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
@@ -199,7 +199,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                     gain=0, # gain set by update
                     length=self.pi_EgGf_sigma)
             self.mathi(self.ch_page(self.swap_chs[qSort]), self.r_gain_swap, self.r_gain_swap_update, "+", 0)
-            print('driving', self.swap_chs[qSort])
+            # print('driving', self.swap_chs[qSort])
             if pulse_type != 'flat_top' or length > 0: self.pulse(ch=self.swap_chs[qSort])
         self.sync_all(5)
 
@@ -247,7 +247,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='AmplitudeRabiEgGf', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         qSort = qA
@@ -285,7 +285,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
                 # angle = self.cfg.device.readout.phase
         
         amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-        x_pts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=progress, debug=debug)        
+        x_pts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=progress)        
         self.prog = amprabi
         
         data=dict(
@@ -453,7 +453,7 @@ class EgGfLenGainChevronExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='RabiEgGfLenGainChevron', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
@@ -486,7 +486,7 @@ class EgGfLenGainChevronExperiment(Experiment):
             self.cfg.expt.pi_EgGf_sigma = float(length)
 
             amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
+            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False)        
 
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data['avgi'][q_ind].append(avgi[adc_chs[q], 0])
@@ -565,7 +565,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='RabiEgGfFreqGainChevron', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         qSort = qA
@@ -611,13 +611,13 @@ class EgGfFreqGainChevronExperiment(Experiment):
             else: self.cfg.device.qubit.f_EgGf_Q[qSort] = float(freq)
 
             amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False, debug=debug)        
+            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False)        
 
             for q_ind, q in enumerate(self.cfg.expt.qubits):
-                data['avgi'][q_ind].append(avgi[adc_chs[q], 0])
-                data['avgq'][q_ind].append(avgq[adc_chs[q], 0])
-                data['amps'][q_ind].append(np.abs(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
-                data['phases'][q_ind].append(np.angle(avgi[adc_chs[q], 0]+1j*avgi[adc_chs[q], 0]))
+                data['avgi'][q_ind].append(avgi[adc_chs[q]][0])
+                data['avgq'][q_ind].append(avgq[adc_chs[q]][0])
+                data['amps'][q_ind].append(np.abs(avgi[adc_chs[q]][0]+1j*avgi[adc_chs[q]][0]))
+                data['phases'][q_ind].append(np.angle(avgi[adc_chs[q]][0]+1j*avgi[adc_chs[q]][0]))
 
         for k, a in data.items():
             data[k] = np.array(a)

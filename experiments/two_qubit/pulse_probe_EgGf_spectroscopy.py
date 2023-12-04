@@ -174,7 +174,7 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='PulseProbeEgGfSpectroscopy', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
@@ -193,7 +193,7 @@ class PulseProbeEgGfSpectroscopyExperiment(Experiment):
         adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
 
         qspec_EgGf = PulseProbeEgGfSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-        xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
         
         data=dict(
             xpts=xpts,
@@ -284,7 +284,7 @@ class PulseProbeEgGfSweepSpectroscopyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='PulseProbeEgGfSweep', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
@@ -320,7 +320,7 @@ class PulseProbeEgGfSweepSpectroscopyExperiment(Experiment):
             self.cfg.expt.step = self.cfg.expt.step_f
             self.cfg.expt.expts = self.cfg.expt.expts_f
             qspec_EgGf = PulseProbeEgGfSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-            xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False, debug=debug)        
+            xpts, avgi, avgq = qspec_EgGf.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False)
         
             data['avgi'][0].append(avgi[adcA_ch][0])
             data['avgq'][0].append(avgq[adcA_ch][0])

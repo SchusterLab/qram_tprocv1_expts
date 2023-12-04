@@ -162,7 +162,7 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='PulseProbeCouplingSpectroscopy', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
@@ -180,7 +180,7 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
         adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
 
         qspec = PulseProbeCouplingSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
-        xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        xpts, avgi, avgq = qspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
 
         avgi = avgi[0][0]
         avgq = avgq[0][0]

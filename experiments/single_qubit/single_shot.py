@@ -178,6 +178,7 @@ class HistogramProgram(AveragerProgram):
         
         self.f_ge_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ge, self.qubit_chs)]
         self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
@@ -198,7 +199,6 @@ class HistogramProgram(AveragerProgram):
             mux_gains = cfg.device.readout.gain
             ro_ch=self.adc_chs[qubit]
         self.declare_gen(ch=self.res_chs[qubit], nqz=cfg.hw.soc.dacs.readout.nyquist[qubit], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
-        self.declare_readout(ch=self.adc_chs[qubit], length=self.readout_lengths_adc[qubit], freq=cfg.device.readout.frequency[qubit], gen_ch=self.res_chs[qubit])
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
@@ -207,7 +207,7 @@ class HistogramProgram(AveragerProgram):
         # add readout pulses to respective channels
         if self.res_ch_types[qubit] == 'mux4':
             self.set_pulse_registers(ch=self.res_chs[qubit], style="const", length=self.readout_lengths_dac[qubit], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_reg[qubit], phase=0, gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
+        else: self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_regs[qubit], phase=0, gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
@@ -363,8 +363,8 @@ class HistogramProgram(AveragerProgram):
         # collect shots for the relevant adc and I and Q channels
         cfg=AttrDict(self.cfg)
         # print(np.average(self.di_buf[0]))
-        shots_i0 = self.di_buf[0] / self.readout_lengths_adc[self.cfg.expt.qubit]
-        shots_q0 = self.dq_buf[0] / self.readout_lengths_adc[self.cfg.expt.qubit]
+        shots_i0 = self.di_buf[self.cfg.expt.qubit] / self.readout_lengths_adc[self.cfg.expt.qubit]
+        shots_q0 = self.dq_buf[self.cfg.expt.qubit] / self.readout_lengths_adc[self.cfg.expt.qubit]
         return shots_i0, shots_q0
         # return shots_i0[:5000], shots_q0[:5000]
 
@@ -382,7 +382,7 @@ class HistogramExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='Histogram', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -403,7 +403,7 @@ class HistogramExperiment(Experiment):
         # Ie = np.zeros(self.cfg.expt.reps)
         # Qe = np.zeros(self.cfg.expt.reps)
         # for r in tqdm(range(rounds)):
-        #     x_pts, avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None,load_pulses=True,progress=False, debug=debug)
+        #     x_pts, avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None,load_pulses=True,progress=False)
         #     i0, q0, i1, q1 = histpro.collect_shots()
         #     iq = ([i0, q0], [i1, q1])
         #     i, q = iq[0] # i/q[0]: ground state i/q, i/q[1]: excited state i/q
@@ -420,7 +420,7 @@ class HistogramExperiment(Experiment):
         cfg.expt.pulse_f = False
         cfg.expt.pulse_test = False
         histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-        avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
+        avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
         data['Ig'], data['Qg'] = histpro.collect_shots()
 
         # Excited state shots
@@ -433,7 +433,7 @@ class HistogramExperiment(Experiment):
             cfg.expt.pulse_f = False
             cfg.expt.pulse_test = False
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
+            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
             data['Ie'], data['Qe'] = histpro.collect_shots()
 
         # Excited f state shots
@@ -444,7 +444,7 @@ class HistogramExperiment(Experiment):
             cfg.expt.pulse_f = True
             cfg.expt.pulse_test = False
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
+            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
             data['If'], data['Qf'] = histpro.collect_shots()
 
         # Test state shots
@@ -453,7 +453,7 @@ class HistogramExperiment(Experiment):
         if self.check_test:
             cfg = AttrDict(deepcopy(self.cfg))
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress, debug=debug)
+            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
             data['Itest'], data['Qtest'] = histpro.collect_shots()
 
         self.data = data
@@ -517,7 +517,7 @@ class SingleShotOptExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='Histogram', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         fpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
         gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"]*np.arange(self.cfg.expt["expts_gain"])
         lenpts = self.cfg.expt["start_len"] + self.cfg.expt["step_len"]*np.arange(self.cfg.expt["expts_len"])

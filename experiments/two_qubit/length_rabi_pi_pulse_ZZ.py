@@ -140,7 +140,7 @@ class LengthRabiPiZZExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='LengthRabiPiZZ', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         qA, qB = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
@@ -167,7 +167,7 @@ class LengthRabiPiZZExperiment(Experiment):
         for length in tqdm(lengths, disable=not progress):
             self.cfg.expt.sigma_test = float(length)
             lengthrabi = LengthRabiPiZZProgram(soccfg=self.soccfg, cfg=self.cfg)
-            avgi, avgq = lengthrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, load_pulses=True, progress=False, debug=debug)        
+            avgi, avgq = lengthrabi.acquire(self.im[self.cfg.aliases.soc], threshold=threshold, load_pulses=True, progress=False)
             # print(avgi[:,0], avgq[:,0])
             # print()
             data['avgi'][0].append(avgi[adcA_ch, 0])

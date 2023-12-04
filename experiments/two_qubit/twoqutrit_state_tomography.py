@@ -111,8 +111,8 @@ class AbstractStateTomo2qutritProgram(QutritAveragerProgram):
                 ind += 1
         return nij
 
-    def acquire(self, soc, angle=None, threshold_ge=None, threshold_ef=None, shot_avg=1, load_pulses=True, progress=False, debug=False):
-        super().acquire(soc, load_pulses=load_pulses, progress=progress, debug=debug)
+    def acquire(self, soc, angle=None, threshold_ge=None, threshold_ef=None, shot_avg=1, load_pulses=True, progress=False):
+        super().acquire(soc, load_pulses=load_pulses, progress=progress)
         return self.collect_counts(angle=angle, threshold_ge=threshold_ge, threshold_ef=threshold_ef, shot_avg=shot_avg)
 
     def initialize(self):
@@ -232,7 +232,7 @@ class EgGfStateTomographyQutritExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='EgGfStateTomography', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -263,7 +263,7 @@ class EgGfStateTomographyQutritExperiment(Experiment):
                 cfg = AttrDict(self.cfg.copy())
                 cfg.expt.prep = prep
                 tomo = EgGfStateTomo2qutritProgram(soccfg=self.soccfg, cfg=cfg)
-                counts = tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, angle=angle, threshold_ge=threshold_ge, threshold_ef=threshold_ef, load_pulses=True, progress=False, debug=debug)
+                counts = tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, angle=angle, threshold_ge=threshold_ge, threshold_ef=threshold_ef, load_pulses=True, progress=False)
                 data['counts_tomo'].append(counts)
                 self.pulse_dict.update({prep0+'-'+prep1:tomo.pulse_dict})
 
@@ -273,7 +273,7 @@ class EgGfStateTomographyQutritExperiment(Experiment):
             cfg = AttrDict(self.cfg.copy())
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo2qutritProgram(soccfg=self.soccfg, cfg=cfg)
-            counts = err_tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, angle=angle, threshold_ge=threshold_ge, threshold_ef=threshold_ef, load_pulses=True, progress=False, debug=debug)
+            counts = err_tomo.acquire(self.im[self.cfg.aliases.soc], shot_avg=self.cfg.expt.shot_avg, angle=angle, threshold_ge=threshold_ge, threshold_ef=threshold_ef, load_pulses=True, progress=False)
             data['counts_calib'].append(counts)
 
         self.data=data

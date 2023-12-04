@@ -149,7 +149,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
             ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
             freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[second_e]] + ZZs[qubits[second_e], qubits[first_e]], gen_ch=self.qubit_chs[qubits[second_e]])
             waveform = f'qubit{qubits[second_e]}_ZZ{qubits[first_e]}'
-            if waveform not in self.pulses:
+            if waveform not in self.envelopes:
                 sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[second_e]], gen_ch=self.qubit_chs[qubits[second_e]])
                 self.add_gauss(ch=self.qubit_chs[qubits[second_e]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
                 gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[second_e]]
@@ -225,7 +225,7 @@ class TestStateTomo3QExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='TestStateTomography3Q', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         qubits = self.cfg.expt.tomo_qubits
@@ -254,7 +254,7 @@ class TestStateTomo3QExperiment(Experiment):
             cfg.expt.reps = self.cfg.expt.singleshot_reps
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo3QProgram(soccfg=self.soccfg, cfg=cfg)
-            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             calib_prog_dict.update({prep_state:err_tomo})
 
         g_prog = calib_prog_dict['ggg']
@@ -290,8 +290,8 @@ class TestStateTomo3QExperiment(Experiment):
             # print(tomo)
             # from qick.helpers import progs2json
             # print(progs2json([tomo.dump_prog()]))
-            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
-            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
 
             # print(basis)
             adc_chs = self.cfg.hw.soc.adcs.readout.ch

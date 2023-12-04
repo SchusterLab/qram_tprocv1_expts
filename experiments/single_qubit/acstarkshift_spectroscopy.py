@@ -130,7 +130,7 @@ class ACStarkShiftPulseProbeExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='ACStarkShiftPulseProbe', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         q_ind = self.cfg.expt.qubit
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc, self.cfg.expt.pump_params):
             for key, value in subcfg.items() :
@@ -153,7 +153,7 @@ class ACStarkShiftPulseProbeExperiment(Experiment):
             self.cfg.expt.pump_gain = gain
             acspec = ACStarkShiftProgram(soccfg=self.soccfg, cfg=self.cfg)
         
-            freqpts, avgi, avgq = acspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False, debug=debug)
+            freqpts, avgi, avgq = acspec.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False)
         
             avgi = avgi[0][0]
             avgq = avgq[0][0]

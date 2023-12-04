@@ -218,7 +218,7 @@ class RamseyEchoExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='RamseyEcho', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         assert self.cfg.expt.cp != self.cfg.expt.cpmg, 'Must select either CP or CPMG experiment!'
 
         q_ind = self.cfg.expt.qubit
@@ -233,7 +233,7 @@ class RamseyEchoExperiment(Experiment):
                                 value2.update({key3: value3[q_ind]})                                
 
         echo = RamseyEchoProgram(soccfg=self.soccfg, cfg=self.cfg)
-        x_pts, avgi, avgq = echo.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)
+        x_pts, avgi, avgq = echo.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
 
         avgi = avgi[0][0]
         avgq = avgq[0][0]

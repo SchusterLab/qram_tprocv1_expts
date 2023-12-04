@@ -265,7 +265,7 @@ class AmplitudeRabiExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='AmplitudeRabi', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -305,7 +305,7 @@ class AmplitudeRabiExperiment(Experiment):
         # from qick.helpers import progs2json
         # print(progs2json([amprabi.dump_prog()]))
         
-        xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)
+        xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
         # print(amprabi)
 
         # shots_i = amprabi.di_buf[adc_ch].reshape((self.cfg.expt.expts, self.cfg.expt.reps)) / amprabi.readout_length_adc
@@ -445,7 +445,7 @@ class AmplitudeRabiChevronExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='AmplitudeRabiChevron', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -483,7 +483,7 @@ class AmplitudeRabiChevronExperiment(Experiment):
             self.cfg.expt.f_pi_test = freq
             amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
         
-            xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False, debug=debug)
+            xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=False)
         
             avgi = avgi[0][0]
             avgq = avgq[0][0]

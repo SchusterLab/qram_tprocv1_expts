@@ -235,64 +235,31 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         count_us = 0
         self.end_times_us = []
 
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[0], freq_reg=self.f_ge_regs[0], type=self.pi_ge_types[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[0], sigma_us=self.pi_sigmas_us[0], waveform='pi_ge_q0')
+
+        self.sync_all()
+        
+        # 1. apply Eg-Gf with qDrive=2: gegg -> ggfg [path 1]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
+        if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        # self.sync_all() # do simultaneously?
+
+        # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[3], freq_reg=self.f_EgGf_Q_regs[3], type=self.pi_EgGf_Q_types[3], phase=self.deg2reg(0, gen_ch=self.swap_Q_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[3], sigma_us=self.pi_EgGf_Q_sigmas_us[3], waveform='pi_EgGf_Q_swap3')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
         self.sync_all()
 
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[0], freq_reg=self.f_ge_regs[0], type=self.pi_ge_types[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[0], sigma_us=self.pi_sigmas_us[0], waveform='pi_ge_q0')
+        # 3. apply ef pulse on Q2 (at this point guaranteed no excitation in Q1) [path 1]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
         if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=self.f_ge_regs[1], type=self.pi_ge_types[1], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[1], sigma_us=self.pi_sigmas_us[1], waveform='pi_ge_q1')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[1], freq_reg=self.f_ge_regs[1], type=self.pi_ge_types[1], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[1], sigma_us=self.pi_sigmas_us[1], waveform='pi_ge_q1')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ge_regs[2], type=self.pi_ge_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[2], sigma_us=self.pi_sigmas_us[2], waveform='pi_ge_q2')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ge_regs[2], type=self.pi_ge_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[2], sigma_us=self.pi_sigmas_us[2], waveform='pi_ge_q2')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.f_ge_regs[3], type=self.pi_ge_types[3], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[3], sigma_us=self.pi_sigmas_us[3], waveform='pi_ge_q3')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.f_ge_regs[3], type=self.pi_ge_types[3], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[3], sigma_us=self.pi_sigmas_us[3], waveform='pi_ge_q3')
-        if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        self.sync_all()
-
-        # # X 1. apply Eg-Gf with qDrive=2: eegg -> egfg [path 1]
-        # # 1. apply Eg-Gf with qDrive=2: gegg -> ggfg [path 1]
-        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
-        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
         # self.sync_all()
 
-        # # # X 2. apply Eg-Gf with qDrive=3: gegg -> gggf [path 2]
-        # # # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
-        # # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[3], freq_reg=self.f_EgGf_Q_regs[3], type=self.pi_EgGf_Q_types[3], phase=self.deg2reg(0, gen_ch=self.swap_Q_chs[3]), gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[3], sigma_us=self.pi_EgGf_Q_sigmas_us[3], waveform='pi_EgGf_Q_swap3')
-        # # if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        # # self.sync_all()
+        # 4. apply ef pulse on Q3 (at this point guaranteed no excitation in Q1) [path 2]
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.f_ef_regs[3], type=self.pi_ef_types[3], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[3], sigma_us=self.pi_ef_sigmas_us[3], waveform='pi_ef_q3')
+        if count_us < self.timestep_us: self.end_times_us.append(count_us)
+        self.sync_all()
 
-        # self.X_pulse(q=2, play=True)
-
-        # # 3. apply ef pulse on Q2 (at this point guaranteed no excitation in Q1) [path 1]
-        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
-        # if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        # self.sync_all()
-
-        # # # 4. apply ef pulse on Q3 (at this point guaranteed no excitation in Q1) [path 2]
-        # # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.f_ef_regs[3], type=self.pi_ef_types[3], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[3], sigma_us=self.pi_ef_sigmas_us[3], waveform='pi_ef_q3')
-        # # if count_us < self.timestep_us: self.end_times_us.append(count_us)
-        # # self.sync_all()
-
-        # # if 'post_select' in self.cfg.expt and self.cfg.expt.post_select:
-        # #     self.setup_measure(qubit=1, basis='X', play=True, flag=None)
+        # if 'post_select' in self.cfg.expt and self.cfg.expt.post_select:
+        #     self.setup_measure(qubit=1, basis='X', play=True, flag=None)
 
         # # ================= #
         # # Begin protocol v1
@@ -419,7 +386,7 @@ class QramProtocolExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='qram_protocol', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -471,7 +438,7 @@ class QramProtocolExperiment(Experiment):
                 # print(prep_state)
                 sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=sscfg.expt.calib_apply_q1_pi2)
                 err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
                 calib_prog_dict.update({prep_state:err_tomo})
 
             g_prog = calib_prog_dict['gg']
@@ -513,7 +480,7 @@ class QramProtocolExperiment(Experiment):
                     # print(prep_state)
                     sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
                     err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
                     calib_prog_dict.update({prep_state:err_tomo})
 
                 g_prog = calib_prog_dict['gg']
@@ -563,7 +530,7 @@ class QramProtocolExperiment(Experiment):
                     # print('basis', basis)
                     # print(progs2json([tomo_prog.dump_prog()]))
                     # print()
-                    avgi, avgq = tomo_prog.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                    avgi, avgq = tomo_prog.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                     counts = tomo_prog.collect_counts_post_select(angle=angles_q, threshold=thresholds_q, postselect=self.cfg.expt.post_select, postselect_q=1)
                     if cfg.expt.post_select:
                         data['counts_tomo_ps0'].append(counts[0])
@@ -703,7 +670,7 @@ class QramProtocol3QTomoExperiment(Experiment):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
         self.cfg.all_qubits = range(4)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         qubits = self.cfg.expt.tomo_qubits
@@ -732,7 +699,7 @@ class QramProtocol3QTomoExperiment(Experiment):
             cfg.expt.reps = self.cfg.expt.singleshot_reps
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo3QProgram(soccfg=self.soccfg, cfg=cfg)
-            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             calib_prog_dict.update({prep_state:err_tomo})
 
         g_prog = calib_prog_dict['ggg']
@@ -769,8 +736,8 @@ class QramProtocol3QTomoExperiment(Experiment):
             # print(tomo)
             # from qick.helpers import progs2json
             # print(progs2json([tomo.dump_prog()]))
-            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
-            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
 
             # print(basis)
             adc_chs = self.cfg.hw.soc.adcs.readout.ch

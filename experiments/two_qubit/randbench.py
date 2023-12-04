@@ -313,7 +313,7 @@ class SimultaneousRBExperiment(Experiment):
                     # print(prep_state)
                     sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
                     err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
                     calib_prog_dict.update({prep_state:err_tomo})
 
                 g_prog = calib_prog_dict['gg']

@@ -96,7 +96,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
         # Prep state to characterize
@@ -129,8 +129,8 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
 
         return sort_counts(shots[0], shots[1])
     
-    # def acquire(self, soc, angle=None, threshold=None, shot_avg=1, load_pulses=True, progress=False, debug=False):
-    #     avgi, avgq = super().acquire(soc, load_pulses=load_pulses, progress=progress, debug=debug)
+    # def acquire(self, soc, angle=None, threshold=None, shot_avg=1, load_pulses=True, progress=False):
+    #     avgi, avgq = super().acquire(soc, load_pulses=load_pulses, progress=progress)
     #     # print()
     #     # print(avgi)
     #     return self.collect_counts(angle=angle, threshold=threshold, shot_avg=shot_avg)
@@ -184,7 +184,7 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
             ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
             freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[1]] + ZZs[qubits[1], qubits[0]], gen_ch=self.qubit_chs[qubits[1]])
             waveform = f'qubit{qubits[1]}_ZZ{qubits[0]}'
-            if waveform not in self.pulses:
+            if waveform not in self.envelopes:
                 sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[1]], gen_ch=self.qubit_chs[qubits[1]])
                 self.add_gauss(ch=self.qubit_chs[qubits[1]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
                 gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[1]]
@@ -286,7 +286,7 @@ class EgGfStateTomographyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='EgGfStateTomography2Q', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         qA, qB = self.cfg.expt.tomo_qubits
@@ -314,7 +314,7 @@ class EgGfStateTomographyExperiment(Experiment):
             cfg.expt.reps = self.cfg.expt.singleshot_reps
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=cfg.expt.calib_apply_q1_pi2)
             err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
-            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             calib_prog_dict.update({prep_state:err_tomo})
 
         g_prog = calib_prog_dict['gg']
@@ -366,8 +366,8 @@ class EgGfStateTomographyExperiment(Experiment):
             # print(tomo)
             # from qick.helpers import progs2json
             # print(progs2json([tomo.dump_prog()]))
-            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
-            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
 
             # print(basis)
             adc_chs = self.cfg.hw.soc.adcs.readout.ch
@@ -486,8 +486,8 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
         n1 = np.sum(shots)
         return np.array([n0, n1])
 
-    # def acquire(self, soc, angle=None, threshold=None, shot_avg=1, load_pulses=True, progress=False, debug=False):
-    #     avgi, avgq = super().acquire(soc, load_pulses=load_pulses, progress=progress, debug=debug)
+    # def acquire(self, soc, angle=None, threshold=None, shot_avg=1, load_pulses=True, progress=False):
+    #     avgi, avgq = super().acquire(soc, load_pulses=load_pulses, progress=progress)
     #     # print()
     #     # print(avgi)
     #     return self.collect_counts(angle=angle, threshold=threshold, shot_avg=shot_avg)
@@ -696,7 +696,7 @@ class StateTomography1QExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='StateTomography1Q', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False, debug=False):
+    def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         q = self.cfg.expt.qubit
@@ -724,7 +724,7 @@ class StateTomography1QExperiment(Experiment):
             cfg.expt.reps = self.cfg.expt.singleshot_reps
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
-            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             calib_prog_dict.update({prep_state:err_tomo})
 
         g_prog = calib_prog_dict['g']
@@ -758,7 +758,7 @@ class StateTomography1QExperiment(Experiment):
                 cfg.expt.state_prep_kwargs = dict(I_mhz_vs_us=cfg.expt.Icontrols, Q_mhz_vs_us=cfg.expt.Qcontrols, times_us=cfg.expt.times_us)
             tomo = StateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
             print(tomo)
-            tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False, debug=debug)
+            tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             counts = tomo.collect_counts(angle=angle, threshold=threshold)
             data['counts_tomo'].append(counts)
             self.pulse_dict.update({basis:tomo.pulse_dict})
