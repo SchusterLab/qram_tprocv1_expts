@@ -124,11 +124,10 @@ class AmplitudeRabiProgram(RAveragerProgram):
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
                 gen_chs.append(self.qubit_chs[q])
         
-        # define pisigma_ge as the ge pulse for the qubit that we are calibrating the pulse on
+        # define pi_test_sigma as the ge pulse for the qubit that we are calibrating the pulse on
         self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qTest], gen_ch=self.qubit_chs[qTest]) # default pi_ge value
         self.f_ge_init_reg = self.f_ge_reg[qTest]
         self.gain_ge_init = self.cfg.device.qubit.pulses.pi_ge.gain[qTest]
-        # define pi2sigma as the pulse that we are calibrating with ramsey
         self.pi_test_sigma = self.us2cycles(cfg.expt.sigma_test, gen_ch=self.qubit_chs[qTest])
         if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
         if self.checkZZ:
@@ -147,9 +146,9 @@ class AmplitudeRabiProgram(RAveragerProgram):
             self.f_pi_test_reg = self.f_ef_reg[qTest] # freq we are trying to calibrate
         if 'f_pi_test' in self.cfg.expt:
             self.f_pi_test_reg = self.freq2reg(self.cfg.expt.f_pi_test, gen_ch=self.qubit_chs[qTest])
+        calibrate_half = False # calibrate the pi/2 pulse instead of the pi pulse by taking half the sigma and calibrating the gain
         
         # add qubit and readout pulses to respective channels
-        print(cfg.expt.pulse_type.lower(), flush=True)
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test", sigma=self.pi_test_sigma, length=self.pi_test_sigma*4)
         elif cfg.expt.pulse_type.lower() == 'adiabatic' and self.pi_test_sigma > 0:
@@ -163,9 +162,6 @@ class AmplitudeRabiProgram(RAveragerProgram):
             self.add_gauss(ch=self.qubit_chs[qZZ], name="pi_qubitZZ", sigma=self.pisigma_ge_qZZ, length=self.pisigma_ge_qZZ*4)
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
-
-        # !!! REMOVE !!!
-        # self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
 
         # add readout pulses to respective channels
         if self.res_ch_types[qTest] == 'mux4':
@@ -191,7 +187,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
         # initializations as necessary
@@ -223,6 +219,9 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.mathi(self.q_rps[qTest], self.r_gain, self.r_gain2, "+", 0)
         self.pulse(ch=self.qubit_chs[qTest])
         self.sync_all()
+        if 'calibrate_half' in self.cfg.expt and self.cfg.expt.calibrate_half:
+            self.pulse(ch=self.qubit_chs[qTest])
+            self.sync_all()
 
         if self.checkEF: # map excited back to qubit ground state for measurement
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
@@ -258,6 +257,10 @@ class AmplitudeRabiExperiment(Experiment):
         reps: number averages per expt
         rounds: number repetitions of experiment sweep
         sigma_test: gaussian sigma for pulse length [us] (default: from pi_ge in config)
+        checkZZ
+        checkEF
+        calibrate_half
+        qubits
         pulse_type: 'gauss' or 'const'
     )
     """
@@ -299,6 +302,9 @@ class AmplitudeRabiExperiment(Experiment):
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
             else: 
                 self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest]
+        if 'calibrate_half' in self.cfg.expt and self.cfg.expt.calibrate_half:
+            print(f'Calibrating half pi gain for pi len of {self.cfg.expt.sigma_test}')
+            self.cfg.expt.sigma_test /= 2 
         
         amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
         # print(amprabi)

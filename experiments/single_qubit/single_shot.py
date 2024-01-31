@@ -37,12 +37,12 @@ def hist(data, plot=True, span=None, verbose=True):
         fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10, 6))
         fig.tight_layout()
 
-        axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.')
-        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.')
-        if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.')
-        axs[0,0].scatter(xg, yg, color='k', marker='o')
-        axs[0,0].scatter(xe, ye, color='k', marker='o')
-        if plot_f: axs[0,0].scatter(xf, yf, color='k', marker='o')
+        axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.', edgecolor='None', alpha=0.3)
+        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.', edgecolor='None', alpha=0.3)
+        if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.', edgecolor='None', alpha=0.3)
+        axs[0,0].scatter(xg, yg, color='k', marker='o', s=20)
+        axs[0,0].scatter(xe, ye, color='k', marker='o', s=20)
+        if plot_f: axs[0,0].scatter(xf, yf, color='k', marker='o', s=20)
 
         # axs[0,0].set_xlabel('I [ADC levels]')
         axs[0,0].set_ylabel('Q [ADC levels]')
@@ -79,15 +79,14 @@ def hist(data, plot=True, span=None, verbose=True):
     if span is None:
         span = (np.max(np.concatenate((Ie_new, Ig_new))) - np.min(np.concatenate((Ie_new, Ig_new))))/2
     xlims = [(xg+xe)/2-span, (xg+xe)/2+span]
-    ylims = [yg-span, yg+span]
 
     if plot:
-        axs[0,1].scatter(Ig_new, Qg_new, label='g', color='b', marker='.')
-        axs[0,1].scatter(Ie_new, Qe_new, label='e', color='r', marker='.')
-        if plot_f: axs[0, 1].scatter(If_new, Qf_new, label='f', color='g', marker='.')
-        axs[0,1].scatter(xg, yg, color='k', marker='o')
-        axs[0,1].scatter(xe, ye, color='k', marker='o')    
-        if plot_f: axs[0, 1].scatter(xf, yf, color='k', marker='o')    
+        axs[0,1].scatter(Ig_new, Qg_new, label='g', color='b', marker='.', edgecolor='None', alpha=0.3)
+        axs[0,1].scatter(Ie_new, Qe_new, label='e', color='r', marker='.', edgecolor='None', alpha=0.3)
+        if plot_f: axs[0, 1].scatter(If_new, Qf_new, label='f', color='g', marker='.', edgecolor='None', alpha=0.3)
+        axs[0,1].scatter(xg, yg, color='k', marker='o', s=20)
+        axs[0,1].scatter(xe, ye, color='k', marker='o', s=20)    
+        if plot_f: axs[0, 1].scatter(xf, yf, color='k', marker='o', s=20)    
 
         # axs[0,1].set_xlabel('I [ADC levels]')
         axs[0,1].legend(loc='upper right')
@@ -246,7 +245,7 @@ class HistogramProgram(AveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
         if 'pulse_test' in self.cfg.expt and self.cfg.expt.pulse_test:
@@ -535,7 +534,7 @@ class SingleShotOptExperiment(Experiment):
             for g_ind, gain in enumerate(gainpts):
                 for l_ind, l in enumerate(lenpts):
                     shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
-                    shot.cfg = self.cfg
+                    shot.cfg = deepcopy(self.cfg)
                     shot.cfg.device.readout.frequency[qubit] = f
                     shot.cfg.device.readout.gain[qubit] = gain
                     shot.cfg.device.readout.readout_length = l 

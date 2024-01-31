@@ -88,12 +88,13 @@ class AbstractStateTomo3QProgram(QutritAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
         # Prep state to characterize
         kwargs = self.cfg.expt.state_prep_kwargs
         if kwargs is None: kwargs = dict()
+        # print('kwargs', kwargs)
         self.state_prep_pulse(qubits, **kwargs)
         self.sync_all(10)
 
@@ -101,6 +102,11 @@ class AbstractStateTomo3QProgram(QutritAveragerProgram):
         self.setup_measure(qubit=qubits[0], basis=self.basis[0], play=True)
         self.setup_measure(qubit=qubits[1], basis=self.basis[1], play=True)
         self.setup_measure(qubit=qubits[2], basis=self.basis[2], play=True)
+
+        # Extra pulse for distinguishing g/e/f states
+        if 'ge_pulse' in self.cfg.expt and self.cfg.expt.ge_pulse is not None:
+            for q in self.cfg.expt.ge_pulse:
+                self.X_pulse(q, pihalf=False, neg=False, play=True) # flagged for ZZ correction
 
         # self.sync_all(50)
         # Simultaneous measurement
@@ -133,16 +139,31 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
     """
     def state_prep_pulse(self, qubits, **kwargs):
         # pass in kwargs via cfg.expt.state_prep_kwargs
-        prep_state = kwargs['prep_state'] # should be gg, ge, eg, or ee
+        prep_state = kwargs['prep_state'] # should be xxx
+
+        num_in_e = np.sum([char == 'e' for char in prep_state]) # number of qubits in e
+        # print(prep_state)
 
         # Do all the calibrations with Q1 in 0+1
-        num_in_e = np.sum([char == 'e' for char in prep_state])
-        if num_in_e == 0: return
-
-        first_e = prep_state.index('e')
-        if num_in_e >= 1:
-            self.X_pulse(q=qubits[first_e], play=True)
-            self.sync_all(10)
+        setup_q1_e = False
+        if 'setup_q1_e' in kwargs and kwargs['setup_q1_e']:
+            assert 1 not in qubits, 'Trying to setup Q1 for calibration matrix as if it were not part of the tomo qubits, but it is!'
+            setup_q1_e = True
+            self.X_pulse(q=1, pihalf=True, play=True)
+            if num_in_e == 0: return # did the Q1 prep pulse before returning
+            num_in_e += 1
+            prep_state = 'e'+prep_state
+            # print('added Q1=e to front of prep state string')
+            qubits = [1, *qubits]
+            first_e = 0
+        else:
+            if num_in_e == 0: return
+            first_e = prep_state.index('e')
+            if num_in_e >= 1:
+                # print(prep_state, f'pulse {first_e}')
+                self.X_pulse(q=qubits[first_e], play=True)
+                self.sync_all(10)
+        # print('first', first_e)
 
         if num_in_e >= 2: # ee
             second_e = prep_state[first_e+1:].index('e') + first_e + 1
@@ -153,19 +174,39 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[second_e]], gen_ch=self.qubit_chs[qubits[second_e]])
                 self.add_gauss(ch=self.qubit_chs[qubits[second_e]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
                 gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[second_e]]
-            else: gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[first_e]]
+            elif qubits[second_e] == 1:
+                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[first_e]]
+            elif qubits[first_e] == 1:
+                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qubits[second_e]]
+            else: assert False, "There's probably a bug in your conditional statements"
+            print(prep_state, f'pulse {second_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[second_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
             self.sync_all(10)
+            # print('second', second_e)
 
-        if num_in_e == 3: # eee    
-            third_e = 2
-            freq = self.freq2reg( # not totally sure... do ZZ shifts add?
+        if num_in_e >= 3: # eee
+            third_e = prep_state[second_e+1:].index('e') + second_e + 1
+            freq = self.freq2reg(
                 self.cfg.device.qubit.f_ge[qubits[third_e]] + ZZs[qubits[third_e], qubits[first_e]] + ZZs[qubits[third_e], qubits[second_e]], 
                 gen_ch=self.qubit_chs[qubits[third_e]])
             waveform = f'pi_ge_q{qubits[third_e]}'
             gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[third_e]]
+            print(prep_state, f'pulse {third_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[third_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
             self.sync_all(10)
+            # print('third', third_e)
+
+        if num_in_e >= 4: # eeee
+            fourth_e = prep_state[second_e+1:].index('e') + second_e + 1
+            freq = self.freq2reg(
+                self.cfg.device.qubit.f_ge[qubits[fourth_e]] + ZZs[qubits[fourth_e], qubits[first_e]] + ZZs[qubits[fourth_e], qubits[second_e]] + ZZs[qubits[fourth_e], qubits[third_e]],
+                gen_ch=self.qubit_chs[qubits[fourth_e]])
+            waveform = f'pi_ge_q{qubits[fourth_e]}'
+            gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[fourth_e]]
+            print(prep_state, f'pulse {fourth_e}')
+            self.setup_and_pulse(ch=self.qubit_chs[qubits[fourth_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
+            self.sync_all(10)
+            # print('fourth', fourth_e)
 
     def initialize(self):
         self.cfg.expt.basis = 'ZZZ'

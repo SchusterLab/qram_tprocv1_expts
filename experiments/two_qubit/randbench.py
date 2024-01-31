@@ -14,7 +14,7 @@ from tqdm import tqdm_notebook as tqdm
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram
 from experiments.two_qubit.length_rabi_EgGf import LengthRabiEgGfProgram
-from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts
 
 import experiments.fitting as fitter
 
@@ -213,7 +213,7 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
         # Do all the gates given in the initialize except for the total gate, measure
@@ -288,16 +288,19 @@ class SimultaneousRBExperiment(Experiment):
         ge_avgs_q = None
         angles_q = None
         fids_q = None
-        if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt:
+        counts_calib = None
+        if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt:
             angles_q = self.cfg.expt.angles
             thresholds_q = self.cfg.expt.thresholds
             ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
+            counts_calib = np.asarray(self.cfg.expt.counts_calib)
             print('Re-using provided angles, thresholds, ge_avgs')
         else:
                 thresholds_q = [0]*4
                 ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
                 angles_q = [0]*4
                 fids_q = [0]*4
+                counts_calib = []
 
                 # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
                 sscfg = AttrDict(deepcopy(self.cfg))
@@ -306,6 +309,9 @@ class SimultaneousRBExperiment(Experiment):
                 if not self.cfg.expt.use_EgGf_subspace: # single qubit RB
                     sscfg.expt.tomo_qubits = [sscfg.expt.tomo_qubits[0], (sscfg.expt.tomo_qubits[0] + 1) % 4] # super hacky way to just add another qubit so can use the error tomo program to do single shot calib
                 else: sscfg.expt.tomo_qubits = [sscfg.expt.tomo_qubits[0], 1]
+                qA, qB = sscfg.expt.tomo_qubits
+                adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
+                adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
 
                 calib_prog_dict = dict()
                 calib_order = ['gg', 'ge', 'eg', 'ee']
@@ -332,16 +338,22 @@ class SimultaneousRBExperiment(Experiment):
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     angles_q[q] = angle
                     fids_q[q] = fid[0]
-                    print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+                    print(f'ge fidelity (%): {100*fid[0]}')
+                
+                # Process the shots taken for the confusion matrix with the calibration angles
+                for prep_state in calib_order:
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts_calib.append(counts)
 
-                if debug:
-                    print(f'thresholds={thresholds_q}')
-                    print(f'angles={angles_q}')
-                    print(f'ge_avgs={ge_avgs_q}')
+                print(f'thresholds={thresholds_q}')
+                print(f'angles={angles_q}')
+                print(f'ge_avgs={ge_avgs_q}')
+                print(f'counts_calib={counts_calib}')
 
                 thresholds_q = np.asarray(thresholds_q)
                 angles_q = np.asarray(angles_q)
                 ge_avgs_q = np.asarray(ge_avgs_q)
+                counts_calib = np.asarray(counts_calib)
 
         # ================= #
         # Begin RB
@@ -349,7 +361,7 @@ class SimultaneousRBExperiment(Experiment):
 
         if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
         a = [[] for _ in range(len(qubits))]
-        data={"xpts":[], "avgi":deepcopy(a), "avgq":deepcopy(a), "amps":deepcopy(a), "phases":deepcopy(a), "avgi_err":deepcopy(a), "avgq_err":deepcopy(a)}
+        data={"xpts":[], "avgi":deepcopy(a), "avgq":deepcopy(a), "amps":deepcopy(a), "phases":deepcopy(a), "avgi_err":deepcopy(a), "avgq_err":deepcopy(a), 'counts_calib':counts_calib, 'counts_raw':[]}
 
         depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
         for depth in tqdm(depths):
@@ -363,6 +375,9 @@ class SimultaneousRBExperiment(Experiment):
                     gate_list, total_gate = interleaved_gate_sequence(depth, gate_char=self.cfg.expt.gate_char)
                 else: gate_list, total_gate = gate_sequence(depth)
                 gate_list.append(total_gate) # make sure to do the inverse gate
+
+                # print(gate_list)
+
                 # gate_list = ['X', '-X/2,Z', 'Y/2', '-X/2,-Z/2', '-Y/2,Z', '-Z/2', 'X', 'Y']
                 # gate_list = ['X/2,Z/2', 'X/2,Z/2']
                 # gate_list = ['I', 'I']
@@ -392,11 +407,25 @@ class SimultaneousRBExperiment(Experiment):
 
                 # print(gate_list)
                 avgi, avgi_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
-                for iq, q in enumerate(qubits):
-                    data["avgi"][iq][-1].append(avgi[adc_chs[q]])
-                    # print(depth, var, iq, avgi)
-                    data["avgi_err"][iq][-1].append(avgi_err[adc_chs[q]])
+                if self.cfg.expt.post_process == 'threshold':
+                    shots, _ = randbench.get_shots(angle=angles_q, threshold=thresholds_q)
+                    # 00, 01, 10, 11
+                    counts = np.array([sort_counts(shots[adcA_ch], shots[adcB_ch])])
+                    data['counts_raw'].append(counts)
+                    counts = fix_neg_counts(correct_readout_err(counts, data['counts_calib']))
+                    counts = counts[0] # go back to just 1d array
+                    # qA
+                    data["avgi"][0][-1].append((counts[2] + counts[3])/sum(counts))
+                    # print('corrected', (counts[2] + counts[3])/sum(counts), 'original', avgi[adcA_ch])
+                    # qB
+                    if len(qubits) > 1: data["avgi"][1][-1].append((counts[1] + counts[3])/sum(counts))
+                else:
+                    for iq, q in enumerate(qubits):
+                        data["avgi"][iq][-1].append(avgi[adc_chs[q]])
+                        # print(depth, var, iq, avgi)
+                        data["avgi_err"][iq][-1].append(avgi_err[adc_chs[q]])
                 data['xpts'][-1].append(depth)
+
                 # try:
                 #     avgi, avgi_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
                 #     for iq, q in enumerate(qubits):
@@ -503,7 +532,7 @@ class SimultaneousRBExperiment(Experiment):
         depths = data['xpts']
         flat_depths = np.concatenate(depths)
         flat_probs = np.concatenate(data['probs'][iq])
-        plt.plot(flat_depths, flat_probs, 'x')
+        plt.plot(flat_depths, flat_probs, 'x', color='tab:grey')
 
         probs_vs_depth = data['probs'][iq]
         # probs_vs_depth = np.reshape(data['probs'][iq], (self.cfg.expt.expts, self.cfg.expt.variations))
@@ -511,7 +540,8 @@ class SimultaneousRBExperiment(Experiment):
         med_probs = data['med_probs'][iq]
         avg_probs = data['avg_probs'][iq]
         working_depths = data['working_depths']
-        plt.errorbar(working_depths, avg_probs, fmt='o-', yerr=2*std_dev_probs, color='tab:blue', elinewidth=0.75)
+        # plt.errorbar(working_depths, avg_probs, fmt='o', yerr=2*std_dev_probs, color='k', elinewidth=0.75)
+        plt.errorbar(working_depths, med_probs, fmt='o', yerr=2*std_dev_probs, color='k', elinewidth=0.75)
 
         if fit:
             cov_p = data['fit_err'][iq][0][0]
@@ -524,7 +554,7 @@ class SimultaneousRBExperiment(Experiment):
             print(f'\tFidelity=1-error: {1-data["error"][iq]} +/- {np.sqrt(fitter.error_fit_err(cov_p, 2**(len(self.cfg.expt.qubits))))}')
 
         plt.grid(linewidth=0.3)
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
         plt.show()
     
     def save_data(self, data=None):
@@ -592,7 +622,6 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
         self.sync_all(10)
 
         # Get into the Eg-Gf subspace

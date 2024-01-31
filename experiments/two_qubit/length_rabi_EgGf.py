@@ -74,23 +74,99 @@ class LengthRabiEgGfProgram(CliffordAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
 
-        setup_ZZ = 1
-        if 'setup_ZZ' in self.cfg.expt and self.cfg.expt.setup_ZZ is not None: setup_ZZ = self.cfg.expt.setup_ZZ
+        # ================= #
+        # Initial states
+        # ================= #
 
-        if setup_ZZ != 1:
-            self.X_pulse(q=setup_ZZ, pihalf=False, play=True)
-            assert qNotDrive == 1, 'qNotDrive != 1 and setup_ZZ != 1 not setup yet'
-            self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_Q1_ZZ_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[setup_ZZ], waveform=f'qubit{qNotDrive}_ZZ{setup_ZZ}')
+        init_state = self.cfg.expt.init_state
+
+        if init_state == '|0>|0>':
+            pass
+
+        elif init_state == '|0>|1>':
+            self.Y_pulse(q=1, play=True)
             self.sync_all()
+
+        elif init_state == '|0>|0+1>':
+            self.Y_pulse(q=1, play=True, pihalf=True)
+            self.sync_all()
+
+        elif init_state == '|1>|0>':
+            self.Y_pulse(q=0, play=True, pihalf=False)
+            self.sync_all()
+
+        elif init_state == '|1>|0+1>':
+            self.Y_pulse(q=0, play=True)
+            self.sync_all(0)
+
+            pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0]/2, gen_ch=self.qubit_chs[1])
+            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
+            # phase = self.deg2reg(-90+260.6060606060606, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
+            # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
+            self.sync_all()
+
+        elif init_state == '|1>|1>':
+            self.Y_pulse(q=0, play=True)
+            self.sync_all(0)
+
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
+            self.sync_all()
+
+        elif init_state == '|0+1>|0+1>':
+            assert False, f'init state {init_state} is not well calibrated!'
+            self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
+            self.sync_all()
+
+            freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
+            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+            sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
+            pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
+            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
+            self.sync_all()
+
+        elif init_state == '|0+1>|0>':
+            self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
+            self.sync_all()
+
+        elif init_state == '|0+1>|1>':
+            self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
+            self.sync_all()
+
+            waveform = f'qubit0_ZZ1'
+            freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[0], gen_ch=self.qubit_chs[0])
+            gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
+            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0], gen_ch=self.qubit_chs[0])
+            self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
+            self.sync_all()
+
+        elif init_state == '|0+i1>|0+1>':
+            self.X_pulse(q=0, play=True, pihalf=True, neg=True) # -> 0+i1
+            self.sync_all()
+
+            freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
+            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+            sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
+            pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
+            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
+            self.sync_all()
+        
         else:
-            # initialize qubit A to E: expect to end in Eg
-            # self.setup_and_pulse(ch=self.qubit_chs[qSort], style="arb", phase=0, freq=self.f_ge_regs[qSort], gain=cfg.device.qubit.pulses.pi_ge.gain[qSort], waveform=f"qubit{qSort}") #, phrst=1)
-            self.X_pulse(q=qNotDrive, pihalf=False, play=True)
-            self.sync_all(5)
+            assert False, 'Init state not valid'
+
+        # ================= #
+        # Do the pulse
+        # ================= #
 
         # apply Eg -> Gf pulse on qDrive: expect to end in Gf
         if self.sigma_test > 0:
@@ -174,6 +250,8 @@ class LengthRabiEgGfExperiment(Experiment):
         if qA == qDrive: qNotDrive = qB
         else: qNotDrive = qA
 
+        if 'measure_qubits' not in self.cfg.expt: self.cfg.expt.measure_qubits = [qA, qB]
+
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -186,12 +264,16 @@ class LengthRabiEgGfExperiment(Experiment):
                 elif not(isinstance(value, list)):
                     subcfg.update({key: [value]*num_qubits_sample})
 
-        adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
-        adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
         
         lengths = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
         
-        data={"xpts":[], "avgi":[[],[]], "avgq":[[],[]], "amps":[[],[]], "phases":[[],[]], 'counts_calib':[], 'counts_raw':[[],[]]}
+        data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[], 'counts_calib':[], 'counts_raw':[]}
+        for i_q in range(len(self.cfg.expt.measure_qubits)):
+            data['avgi'].append([])
+            data['avgq'].append([])
+            data['amps'].append([])
+            data['phases'].append([])
+            data['counts_raw'].append([])
 
         # ================= #
         # Get single shot calibration for 2 qubits
@@ -268,11 +350,16 @@ class LengthRabiEgGfExperiment(Experiment):
         if 'gain' not in self.cfg.expt:
             if qDrive == 1: self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
             else: self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+        if 'pulse_type' not in self.cfg.expt:
+            if qDrive == 1: self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
+            else: self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
         
         for length in tqdm(lengths, disable=not progress):
             self.cfg.expt.sigma_test = float(length)
             # lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
             if not self.cfg.expt.measure_f:
+                if self.cfg.expt.post_process is not None and len(self.cfg.expt.measure_qubits) != 2:
+                    assert False, 'more qubits not implemented for measure f'
                 self.cfg.expt.setup_measure = 'qDrive_ef' # measure g vs. f (e)
                 lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
                 # print(lengthrabi)
@@ -280,16 +367,17 @@ class LengthRabiEgGfExperiment(Experiment):
                 # print(progs2json([lengthrabi.dump_prog()]))
                 avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
 
-                data['avgi'][0].append(avgi[adcA_ch])
-                data['avgi'][1].append(avgi[adcB_ch])
-                data['avgq'][0].append(avgq[adcA_ch])
-                data['avgq'][1].append(avgq[adcB_ch])
-                data['amps'][0].append(np.abs(avgi[adcA_ch]+1j*avgi[adcA_ch]))
-                data['amps'][1].append(np.abs(avgi[adcB_ch]+1j*avgi[adcB_ch]))
-                data['phases'][0].append(np.angle(avgi[adcA_ch]+1j*avgi[adcA_ch]))
-                data['phases'][1].append(np.angle(avgi[adcB_ch]+1j*avgi[adcB_ch]))
+                for i_q, q in enumerate(self.cfg.expt.measure_qubits):
+                    adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
+                    data['avgi'][i_q].append(avgi[adc_ch])
+                    data['avgq'][i_q].append(avgq[adc_ch])
+                    data['amps'][i_q].append(np.abs(avgi[adc_ch]+1j*avgi[adc_ch]))
+                    data['phases'][i_q].append(np.angle(avgi[adc_ch]+1j*avgi[adc_ch]))
 
             else:
+                assert len(self.cfg.expt.measure_qubits) == 2, 'more qubits not implemented for measure f'
+                adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
+                adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
                 self.cfg.expt.setup_measure = 'qDrive_ef' # measure g vs. f (e)
                 lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
                 popln, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
@@ -362,166 +450,127 @@ class LengthRabiEgGfExperiment(Experiment):
 
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=True):
         if data is None:
             data=self.data
         if fit:
             # fitparams=[yscale, freq, phase_deg, decay, y0]
             # Remove the first and last point from fit in case weird edge measurements
             fitparams = None
+            fitparams = [None, 2/data['xpts'][-1], None, None, None]
 
-            try:
-                pA_avgi, pCovA_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][0][:-1], fitparams=None)
-                data['fitA_avgi'] = pA_avgi   
-            except Exception as e: print('Exception:', e)
-            try:
-                pA_avgq, pCovA_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][0][:-1], fitparams=None)
-                data['fitA_avgq'] = pA_avgq
-            except Exception as e: print('Exception:', e)
-            # pA_amps, pCovA_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][0][:-1], fitparams=None)
+            q_names = ['A', 'B', 'C']
 
-            if not self.cfg.expt.measure_f:
-                # data['fitA_amps'] = pA_amps
-                data['fitA_err_avgi'] = pCovA_avgi   
-                data['fitA_err_avgq'] = pCovA_avgq
-                # data['fitA_err_amps'] = pCovA_amps
+            for i_q, q in enumerate(self.cfg.expt.measure_qubits):
+                q_name = q_names[i_q]
+                try:
+                    p_avgi, pCov_avgi = fitter.fitdecaysin(data['xpts'], data["avgi"][i_q], fitparams=fitparams)
+                    data[f'fit{q_name}_avgi'] = p_avgi
+                except Exception as e: print('Exception:', e)
+                try:
+                    p_avgq, pCov_avgq = fitter.fitdecaysin(data['xpts'], data["avgq"][i_q], fitparams=fitparams)
+                    data[f'fit{q_name}_avgq'] = p_avgq
+                except Exception as e: print('Exception:', e)
+                # p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'], data["amps"][0], fitparams=None)
 
-            try:
-                fitparams=[None, None, 0, None, None]
-                pB_avgi, pCovB_avgi = fitter.fitdecaysin(data['xpts'][:-1], data["avgi"][1][:-1], fitparams=fitparams)
-                data['fitB_avgi'] = pB_avgi   
-            except Exception as e: print('Exception:', e)
-            # fitparams = [20, 1/0.6, None, None, None, None]
-            try:
-                pB_avgq, pCovB_avgq = fitter.fitdecaysin(data['xpts'][:-1], data["avgq"][1][:-1], fitparams=fitparams)
-                data['fitB_avgq'] = pB_avgq
-            # pB_amps, pCovB_amps = fitter.fitdecaysin(data['xpts'][:-1], data["amps"][1][:-1], fitparams=None)
-            except Exception as e: print('Exception:', e)
-
-            if not self.cfg.expt.measure_f:
-                # data['fitB_amps'] = pB_amps
-                data['fitB_err_avgi'] = pCovB_avgi   
-                data['fitB_err_avgq'] = pCovB_avgq
-                # data['fitB_err_amps'] = pCovB_amps
+                if not self.cfg.expt.measure_f:
+                    # data[f'fit{q_name}_amps'] = p_amps
+                    data[f'fit{q_name}_err_avgi'] = pCov_avgi   
+                    data[f'fit{q_name}_err_avgq'] = pCov_avgq
+                    # data[f'fit{q_name}_err_amps'] = pCov_amps
 
         return data
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True):
         if data is None:
             data=self.data 
 
         xpts_ns = data['xpts']*1e3
 
-        # plt.figure(figsize=(18,6))
-        # plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
-        # plt.subplot(121, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Amplitude [adc level]", xlabel='Length [ns]')
-        # plt.plot(xpts_ns[0:-1], data["amps"][0][0:-1],'o-')
-        # if fit:
-        #     p = data['fitA_amps']
-        #     plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-        #     if p[2] > 180: p[2] = p[2] - 360
-        #     elif p[2] < -180: p[2] = p[2] + 360
-        #     if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
-        #     else: pi_length= (3/2 - p[2]/180)/2/p[1]
-        #     pi2_length = pi_length/2
-        #     print(f'Pi length from amps data (qubit A) [us]: {pi_length}')
-        #     print(f'Pi/2 length from amps data (qubit A) [us]: {pi2_length}')
-        #     plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-        #     plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        # plt.subplot(122, title=f'Qubit B ({self.cfg.expt.qubits[1]})', xlabel='Length[ns]')
-        # plt.plot(xpts_ns[0:-1], data["amps"][1][0:-1],'o-')
-        # if fit:
-        #     p = data['fitB_amps']
-        #     plt.plot(xpts_ns[0:-1], fitter.decaysin(data["xpts"][0:-1], *p))
-        #     if p[2] > 180: p[2] = p[2] - 360
-        #     elif p[2] < -180: p[2] = p[2] + 360
-        #     if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
-        #     else: pi_length= (3/2 - p[2]/180)/2/p[1]
-        #     pi2_length = pi_length/2
-        #     print(f'Pi length from amps data (qubit B) [us]: {pi_length}')
-        #     print(f'Pi/2 length from amps data (qubit B) [us]: {pi2_length}')
-        #     plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-        #     plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        pi_lens = []
 
-        plt.figure(figsize=(14,8))
+        rows = 2
+        cols = len(self.cfg.expt.measure_qubits)
+        index = rows*100 + cols*10
+        plt.figure(figsize=(7*cols,8))
+
         plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
-        plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="I [adc level]")
-        plt.plot(xpts_ns, data["avgi"][0],'o-')
-        if fit:
-            p = data['fitA_avgi']
-            plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
-            if p[2] > 180: p[2] = p[2] - 360
-            elif p[2] < -180: p[2] = p[2] + 360
-            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
-            else: pi_length= (3/2 - p[2]/180)/2/p[1]
-            pi2_length = pi_length/2
-            print(f'Pi length from avgi data (qubit A) [us]: {pi_length}')
-            print(f'\tPi/2 length from avgi data (qubit A) [us]: {pi2_length}')
-            print(f'\tDecay time [us]: {p[3]}')
-            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        this_idx = index + 1
+        plt.subplot(this_idx, title=f'Qubit A ({self.cfg.expt.measure_qubits[0]})', ylabel='Population' if self.cfg.expt.post_process else "I [adc level]")
+        pi_len = self.plot_rabi(data=data, data_name='avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=0, q_name='A', fit=fit)
+        pi_lens.append(pi_len) 
+        
+        this_idx = index + cols + 1
+        plt.subplot(this_idx, xlabel="Length [ns]", ylabel='Population' if self.cfg.expt.post_process else "Q [adc level]")
+        pi_len = self.plot_rabi(data=data, data_name='avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=0, q_name='A', fit=fit)
+        pi_lens.append(pi_len) 
 
-        plt.subplot(223, xlabel="Length [ns]", ylabel="Q [adc levels]")
-        plt.plot(xpts_ns, data["avgq"][0],'o-')
-        if fit:
-            p = data['fitA_avgq']
-            plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
-            if p[2] > 180: p[2] = p[2] - 360
-            elif p[2] < -180: p[2] = p[2] + 360
-            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
-            else: pi_length= (3/2 - p[2]/180)/2/p[1]
-            pi2_length = pi_length/2
-            print(f'Pi length from avgq data (qubit A) [us]: {pi_length}')
-            print(f'\tPi/2 length from avgq data (qubit A) [us]: {pi2_length}')
-            print(f'\tDecay time [us]: {p[3]}')
-            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        # plt.axvline(631)
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        this_idx = index + 2
+        plt.subplot(this_idx, title=f'Qubit B ({self.cfg.expt.measure_qubits[1]})')
+        pi_len = self.plot_rabi(data=data, data_name='avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=1, q_name='B', fit=fit)
+        pi_lens.append(pi_len) 
 
-        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
-        plt.plot(xpts_ns, data["avgi"][1],'o-')
-        if fit:
-            p = data['fitB_avgi']
-            plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
-            if p[2] > 180: p[2] = p[2] - 360
-            elif p[2] < -180: p[2] = p[2] + 360
-            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
-            else: pi_length= (3/2 - p[2]/180)/2/p[1]
-            pi2_length = pi_length/2
-            print(f'Pi length from avgi data (qubit B) [us]: {pi_length}')
-            print(f'\tPi/2 length from avgi data (qubit B) [us]: {pi2_length}')
-            print(f'\tDecay time [us]: {p[3]}')
-            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        this_idx = index + cols + 2
+        plt.subplot(this_idx, xlabel="Length [ns]")
+        pi_len = self.plot_rabi(data=data, data_name='avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=1, q_name='B', fit=fit)
+        pi_lens.append(pi_len) 
 
-        plt.subplot(224, xlabel="Length [ns]")
-        plt.plot(xpts_ns, data["avgq"][1],'o-')
-        if fit:
-            try:
-                p = data['fitB_avgq']
-                plt.plot(xpts_ns, fitter.decaysin(data["xpts"], *p))
-                if p[2] > 180: p[2] = p[2] - 360
-                elif p[2] < -180: p[2] = p[2] + 360
-                if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
-                else: pi_length= (3/2 - p[2]/180)/2/p[1]
-                pi2_length = pi_length/2
-                print(f'Pi length from avgq data (qubit B) [us]: {pi_length}')
-                print(f'\tPi/2 length from avgq data (qubit B) [us]: {pi2_length}')
-                print(f'\tDecay time [us]: {p[3]}')
-                plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
-                plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
-            except Exception as e: print('Exception:', e)
-        if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.measure_f:
+            print('max QA f population:', np.max(data['avgq'][0]))
+            print('min QB g population:', np.min(data['avgi'][1]))
+
+
+        # ------------------------------ #
+        if len(self.cfg.expt.measure_qubits) == 3:
+            this_idx = index + 3
+            plt.subplot(this_idx, title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})', ylabel="I [adc level]")
+            pi_len = self.plot_rabi(data=data, data_name='avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=2, q_name='C', fit=fit)
+            pi_lens.append(pi_len) 
+
+            this_idx = index + cols + 3
+            plt.subplot(this_idx, xlabel="Length [ns]", ylabel="Q [adc levels]")
+            pi_len = self.plot_rabi(data=data, data_name='avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=2, q_name='C', fit=fit)
+            pi_lens.append(pi_len) 
+
 
         plt.tight_layout()
         plt.show()
 
+        return pi_lens
+
+
+    """
+    q_index is the index in measure_qubits
+    """
+    def plot_rabi(self, data, data_name, fit_xpts, plot_xpts, q_index, q_name, fit=True):
+        plt.plot(plot_xpts, data[data_name][q_index],'o-')
+        pi_length=None
+        if fit: 
+            if f'fit{q_name}_{data_name}' not in data: return None
+            p = data[f'fit{q_name}_{data_name}']
+            plt.plot(plot_xpts, fitter.decaysin(fit_xpts, *p))
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: pi_length = (3/2 - p[2]/180)/2/p[1]
+            pi2_length = pi_length/2
+            print(f'Pi length from avgq data (qubit {q_name}) [us]: {pi_length}')
+            print(f'\tPi/2 length from avgq data (qubit {q_name}) [us]: {pi2_length}')
+            print(f'\tDecay time [us]: {p[3]}')
+            plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
+            plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        if self.cfg.expt.post_process is not None:
+            if np.max(data[data_name][q_index]) - np.min(data[data_name][q_index]) > 0.2:
+                plt.ylim(-0.1, 1.1)
+                print(data_name, q_name)
+        return pi_length
+
+
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname
 
 # ===================================================================== #
 
@@ -573,7 +622,12 @@ class EgGfFreqLenChevronExperiment(Experiment):
         freqpts = self.cfg.expt.start_f + self.cfg.expt.step_f * np.arange(self.cfg.expt.expts_f)
         lenpts = self.cfg.expt.start_len + self.cfg.expt.step_len * np.arange(self.cfg.expt.expts_len)
         
-        data={"lenpts":lenpts, "freqpts":freqpts, "avgi":[[],[]], "avgq":[[],[]], "amps":[[],[]], "phases":[[],[]]}
+        data={"lenpts":lenpts, "freqpts":freqpts, "avgi":[], "avgq":[], "amps":[], "phases":[]}
+        for i_q in range(len(self.cfg.expt.measure_qubits)):
+            data['avgi'].append([])
+            data['avgq'].append([])
+            data['amps'].append([])
+            data['phases'].append([])
 
         self.cfg.expt.start = self.cfg.expt.start_len
         self.cfg.expt.step = self.cfg.expt.step_len
@@ -582,6 +636,9 @@ class EgGfFreqLenChevronExperiment(Experiment):
         if 'gain' not in self.cfg.expt:
             if qDrive == 1: self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
             else: self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+        if 'pulse_type' not in self.cfg.expt:
+            if qDrive == 1: self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
+            else: self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
 
         expt_prog = LengthRabiEgGfExperiment(soccfg=self.soccfg, path=self.path, prefix=self.prefix, config_file=self.config_file) 
         expt_prog.cfg.expt = self.cfg.expt
@@ -591,7 +648,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
             if qDrive == 1: expt_prog.cfg.device.qubit.f_EgGf[qSort] = float(freq)
             else: expt_prog.cfg.device.qubit.f_EgGf_Q[qSort] = float(freq)
             expt_prog.go(analyze=False, display=False, progress=False, save=False)
-            for q_ind, q in enumerate(self.cfg.expt.qubits):
+            for q_ind, q in enumerate(self.cfg.expt.measure_qubits):
                 data['avgi'][q_ind].append(expt_prog.data['avgi'][q_ind])
                 data['avgq'][q_ind].append(expt_prog.data['avgq'][q_ind])
                 data['amps'][q_ind].append(expt_prog.data['amps'][q_ind])
@@ -626,122 +683,124 @@ class EgGfFreqLenChevronExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fitparams=None, verbose=True):
         if data is None:
             data=self.data
-        pass
+        data = deepcopy(data)
+        inner_sweep = data['lenpts']
+        outer_sweep = data['freqpts']
 
-    def display(self, data=None, fit=True, plot_freq=None, plot_len=None, saveplot=False, **kwargs):
+        y_sweep = outer_sweep # index 0
+        x_sweep = inner_sweep # index 1
+
+        # fitparams = [yscale, freq, phase_deg, y0]
+        # fitparams=[None, 2/x_sweep[-1], None, None]
+        for data_name in ['avgi', 'avgq']:
+            data.update({f'fit{data_name}':[None]*len(self.cfg.expt.measure_qubits)})
+            data.update({f'fit{data_name}_err':[None]*len(self.cfg.expt.measure_qubits)})
+            data.update({f'data_fit{data_name}':[None]*len(self.cfg.expt.measure_qubits)})
+            for q_index in range(len(self.cfg.expt.measure_qubits)):
+                this_data = data[data_name][q_index]
+
+                fit = [None]*len(y_sweep)
+                fit_err = [None]*len(y_sweep)
+                data_fit = [None]*len(y_sweep)
+
+                for i_freq, freq in enumerate(y_sweep):
+                    try:
+                        p, pCov = fitter.fitsin(x_sweep, this_data[i_freq, :], fitparams=fitparams)
+                        fit[i_freq] = p
+                        fit_err[i_freq] = pCov
+                        data_fit[i_freq] = fitter.sinfunc(x_sweep, *p)
+                    except Exception as e: print('Exception:', e)
+
+                data[f'fit{data_name}'][q_index] = fit
+                data[f'fit{data_name}_err'][q_index] = fit_err
+                data[f'data_fit{data_name}'][q_index] = data_fit
+
+
+        # for k, a in data.items():
+        #     data[k] = np.array(a)
+        #     if np.shape(data[k]) == (2, len(y_sweep) * len(x_sweep)):
+        #         data[k] = np.reshape(data[k], (2, len(y_sweep), len(x_sweep)))
+        return data
+
+    def display(self, data=None, fit=True, plot_rabi=True, signs=[[1,1],[1,1]], verbose=True, saveplot=False):
         if data is None:
             data=self.data 
 
-        inner_sweep = data['lenpts'][1:]
-        outer_sweep = data['freqpts'][1:]
         data = deepcopy(data)
-        # print(data['avgq'][0])
-        data['avgi'] = (data['avgi'][0][1:, 1:], data['avgi'][1][1:, 1:])
-        data['avgq'] = (data['avgq'][0][1:, 1:], data['avgq'][1][1:, 1:])
+        inner_sweep = data['lenpts']
+        outer_sweep = data['freqpts']
 
         y_sweep = outer_sweep
         x_sweep = inner_sweep
 
         if saveplot: plt.style.use('dark_background')
-        plt.figure(figsize=(14,10))
-        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length")
 
-        print('min qA I', np.min(data['avgi'][0]))
-        print('max qA I', np.max(data['avgi'][0]))
-        min_pos = np.argwhere(data['avgi'][0] == np.min(data['avgi'][0]))
-        print(min_pos)
-        plot_freq1 = y_sweep[min_pos[0,0]]
-        plot_len1 = 1e3*x_sweep[min_pos[0,1]]
-        print('freq', plot_freq1, 'len', plot_len1)
-        if plot_freq is not None: plot_freq1 = plot_freq
-        if plot_len is not None: plot_len1 = plot_len
+        plot_lens = []
+        plot_freqs = []
 
-        print('min qB I', np.min(data['avgi'][1]))
-        print('max qB I', np.max(data['avgi'][1]))
-        max_pos = np.argwhere(data['avgq'][1] == np.max(data['avgq'][1]))
-        print(max_pos)
-        plot_freq2 = y_sweep[max_pos[0,0]]
-        plot_len2 = 1e3*x_sweep[max_pos[0,1]]
-        print('freq', plot_freq2, 'len', plot_len2)
-        if plot_freq is not None: plot_freq2 = plot_freq
-        if plot_len is not None: plot_len2 = plot_len
+        rows = 2
+        cols = len(self.cfg.expt.measure_qubits)
+        index = rows*100 + cols*10
+        plt.figure(figsize=(7*cols,8))
+        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length (Gain {self.cfg.expt.gain})")
 
-        if saveplot:
-            plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})')
-            ax = plt.gca()
-            ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
-            ax.tick_params(axis='both', which='major', labelsize=16)
-        else: plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Pulse Frequency [MHz]")
-        # plt.pcolormesh(x_sweep, y_sweep, np.reshape(data['avgi'][0], (len(outer_sweep), len(inner_sweep))), cmap='viridis', shading='auto')
-        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
-        if plot_freq1 is not None: plt.axhline(plot_freq1, color='r')
-        if plot_len1 is not None: plt.axvline(plot_len1, color='r')
-        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
-        else:
-            if self.cfg.expt.post_process is not None:
-                if self.cfg.expt.measure_f: plt.colorbar(label='Population Not E -> E')
-                else: plt.colorbar(label='Population G -> Not G')
-            else: plt.colorbar(label='I [ADC level]')
-        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
+        # ------------------------------ #
+        q_index = 0
 
-        if saveplot:
-            plt.subplot(223)
-            ax = plt.gca()
-            ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
-            ax.set_xlabel("Length [ns]", fontsize=18)
-            ax.tick_params(axis='both', which='major', labelsize=16)
-        else: plt.subplot(223, xlabel="Length [ns]", ylabel="Pulse Frequency [MHz]")
-        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
-        if plot_freq1 is not None: plt.axhline(plot_freq1, color='r')
-        if plot_len1 is not None: plt.axvline(plot_len1, color='r')
-        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
-        else:
-            if self.cfg.expt.post_process is not None:
-                if self.cfg.expt.measure_f:
-                    plt.colorbar(label='Population Not F -> F')
-                else: plt.colorbar(label='Population error')
-            else: plt.colorbar(label='Q [ADC level]')
-        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
+        this_idx = index + 1
+        plt.subplot(this_idx, title=f'Qubit A ({self.cfg.expt.measure_qubits[0]})')
+        ax = plt.gca()
+        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'avgi'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
+
+        this_idx = index + cols + 1
+        plt.subplot(this_idx)
+        ax = plt.gca()
+        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'avgq'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
+
+        # ------------------------------ #
+        q_index = 1
+
+        this_idx = index + 2
+        plt.subplot(this_idx, title=f'Qubit B ({self.cfg.expt.measure_qubits[1]})')
+        ax = plt.gca()
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'avgi'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
+
+        this_idx = index + cols + 2
+        plt.subplot(this_idx)
+        ax = plt.gca()
+        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'avgq'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
 
 
-        plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
-        if saveplot:
-            ax = plt.gca()
-            ax.tick_params(axis='both', which='major', labelsize=16)
-        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
-        if plot_freq2 is not None: plt.axhline(plot_freq2, color='r')
-        if plot_len2 is not None: plt.axvline(plot_len2, color='r')
-        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
-        else:
-            if self.cfg.expt.post_process is not None:
-                if self.cfg.expt.measure_f: plt.colorbar(label='Population Not E -> E')
-                # if self.cfg.expt.measure_f: plt.colorbar(label='Population Not G -> G')
-                else: plt.colorbar(label='Population G -> Not G')
-            else: plt.colorbar(label='I [ADC level]')
-        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
-        # plt.clim(0.1, 0.4)
+        # ------------------------------ #
+        if len(self.cfg.expt.measure_qubits) == 3:
+            q_index = 2
 
-        if saveplot:
-            plt.subplot(224)
-            ax = plt.gca()
-            ax.set_xlabel("Length [ns]", fontsize=18)
-            ax.tick_params(axis='both', which='major', labelsize=16)
-        else: plt.subplot(224, xlabel="Length [ns]")
-        plt.pcolormesh(1e3*x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
-        if plot_freq2 is not None: plt.axhline(plot_freq2, color='r')
-        if plot_len2 is not None: plt.axvline(plot_len2, color='r')
-        if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
-        else:
-            if self.cfg.expt.post_process is not None:
-                if self.cfg.expt.measure_f:
-                    plt.colorbar(label='Population Not F -> F')
-                else: plt.colorbar(label='Population error')
-            else: plt.colorbar(label='Q [ADC level]')
-        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
-        # plt.clim(0.4, 0.8)
+            this_idx = index + 3
+            plt.subplot(this_idx, title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})')
+            data_name = 'avgi'
+            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
+
+            this_idx = index + cols + 3
+            plt.subplot(this_idx, xlabel="Length [ns]")
+            data_name = 'avgq'
+            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
+
+        # ------------------------------ #
 
         plt.tight_layout()
 
@@ -751,6 +810,132 @@ class EgGfFreqLenChevronExperiment(Experiment):
             print('Saved', plot_filename)
 
         plt.show()
+
+        # ------------------------------------------ #
+        # ------------------------------------------ #
+        """
+        Plot fit chevron
+
+        Calculate max/min
+        display signs: [QA I, QB I, QA Q, QB Q]
+        plot_freq, plot_len index: [QA I, QA Q, QB I, QB Q]
+        """ 
+        
+        if saveplot: plt.style.use('dark_background')
+        plt.figure(figsize=(7*cols,8))
+        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length Fit (Gain {self.cfg.expt.gain})")
+
+        # ------------------------------ #
+        q_index = 0
+
+        this_idx = index + 1
+        plt.subplot(this_idx, title=f'Qubit A ({self.cfg.expt.measure_qubits[0]})')
+        ax = plt.gca()
+        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'data_fitavgi'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[0], plot_rabi=True, verbose=verbose)
+        plot_freqs.append(plot_freq)
+        plot_lens.append(plot_len*1e-3)
+
+        this_idx = index + cols + 1
+        plt.subplot(this_idx)
+        ax = plt.gca()
+        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'data_fitavgq'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[1], plot_rabi=True, verbose=verbose)
+        plot_freqs.append(plot_freq)
+        plot_lens.append(plot_len*1e-3)
+
+        # ------------------------------ #
+        q_index = 1
+
+        this_idx = index + 2
+        plt.subplot(this_idx, title=f'Qubit B ({self.cfg.expt.measure_qubits[1]})')
+        ax = plt.gca()
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'data_fitavgi'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[2], plot_rabi=True, verbose=verbose)
+        plot_freqs.append(plot_freq)
+        plot_lens.append(plot_len*1e-3)
+
+        this_idx = index + cols + 2
+        plt.subplot(this_idx)
+        ax = plt.gca()
+        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        data_name = 'data_fitavgq'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[3], plot_rabi=True, verbose=verbose)
+        plot_freqs.append(plot_freq)
+        plot_lens.append(plot_len*1e-3)
+
+
+        # ------------------------------ #
+        if len(self.cfg.expt.measure_qubits) == 3:
+            q_index = 2
+
+            this_idx = index + 3
+            plt.subplot(this_idx, title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})')
+            data_name = 'data_fitavgi'
+            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[4], plot_rabi=True, verbose=verbose)
+            plot_freqs.append(plot_freq)
+            plot_lens.append(plot_len*1e-3)
+
+            this_idx = index + cols + 3
+            plt.subplot(this_idx, xlabel="Length [ns]")
+            data_name = 'data_fitavgq'
+            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[5], plot_rabi=True, verbose=verbose)
+            plot_freqs.append(plot_freq)
+            plot_lens.append(plot_len*1e-3)
+
+        # ------------------------------ #
+
+        plt.tight_layout()
+
+        if saveplot:
+            plot_filename = f'len_freq_chevron_EgGf{self.cfg.expt.qubits[0]}{self.cfg.expt.qubits[1]}_fit.png'
+            plt.savefig(plot_filename, format='png', bbox_inches='tight', transparent = True)
+            print('Saved', plot_filename)
+
+        plt.show()
+
+        return plot_freqs, plot_lens
+
+    """
+    q_index is the index in measure_qubits
+    """
+    def plot_rabi_chevron(self, data, data_name, plot_xpts, plot_ypts, q_index, sign=None, plot_rabi=True, verbose=True, label=None):
+        this_data = data[data_name][q_index]
+        plt.pcolormesh(plot_xpts, plot_ypts, this_data, cmap='viridis', shading='auto')
+        qubit = self.cfg.expt.measure_qubits[q_index]
+        plot_len = None
+        plot_freq = None
+        if plot_rabi:
+            assert sign is not None
+            if sign == 1: func = np.max
+            else: func = np.min
+            good_pos = np.argwhere(this_data == func(this_data))
+            plot_freq = plot_ypts[good_pos[0,0]]
+            plot_len = plot_xpts[good_pos[0,1]]
+            if verbose:
+                if sign == 1:
+                    print(f'max q{qubit} {data_name}', np.max(this_data))
+                else:
+                    print(f'min q{qubit} {data_name}', np.min(this_data))
+                print(good_pos)
+                print(f'Q{qubit} {data_name} freq', plot_freq, 'len', plot_len)
+            plt.axhline(plot_freq, color='r', linestyle='--')
+            plt.axvline(plot_len, color='r', linestyle='--')
+        if label is not None:
+            if self.cfg.expt.post_process is not None:
+                plt.colorbar(label=f'Population {data_name}')
+            else: plt.colorbar(label='$S_{21}$'+ f' {data_name} [ADC level]')
+        else: plt.colorbar().set_label(label=data_name, size=15) 
+        if self.cfg.expt.post_process is not None: plt.clim(0, 1)
+        return plot_freq, plot_len
+
 
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

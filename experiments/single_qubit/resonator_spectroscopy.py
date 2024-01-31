@@ -76,7 +76,26 @@ class ResonatorSpectroscopyExperiment(Experiment):
 
     def analyze(self, data=None, fit=False, findpeaks=False, verbose=True, **kwargs):
         if data is None:
-            data=self.data
+            data=deepcopy(self.data)
+        
+        # Fix the "electrical delay": (doesn't work for mux currently as the mux gen is not phase coherent) - see https://github.com/meeg/qick_demos_sho/blob/main/2023-01-12_qick-workshop/qick_workshop_new.ipynb
+
+        freqs = self.soccfg.adcfreq(data['xpts'])
+        freqs = data['xpts']
+        means = data['avgi'] + 1j*data['avgq']
+        a = np.vstack([freqs, np.ones_like(freqs)]).T
+        phase_correction = np.linalg.lstsq(a, np.unwrap(np.angle(means)), rcond=None)[0][0]/(2*np.pi)
+        # print('phase correction (deg)', phase_correction)
+        means_rotated = means*np.exp(-1j*freqs*2*np.pi*phase_correction)
+        phase_trim = np.linalg.lstsq(a, np.unwrap(np.angle(means_rotated)), rcond=None)[0][0]/(2*np.pi)
+        # print('phase trim (deg)', phase_trim)
+        phase_correction += phase_trim
+        print('electrical delay phase correction (no mux support) (deg)', phase_correction)
+
+        means_corrected = means*np.exp(-1j*freqs*2*np.pi*phase_correction)
+        data['avgi'] = np.real(means_corrected)
+        data['avgq'] = np.imag(means_corrected)
+        data['phases'] = np.angle(means_corrected)
             
         if fit:
             # fitparams = [f0, Qi, Qe, phi, scale]
@@ -138,8 +157,8 @@ class ResonatorSpectroscopyExperiment(Experiment):
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')
 
-        plt.subplot(313, xlabel="Readout Frequency [MHz]", ylabel="Q [ADC units]")
-        plt.plot(xpts, data["avgq"][1:-1],'o-')
+        # plt.subplot(313, xlabel="Readout Frequency [MHz]", ylabel="Q [ADC units]")
+        # plt.plot(xpts, data["avgq"][1:-1],'o-')
         plt.show()
         
     def save_data(self, data=None):
@@ -238,7 +257,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         
         return data
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, select=None, **kwargs):
         if data is None:
             data=self.data 
 
@@ -282,9 +301,12 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         plt.colorbar(label='Amps-Avg [ADC level]')
         plt.show()
 
-        print(y_sweep[-1])
-        plt.plot(x_sweep, amps[-1,:])
-        plt.show()
+        if select is not None:
+            y_closest_i = np.argmin(abs(y_sweep - select))
+            y_closest = y_sweep[y_closest_i]
+            print('plotting at gain', y_closest, 'index', y_closest_i)
+            plt.plot(x_sweep, amps[y_closest_i,:])
+            plt.show()
         
     def save_data(self, data=None):
         print(f'Saving {self.fname}')

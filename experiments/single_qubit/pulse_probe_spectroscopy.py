@@ -73,8 +73,6 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         elif self.cfg.expt.pulse_type == 'gauss':
             length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch)
             self.add_gauss(ch=self.qubit_ch, name="qubit", sigma=length, length=length*4)
-        elif self.cfg.expt.pulse_type == 'const':
-            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_start, phase=0, gain=cfg.expt.gain, length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch))
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
@@ -92,13 +90,22 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
     def body(self):
         cfg=AttrDict(self.cfg)
 
+        # Phase reset all channels
+        for ch in self.gen_chs.keys():
+            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+
         length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch)
         if self.cfg.expt.pulse_type == 'flat_top':
             self.set_pulse_registers(ch=self.qubit_ch, style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.gain, length=length, waveform="qubit") # play probe pulse
-            self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
         elif self.cfg.expt.pulse_type == 'gauss':
             self.set_pulse_registers(ch=self.qubit_ch, style="arb", phase=0, freq=self.f_start, gain=cfg.expt.gain, waveform="qubit") # play probe pulse
-            self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
+        elif self.cfg.expt.pulse_type == 'const':
+            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_start, phase=0, gain=cfg.expt.gain, length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_ch))
+        self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
         self.pulse(ch=self.qubit_ch) # play probe pulse
 
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
@@ -174,7 +181,8 @@ class PulseProbeSpectroscopyExperiment(Experiment):
             xpts = data['xpts'][1:-1]
 
         plt.figure(figsize=(9, 11))
-        plt.subplot(311, title=f"Qubit {self.cfg.expt.qubit} Spectroscopy (Gain {self.cfg.expt.gain})", ylabel="Amplitude [ADC units]")
+        title = f"Qubit {self.cfg.expt.qubit} Spectroscopy (Gain {self.cfg.expt.gain}, {self.cfg.expt.length} us {self.cfg.expt.pulse_type})"
+        plt.subplot(311, title=title, ylabel="Amplitude [ADC units]")
         plt.plot(xpts, data["amps"][1:-1],'o-')
         if fit:
             plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))

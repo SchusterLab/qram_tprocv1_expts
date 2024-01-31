@@ -146,7 +146,7 @@ class RamseyProgram(RAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(10)
 
         # initializations as necessary
@@ -245,13 +245,22 @@ class RamseyExperiment(Experiment):
             data=self.data
 
         if fit:
-            # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset, decay time offset]
+            # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset]
             # fitparams=[yscale0, freq0, phase_deg0, decay0, y00, x00, yscale1, freq1, phase_deg1, y01] # two fit freqs
+            
             # Remove the first and last point from fit in case weird edge measurements
             fitparams = None
-            # fitparams=[8, 0.5, 0, 20, None, None]
-            if fit_twofreq: fitfunc = fitter.fittwofreq_decaysin
-            else: fitfunc = fitter.fitdecaysin
+            if fit_twofreq:
+                fitfunc = fitter.fittwofreq_decaysin
+                fitparams = [None]*10
+                fitparams[1] = self.cfg.expt.ramsey_freq
+                fitparams[2] = 0
+                fitparams[7] = 2/data['xpts'][-1]
+                # print('FITPARAMS', fitparams[7])
+                fitparams[8] = 0
+            else:
+                fitfunc = fitter.fitdecaysin
+                fitparams=[None, self.cfg.expt.ramsey_freq, None, None, None]
             p_avgi, pCov_avgi = fitfunc(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
             p_avgq, pCov_avgq = fitfunc(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
             p_amps, pCov_amps = fitfunc(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)

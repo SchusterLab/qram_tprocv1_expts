@@ -66,6 +66,7 @@ def expfunc(x, *p):
 
 def fitexp(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*4
+    else: fitparams = np.copy(fitparams)
     if fitparams[0] is None: fitparams[0] = ydata[-1]
     if fitparams[1] is None: fitparams[1] = ydata[0]-ydata[-1]
     if fitparams[2] is None: fitparams[2] = xdata[0]
@@ -88,6 +89,7 @@ def lorfunc(x, *p):
 
 def fitlor(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*4
+    else: fitparams = np.copy(fitparams)
     if fitparams[0] is None: fitparams[0] = (ydata[0] + ydata[-1])/2
     if fitparams[1] is None: fitparams[1] = max(ydata) - min(ydata)
     if fitparams[2] is None: fitparams[2] = xdata[np.argmax(abs(ydata - fitparams[0]))]
@@ -110,6 +112,7 @@ def sinfunc(x, *p):
 
 def fitsin(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*4
+    else: fitparams = np.copy(fitparams)
     fourier = np.fft.fft(ydata)
     fft_freqs = np.fft.fftfreq(len(ydata), d=xdata[1]-xdata[0])
     fft_phases = np.angle(fourier)
@@ -148,6 +151,7 @@ def decaysin(x, *p):
 
 def fitdecaysin(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*5
+    else: fitparams = np.copy(fitparams)
     fourier = np.fft.fft(ydata)
     fft_freqs = np.fft.fftfreq(len(ydata), d=xdata[1]-xdata[0])
     fft_phases = np.angle(fourier)
@@ -191,6 +195,7 @@ def twofreq_decaysin(x, *p):
 
 def fittwofreq_decaysin(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*10
+    else: fitparams = np.copy(fitparams)
     fourier = np.fft.fft(ydata)
     fft_freqs = np.fft.fftfreq(len(ydata), d=xdata[1]-xdata[0])
     fft_phases = np.angle(fourier)
@@ -250,6 +255,7 @@ def hangerphasefunc(x, *p):
 
 def fithanger(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*7
+    else: fitparams = np.copy(fitparams)
     if fitparams[0] is None: fitparams[0]=np.average(xdata)
     if fitparams[1] is None: fitparams[1]=5000
     if fitparams[2] is None: fitparams[2]=1000
@@ -303,6 +309,7 @@ def rb_gate_fidelity(p_rb, p_irb, d):
 
 def fitrb(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*3
+    else: fitparams = np.copy(fitparams)
     if fitparams[0] is None: fitparams[0]=0.9
     if fitparams[1] is None: fitparams[1]=np.max(ydata) - np.min(ydata)
     if fitparams[2] is None: fitparams[2]=np.min(ydata)

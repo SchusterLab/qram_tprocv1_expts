@@ -18,17 +18,29 @@ def sort_counts(shotsA, shotsB):
     n11 = np.sum(np.logical_and(shotsA, shotsB))
     return np.array([n00, n01, n10, n11])
 
+"""
+See qiskit measurement error mitigation procedure: [https://qiskit.org/textbook/ch-quantum-hardware/measurement-error-mitigation.html](https://qiskit.org/textbook/ch-quantum-hardware/measurement-error-mitigation.html)
+"""
 
 def correct_readout_err(n, n_conf):
+    n = np.array(n, dtype=float)
     conf_mat = np.array(n_conf, dtype=float)
+    assert len(n.shape) == 2 # 2d array
+    assert len(conf_mat.shape) == 2 # 2d array
+    old_sum = sum(n[0])
     for r, row in enumerate(conf_mat):
         conf_mat[r] /= sum(row) # normalize so counts for each state prep sum to 1
     conf_mat = np.transpose(conf_mat) # want counts for each state prep on columns
+    # Check the determinant to make sure we are not running into machine precision
+    # det = np.linalg.det(conf_mat)
+    # print('DETERMINANT', det)
     conf_mat_inv = np.linalg.inv(conf_mat)
     # C_id = invM . C_noisy
     n = np.array(n, dtype=float)
-    for r in range(len(n)):
+    for r in range(np.shape(n)[0]):
+        # print('n[r]', r, n[r])
         n[r] = (conf_mat_inv @ n[r].T).T
+        n[r] *= old_sum/sum(n[r])
     return np.around(n, decimals=5)
 
 
@@ -37,17 +49,67 @@ def fix_neg_counts(counts):
     assert len(counts.shape) == 2 # 2d array
 
     for i_n, n in enumerate(counts):
+        orig_sum = sum(n)
         while len(n[n<0]) > 0: # repeat while still has neg counts
-            assert sum(n) > 0, 'Negative sum of counts'
-            neg_indices = np.where(n<0)[0]
-            neg_vals = n[n<0]
-            len_pos = len(n) - len(neg_vals)
-            n += sum(neg_vals)/len_pos # redistribute the negative counts over all the positive elements evenly
-            for i in neg_indices:
-                n[i] = 0
-
-        counts[i_n] = np.round(n)
+            # print(i_n, n)
+            assert orig_sum > 0, 'Negative sum of counts'
+            most_neg_ind = np.argmin(n)
+            n += abs(n[most_neg_ind]) / (len(n) - 1)
+            n[most_neg_ind] = 0
+        n *= orig_sum/sum(n)
     return counts
+
+"""
+Infer the populations of the g, e, (and f) states given 1 (2) measurements:
+Obtain counts sorted into bins specified by calib_order.
+Apply counts_calib if not None. Apply fix_neg_counts if True.
+1. counts1: measure population with just the standard pulse sequence. Will take the g state population as the true g state population. If no counts2 is specified, will take e state population as true e state population and f will not be measured.
+2. counts2: measure population with adding a ge pulse on the measure_f_qubits. Will take the g state pouplation as the true e state population, and the f state population as 1-g-e
+"""
+def infer_gef_popln(counts1, qubits, calib_order, counts2=None, measure_f_qubits=None, counts_calib=None, fix_neg_counts_flag=True):
+    assert len(calib_order) == np.shape(counts1)[1]
+    assert np.shape(counts1)[0] == 1 # set of counts for 1 state preparation
+    if fix_neg_counts_flag is not None: assert np.shape(calib_order)[0] == np.shape(counts1)[1]
+    if counts2 is not None: assert measure_f_qubits is not None
+
+    gpop_q = [0]*4
+    epop_q = [0]*4
+    fpop_q = [0]*4
+
+    if counts_calib is not None: counts1 = correct_readout_err(counts1, counts_calib)
+    if fix_neg_counts_flag: counts1 = fix_neg_counts(counts1)
+    counts1 = counts1[0] # go back to just 1d array
+    print('corrected counts1', counts1)
+
+    tot_counts1 = sum(counts1)
+    for i_counts_state, counts_state in enumerate(calib_order):
+        for i_q, q in enumerate(qubits):
+            # counts_state is a string like xx (2q), xxx (3q) or xxxx (4q)
+            if counts_state[i_q] == 'g':
+                gpop_q[q] += counts1[i_counts_state] / tot_counts1
+            else: epop_q[q] += counts1[i_counts_state] / tot_counts1 # this is the final answer if we don't care about distinguishing e/f
+
+    if measure_f_qubits is not None:
+        # if we care about distinguishing e/f, the "g" popln of the 2nd experiment is the real e popln, and the real f popln is whatever is left
+        for q in measure_f_qubits: epop_q[q] = 0 # reset this to recalculate e population
+
+        if counts_calib is not None: counts2 = correct_readout_err(counts2, counts_calib)
+        if fix_neg_counts_flag: counts2 = fix_neg_counts(counts2)
+        counts2 = counts2[0] # go back to just 1d array
+        print('corrected counts2', counts2)
+
+        tot_counts2 = sum(counts2)
+        for i_counts_state, counts_state in enumerate(calib_order):
+            for i_q, q in enumerate(qubits):
+                if q not in measure_f_qubits: continue
+                if counts_state[i_q] == 'g':
+                    epop_q[q] += counts2[i_counts_state] / tot_counts2 # e population shows up as g population
+        for i_q, q in enumerate(qubits):
+            if q not in measure_f_qubits: continue
+            fpop_q[q] = 1 - epop_q[q] - gpop_q[q]
+    
+    return gpop_q, epop_q, fpop_q
+
 
 class AbstractStateTomo2QProgram(QutritAveragerProgram):
     """
@@ -96,7 +158,6 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
         self.sync_all(10)
 
         # Prep state to characterize
@@ -188,7 +249,11 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
                 sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[1]], gen_ch=self.qubit_chs[qubits[1]])
                 self.add_gauss(ch=self.qubit_chs[qubits[1]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
                 gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[1]]
-            else: gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[0]]
+            elif qubits[1] == 1:
+                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[0]]
+            elif qubits[0] == 1:
+                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qubits[1]]
+            else: assert False, "There's probably a bug in your conditional statements"
             self.setup_and_pulse(ch=self.qubit_chs[qubits[1]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
             self.sync_all(10)
 
@@ -221,11 +286,25 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
     def state_prep_pulse(self, qubits, **kwargs):
         qA, qB = self.cfg.expt.tomo_qubits
         
-        # self.Y_pulse(q=0, play=True)
+        self.Y_pulse(q=1, play=True, pihalf=False)
         # self.sync_all()
-        # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
+        # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[second_e]) # +Y/2 -> 0+1
+        # self.setup_and_pulse(ch=self.qubit_chs[3], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
         # self.sync_all()
+
+        ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
+        qubits = range(4)
+        second_e = 3
+        first_e = 1
+        freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[second_e]] + ZZs[qubits[second_e], qubits[first_e]], gen_ch=self.qubit_chs[qubits[second_e]])
+        waveform = f'qubit{qubits[second_e]}_ZZ{qubits[first_e]}'
+        if waveform not in self.envelopes:
+            sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[second_e]], gen_ch=self.qubit_chs[qubits[second_e]])
+            self.add_gauss(ch=self.qubit_chs[qubits[second_e]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+            gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[second_e]]
+        phase = self.deg2reg(-90, gen_ch=self.qubit_chs[second_e]) # +Y/2 -> 0+1
+        self.setup_and_pulse(ch=self.qubit_chs[qubits[second_e]], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+        self.sync_all()
 
         # self.X_pulse(q=0, play=True, pihalf=True, neg=True)
         # self.X_pulse(q=1, play=True)
@@ -353,8 +432,8 @@ class EgGfStateTomographyExperiment(Experiment):
             # print(basis)
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.basis = basis
-            assert 'Icontrols' in self.cfg.expt and 'Qcontrols' in self.cfg.expt and 'times_us' in self.cfg.expt
-            cfg.expt.state_prep_kwargs = dict(I_mhz_vs_us=cfg.expt.Icontrols, Q_mhz_vs_us=cfg.expt.Qcontrols, times_us=cfg.expt.times_us)
+            # assert 'Icontrols' in self.cfg.expt and 'Qcontrols' in self.cfg.expt and 'times_us' in self.cfg.expt
+            # cfg.expt.state_prep_kwargs = dict(I_mhz_vs_us=cfg.expt.Icontrols, Q_mhz_vs_us=cfg.expt.Qcontrols, times_us=cfg.expt.times_us)
             # initialize registers
             # cfg.expt.update(dict(
             #     start=0,
@@ -447,7 +526,7 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
             if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            self.sync_all()
+            # self.sync_all()
         self.sync_all(1000)
 
 
@@ -474,23 +553,11 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
 
         # get the shots for the qubits we care about
         shots = np.array(shots[self.adc_chs[self.qubit]])
-        print('shots order', self.qubit)
-
-        # print(self.adc_chs[qubits[0]], angle, self.ro_chs) 
-        # print('shots 0', shots[0])
-        # print('shots 1', shots[1])
-        # print()
 
         # data is returned as n00, n01, n10, n11 measured for the two qubits
         n0 = np.sum(np.logical_not(shots))
         n1 = np.sum(shots)
         return np.array([n0, n1])
-
-    # def acquire(self, soc, angle=None, threshold=None, shot_avg=1, load_pulses=True, progress=False):
-    #     avgi, avgq = super().acquire(soc, load_pulses=load_pulses, progress=progress)
-    #     # print()
-    #     # print(avgi)
-    #     return self.collect_counts(angle=angle, threshold=threshold, shot_avg=shot_avg)
 
 # ===================================================================== #
 
@@ -547,14 +614,23 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         # self.X_pulse(q=1, play=True)
         # self.X_pulse(q=1, special='pulseiq', play=True, **kwargs)
 
-        count_us = 0
-        self.Y_pulse(q=1, play=True)
+        # count_us = 0
+        # self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
+        # self.sync_all()
 
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
-        self.sync_all()
+        # waveform = f'qubit0_ZZ1'
+        # freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[0], gen_ch=self.qubit_chs[0])
+        # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
+        # sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0], gen_ch=self.qubit_chs[0])
+        # self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+        # self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
+        # self.sync_all()
 
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
-        self.sync_all()
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
+        # self.sync_all()
+
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
+        # self.sync_all()
 
         # self.Y_pulse(q=self.qubit, play=True, pihalf=False, neg=False)
         # self.Y_pulse(q=0, play=True, pihalf=False, neg=False)
@@ -757,7 +833,7 @@ class StateTomography1QExperiment(Experiment):
             if 'Icontrols' in cfg.expt and 'Qcontrols' in cfg.expt and 'times_us' in self.cfg.expt:
                 cfg.expt.state_prep_kwargs = dict(I_mhz_vs_us=cfg.expt.Icontrols, Q_mhz_vs_us=cfg.expt.Qcontrols, times_us=cfg.expt.times_us)
             tomo = StateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
-            print(tomo)
+            # print(tomo)
             tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             counts = tomo.collect_counts(angle=angle, threshold=threshold)
             data['counts_tomo'].append(counts)

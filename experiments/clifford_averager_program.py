@@ -9,8 +9,9 @@ import scipy as sp
 
 import experiments.fitting as fitter
 
-"""
-Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2 pulses.
+
+
+"""Falserager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2 True.:
 """
 class CliffordAveragerProgram(AveragerProgram):
     # def update(self):
@@ -63,7 +64,7 @@ class CliffordAveragerProgram(AveragerProgram):
             assert None not in [ch, sigma]
             if waveformname is None: waveformname = name
             self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='gauss', sigma=sigma, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
-            if reload or waveformname not in self.pulses[ch].keys():
+            if reload or waveformname not in self.envelopes[ch].keys():
                 self.add_gauss(ch=ch, name=waveformname, sigma=sigma, length=sigma*4)
                 # print('added gauss pulse', name, 'on ch', ch)
         if play or set_reg:
@@ -89,10 +90,10 @@ class CliffordAveragerProgram(AveragerProgram):
             assert None not in [ch, sigma, flat_length]
             if waveformname is None: waveformname = name
             self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='flat_top', sigma=sigma, flat_length=flat_length, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
-            if reload or waveformname not in self.pulses[ch].keys():
+            if reload or waveformname not in self.envelopes[ch].keys():
                 # print('all waveforms')
-                # for i_ch in range(len(self.pulses)):
-                #     print(self.pulses[i_ch].keys())
+                # for i_ch in range(len(self.envelopes)):
+                #     print(self.envelopes[i_ch].keys())
                 self.add_gauss(ch=ch, name=waveformname, sigma=sigma, length=sigma*4)
                 # print('added', waveformname, 'ch', ch)
                 # print(self.gen_chs.keys())
@@ -147,7 +148,7 @@ class CliffordAveragerProgram(AveragerProgram):
             assert None not in [ch, mu, beta, period_us]
             if waveformname is None: waveformname = name
             self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='adiabatic', mu=mu, beta=beta, period_us=period_us, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
-            if reload or waveformname not in self.pulses[ch].keys():
+            if reload or waveformname not in self.envelopes[ch].keys():
                 self.add_adiabatic(ch=ch, name=waveformname, mu=mu, beta=beta, period_us=period_us)
                 # print('added gauss pulse', name, 'on ch', ch)
         if play or set_reg:
@@ -193,7 +194,7 @@ class CliffordAveragerProgram(AveragerProgram):
             assert ch is not None and I_mhz_vs_us is not None and Q_mhz_vs_us is not None and times_us is not None
             if waveformname is None: waveformname = name
             self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='IQpulse', I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
-            if reload or waveformname not in self.pulses[ch].keys():
+            if reload or waveformname not in self.envelopes[ch].keys():
                 self.add_IQ(ch=ch, name=waveformname, I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us)
         if play or set_reg:
             # if not (ch == sigma == None):
@@ -453,13 +454,21 @@ class CliffordAveragerProgram(AveragerProgram):
 
             ge_avgs_rot = [None]*4
             for q, angle_q in enumerate(angle):
+                if not isinstance(ge_avgs[q], (list, np.ndarray)): continue # this qubit was not calibrated
                 Ig_q, Qg_q, Ie_q, Qe_q = ge_avgs[q]
                 ge_avgs_rot[q] = [
                     Ig_q*np.cos(np.pi/180*angle_q) - Qg_q*np.sin(np.pi/180*angle_q),
                     Ie_q*np.cos(np.pi/180*angle_q) - Qe_q*np.sin(np.pi/180*angle_q)
                 ]
+            shape = None
+            for q in range(4):
+                if ge_avgs_rot[q] is not None:
+                    shape = np.shape(ge_avgs_rot[q])
+                    break
+            for q in range(4):
+                if ge_avgs_rot[q] is None: ge_avgs_rot[q] = np.zeros(shape=shape)
+                
             ge_avgs_rot = np.asarray(ge_avgs_rot)
-            # print(avgi_rot, ge_avgs_rot)
             avgi_rot -= ge_avgs_rot[:,0]
             avgi_rot /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
             avgi_err /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]

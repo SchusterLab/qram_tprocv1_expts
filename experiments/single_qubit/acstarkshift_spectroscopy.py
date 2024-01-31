@@ -24,7 +24,6 @@ class ACStarkShiftProgram(RAveragerProgram):
         self.pump_ch_type = self.pump.type
 
         self.q_rp=self.ch_page(self.qubit_ch) # get register page for qubit_ch
-        self.r_freq=self.sreg(self.qubit_ch, "freq") # get frequency register for qubit_ch    
         self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
         
         self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
@@ -58,11 +57,11 @@ class ACStarkShiftProgram(RAveragerProgram):
         self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
 
         # declare pump dacs
-        assert self.pump_ch != self.qubit_ch
+        # assert self.pump_ch != self.qubit_ch
         mixer_freq = 0
         if self.pump.type == 'int4':
             mixer_freq = self.pump.mixer_freq
-        self.declare_gen(ch=self.pump_ch, nqz=self.pump.nyquist, mixer_freq=mixer_freq)
+        if self.pump_ch not in self.gen_chs: self.declare_gen(ch=self.pump_ch, nqz=self.pump.nyquist, mixer_freq=mixer_freq)
 
         # declare adcs
         self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
@@ -75,22 +74,53 @@ class ACStarkShiftProgram(RAveragerProgram):
 
         self.f_pump = self.freq2reg(cfg.expt.pump_freq, gen_ch=self.pump_ch)
 
-        # add pump, qubit, and readout pulses to respective channels
-        self.set_pulse_registers(ch=self.pump_ch, style="const", freq=self.f_pump, phase=0, gain=cfg.expt.pump_gain, length=self.pump_length_dac)
-
-        self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_start, phase=0, gain=cfg.expt.qubit_gain, length=self.qubit_length_dac)
+        # add qubit and readout pulses to respective channels
+        if self.cfg.expt.pulse_type == 'flat_top':
+            self.add_gauss(ch=self.qubit_ch, name="qubit", sigma=3, length=3*4)
+        elif self.cfg.expt.pulse_type == 'gauss':
+            length = self.qubit_length_dac
+            self.add_gauss(ch=self.qubit_ch, name="qubit", sigma=length, length=length*4)
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
         else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
 
+
+        # initialize registers
+        if self.qubit_ch_type == 'int4':
+            self.r_freq = self.sreg(self.qubit_ch, "freq") # get freq register for qubit_ch    
+        else: self.r_freq = self.sreg(self.qubit_ch, "freq") # get freq register for qubit_ch    
+        self.r_freq2 = 4
+        self.safe_regwi(self.q_rp, self.r_freq2, self.f_start)
+
         self.synci(200) # give processor some time to configure pulses
     
     def body(self):
         cfg=AttrDict(self.cfg)
+
+        # Phase reset all channels
+        for ch in self.gen_chs.keys():
+            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+        # pump tone (always const pulse)
+        if cfg.expt.pump_gain > 0:
+            self.setup_and_pulse(ch=self.pump_ch, style="const", freq=self.f_pump, phase=0, gain=cfg.expt.pump_gain, length=self.pump_length_dac)
         self.sync_all()
-        self.pulse(ch=self.pump_ch)
-        self.pulse(ch=self.qubit_ch, t=self.pump_length_dac - self.qubit_length_dac) # play qubit pulse at end of pump tone
+
+        # self.setup_and_pulse(ch=self.qubit_ch, t=self.pump_length_dac - self.qubit_length_dac) # play qubit pulse at end of pump tone
+        length = self.qubit_length_dac
+        if self.cfg.expt.pulse_type == 'flat_top':
+            self.set_pulse_registers(ch=self.qubit_ch, style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.qubit_gain, length=length, waveform="qubit") # play probe pulse
+        elif self.cfg.expt.pulse_type == 'gauss':
+            self.set_pulse_registers(ch=self.qubit_ch, style="arb", phase=0, freq=self.f_start, gain=cfg.expt.qubit_gain, waveform="qubit") # play probe pulse
+        elif self.cfg.expt.pulse_type == 'const':
+            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_start, phase=0, gain=cfg.expt.qubit_gain, length=length)
+        self.mathi(self.q_rp, self.r_freq, self.r_freq2, "+", 0)
+        self.pulse(ch=self.qubit_ch) # play probe pulse
+
         self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
         self.measure(pulse_ch=self.res_ch, 
              adcs=[self.adc_ch],
@@ -99,7 +129,7 @@ class ACStarkShiftProgram(RAveragerProgram):
              syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
     
     def update(self):
-        self.mathi(self.q_rp, self.r_freq, self.r_freq, '+', self.f_step) # update frequency list index
+        self.mathi(self.q_rp, self.r_freq2, self.r_freq2, '+', self.f_step) # update frequency list index
  
 # ====================================================== #
 
@@ -184,15 +214,20 @@ class ACStarkShiftPulseProbeExperiment(Experiment):
 
         y_sweep = outer_sweep
         x_sweep = inner_sweep
-        avgi = data['avgi']
-        avgq = data['avgq']
+        avgi = np.copy(data['avgi'])
+        avgq = np.copy(data['avgq'])
+
+        for i in range(len(avgi)):
+            # amps_gain = (amps_gain - np.average(amps_gain)) / np.average(amps_gain)
+            avgi[i] -= np.average(avgi[i])
+            avgq[i] -= np.average(avgq[i])
 
         # THIS IS CORRECT EXTENT LIMITS FOR 2D PLOTS
         plt.figure(figsize=(10,8))
         plt.subplot(211, title=f"Qubit {self.cfg.expt.qubit} AC Stark Shift (Pump Freq {self.cfg.expt.pump_freq} MHz)", ylabel="Pump Gain [dac units]")
         plt.pcolormesh(x_sweep, y_sweep, avgi, cmap='viridis', shading='auto')
         plt.colorbar(label='I [ADC level]')
-        plt.clim(vmin=None, vmax=None)
+        # plt.clim(vmin=-6, vmax=6)
         # plt.axvline(1684.92, color='k')
         # plt.axvline(1684.85, color='r')
 
