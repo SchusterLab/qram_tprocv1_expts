@@ -204,25 +204,26 @@ class AmplitudeRabiProgram(RAveragerProgram):
 
         if self.pi_test_sigma > 0:
             # print(self.f_pi_test_reg)
-            if cfg.expt.pulse_type.lower() in ("gauss", "adiabatic", 'pulseiq'):
-                self.set_pulse_registers(
+            for i in range(cfg.expt.num_pulses):
+                if cfg.expt.pulse_type.lower() in ("gauss", "adiabatic", 'pulseiq'):
+                    self.set_pulse_registers(
                     ch=self.qubit_chs[qTest],
                     style="arb",
                     freq=self.f_pi_test_reg,
                     phase=0,
                     gain=0, # gain set by update
                     waveform="pi_test")
-            else:
-                self.set_pulse_registers(
+                else:
+                    self.set_pulse_registers(
                     ch=self.qubit_chs[qTest],
                     style="const",
                     freq=self.f_pi_test_reg,
                     phase=0,
                     gain=0, # gain set by update
                     length=self.us2cycles(self.cfg.expt.sigma_test))
-        self.mathi(self.q_rps[qTest], self.r_gain, self.r_gain2, "+", 0)
-        self.pulse(ch=self.qubit_chs[qTest])
-        self.sync_all()
+                self.mathi(self.q_rps[qTest], self.r_gain, self.r_gain2, "+", 0)
+                self.pulse(ch=self.qubit_chs[qTest])
+                self.sync_all()
 
         if self.checkEF: # map excited back to qubit ground state for measurement
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
@@ -259,6 +260,7 @@ class AmplitudeRabiExperiment(Experiment):
         rounds: number repetitions of experiment sweep
         sigma_test: gaussian sigma for pulse length [us] (default: from pi_ge in config)
         pulse_type: 'gauss' or 'const'
+        num_pulses: number of pulses to apply 
     )
     """
 

@@ -11,7 +11,7 @@ from qick.helpers import gauss
 from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
-from experiments.single_qubit.single_shot import hist
+from experiments.single_qubit.single_shot_edit import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram
 from experiments.two_qubit.length_rabi_EgGf import LengthRabiEgGfProgram
 from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram

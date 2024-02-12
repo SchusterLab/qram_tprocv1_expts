@@ -10,6 +10,7 @@ from slab import Experiment, dsfit, AttrDict
 
 import experiments.fitting as fitter
 from experiments.single_qubit.single_shot import HistogramProgram
+from scipy.signal import find_peaks
 
 class ResonatorSpectroscopyExperiment(Experiment):
     """
@@ -28,7 +29,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='ResonatorSpectroscopy', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False): 
         xpts=self.cfg.expt["start"] + self.cfg.expt["step"]*np.arange(self.cfg.expt["expts"])
         self.qubit = self.cfg.expt.qubit
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
@@ -45,7 +46,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
 
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
         for f in tqdm(xpts, disable=not progress):
-            # self.cfg.expt.frequency = f
+            self.cfg.expt.frequency = f
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.device.readout.frequency[self.qubit] = f
             rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
@@ -56,11 +57,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
             amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
             phase = np.angle(avgi+1j*avgq) # Calculating the phase
             self.prog = rspec
-            # if f > 822.426:
-            #     print('amps', amp)
-            #     print('hello', rspec.cfg)
-            #     break
-
+           
             data["xpts"].append(f)
             data["avgi"].append(avgi)
             data["avgq"].append(avgq)
@@ -74,67 +71,80 @@ class ResonatorSpectroscopyExperiment(Experiment):
 
         return data
 
-    def analyze(self, data=None, fit=False, findpeaks=False, verbose=True, **kwargs):
+    def analyze(self, data=None, fit=False, findpeaks=False, verbose=True, coarse_scan = False, **kwargs):
         if data is None:
             data=self.data
             
         if fit:
-            # fitparams = [f0, Qi, Qe, phi, scale]
             xdata = data["xpts"][1:-1]
-            # ydata = data["avgi"][1:-1] + 1j*data["avgq"][1:-1]
             ydata = data['amps'][1:-1]
-            fitparams=None
-            data['fit'], data['fit_err'] = fitter.fithanger(xdata, ydata, fitparams=fitparams)
-            if isinstance(data['fit'], (list, np.ndarray)):
-                f0, Qi, Qe, phi, scale, a0, slope = data['fit']
-                if 'lo' in self.cfg.hw:
-                    print(float(self.cfg.hw.lo.readout.frequency)*1e-6)
-                    # print(self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit]))
-                    print(f0)
-                    # f0 = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + f0)
-                if verbose:
-                    print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
-                    print(f'Freq with maximum transmission: {xdata[np.argmax(ydata)]}')
-                    print('From fit:')
-                    print(f'\tf0: {f0}')
-                    print(f'\tQi: {Qi}')
-                    print(f'\tQe: {Qe}')
-                    print(f'\tQ0: {1/(1/Qi+1/Qe)}')
-                    print(f'\tkappa [MHz]: {f0*(1/Qi+1/Qe)}')
-                    print(f'\tphi [radians]: {phi}')
+            #data['fit'], data['fit_err'] = fitter.fithanger(xdata, ydata, fitparams=fitparams)
+            fitparams = [max(ydata), -(max(ydata)-min(ydata)), xdata[np.argmin(ydata)], 0.1 ]
+            # print(fitparams)
+            data["lorentz_fit"]=dsfit.fitlor(xdata, ydata, fitparams=fitparams)
+            print('From Fit:')
+            print(f'\tf0: {data["lorentz_fit"][2]}')
+            print(f'\tkappa[MHz]: {data["lorentz_fit"][3]*2}')
+            # if isinstance(data['fit'], (list, np.ndarray)):
+            #     f0, Qi, Qe, phi, scale, a0, slope = data['fit']
+            #     if 'lo' in self.cfg.hw:
+            #         print(float(self.cfg.hw.lo.readout.frequency)*1e-6)
+            #         print(f0)
+            #     if verbose:
+            #         print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
+            #         print(f'Freq with maximum transmission: {xdata[np.argmax(ydata)]}')
+            #         print('From fit:')
+            #         print(f'\tf0: {f0}')
+            #         print(f'\tQi: {Qi}')
+            #         print(f'\tQe: {Qe}')
+            #         print(f'\tQ0: {1/(1/Qi+1/Qe)}')
+            #         print(f'\tkappa [MHz]: {f0*(1/Qi+1/Qe)}')
+            #         print(f'\tphi [radians]: {phi}')
             
         if findpeaks:
-            maxpeaks, minpeaks = dsfit.peakdetect(data['amps'][1:-1], x_axis=data['xpts'][1:-1], lookahead=30, delta=5*np.std(data['amps'][:5]))
+            maxpeaks, minpeaks = dsfit.peakdetect(data['amps'][1:-1], x_axis=data['xpts'][1:-1], lookahead=10, delta=0.01)
             data['maxpeaks'] = maxpeaks
             data['minpeaks'] = minpeaks
-            
+        
+        if coarse_scan: 
+            xdata = data["xpts"][1:-1]
+            ydata = data['amps'][1:-1]
+            coarse_peaks = find_peaks(-ydata, distance=100, prominence= 0.9, width=3, threshold = 0.9, rel_height=1)  
+            data['coarse_peaks_index'] = coarse_peaks 
+            data['coarse_peaks'] = xdata[coarse_peaks[0]]
         return data
 
-    def display(self, data=None, fit=True, findpeaks=False, **kwargs):
+    def display(self, data=None, fit=True, findpeaks=False, coarse_scan = False, **kwargs):
         if data is None:
             data=self.data 
 
         if 'lo' in self.cfg.hw:
             xpts = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'][1:-1])
+            
         else:
             xpts = data['xpts'][1:-1]
 
         plt.figure(figsize=(16,16))
-        plt.subplot(311, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain[self.qubit]}",  ylabel="Amps [ADC units]")
+        plt.subplot(311, title=f"Resonator {self.qubit}  Spectroscopy at gain {self.cfg.device.readout.gain[self.qubit]}",  ylabel="Amps [ADC units]")
         plt.plot(xpts, data['amps'][1:-1],'o-')
+        # if fit:
+        #     plt.plot(xpts, fitter.hangerS21func_sloped(data["xpts"][1:-1], *data["fit"]))
         if fit:
-            plt.plot(xpts, fitter.hangerS21func_sloped(data["xpts"][1:-1], *data["fit"]))
+            plt.plot(xpts, dsfit.lorfunc(data["lorentz_fit"], xpts), label='Lorentzian fit')
         if findpeaks:
-            # for peak in np.concatenate((data['maxpeaks'], data['minpeaks'])):
             for peak in data['minpeaks']:
                 plt.axvline(peak[0], linestyle='--', color='0.2')
                 print(f'Found peak [MHz]: {peak[0]}')
-        # plt.axvline(5787.75)
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.75), c='k', ls='--')
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.1), c='k', ls='--')
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] - 0.8), c='k', ls='--') # |0>|1>
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency - 0.7), c='k', ls='--') # |0>|0+1>
 
+        if coarse_scan:
+            num_peaks = len(data['coarse_peaks_index'][0])
+            print('number of peaks:', num_peaks)
+            peak_indicies = data['coarse_peaks_index'][0]
+            for i in range(num_peaks):
+                peak = peak_indicies[i]
+                plt.axvline(xpts[peak], linestyle='--', color='0.2')
+           
+ 
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')
 
@@ -199,11 +209,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
                 datai, dataq = rspec.collect_shots()
                 avgi = np.average(datai)
                 avgq = np.average(dataq)
-                # rspec = ResonatorSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = rspec
-                # avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-                # avgi = avgi[0][0]
-                # avgq = avgq[0][0]
                 amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
                 phase = np.angle(avgi+1j*avgq) # Calculating the phase
                 data["avgi"][-1].append(avgi)
@@ -244,20 +250,15 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
         if 'lo' in self.cfg.hw:
             inner_sweep = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'])
-        # inner_sweep = float(self.cfg.hw.lo.readout.frequency[self.qubit])*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'])
         else: inner_sweep = data['xpts']
         outer_sweep = data['gainpts']
 
         amps = data['amps']
         for amps_gain in amps:
-            # amps_gain = (amps_gain - np.average(amps_gain)) / np.average(amps_gain)
             amps_gain -= np.average(amps_gain)
         
         y_sweep = outer_sweep
         x_sweep = inner_sweep
-
-        # for iy, y in enumerate(y_sweep):
-        #     plt.plot(x_sweep, amps[iy])
 
         # THIS IS CORRECT EXTENT LIMITS FOR 2D PLOTS
         plt.figure(figsize=(10,8))
@@ -274,11 +275,8 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
             print(f'Low power peak [MHz]: {fit_lowpow[2]}')
             print(f'Lamb shift [MHz]: {data["lamb_shift"]}')
 
-        # plt.title(f"Resonator Spectroscopy Power Sweep")
         plt.xlabel("Resonator Frequency [MHz]")
         plt.ylabel("Resonator Gain [DAC level]")
-        # # plt.clim(vmin=-0.2, vmax=0.2)
-        # # plt.clim(vmin=-10, vmax=5)
         plt.colorbar(label='Amps-Avg [ADC level]')
         plt.show()
 

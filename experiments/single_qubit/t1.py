@@ -6,7 +6,7 @@ from qick.helpers import gauss
 
 from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
-
+from datetime import datetime
 import experiments.fitting as fitter
 
 class T1Program(RAveragerProgram):
@@ -17,7 +17,7 @@ class T1Program(RAveragerProgram):
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
-        
+    
         super().__init__(soccfg, self.cfg)
 
     def initialize(self):
@@ -72,30 +72,19 @@ class T1Program(RAveragerProgram):
         # add qubit and readout pulses to respective channels
         if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
-            self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+            self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=self.deg2reg(self.cfg.device.readout.phase), gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
         else:
-            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
+            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=self.deg2reg(self.cfg.device.readout.phase), gain=cfg.expt.start, length=self.pi_sigma)
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
+        
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=self.deg2reg(self.cfg.device.readout.phase), gain=cfg.device.readout.gain, length=self.readout_length_dac)
 
         self.sync_all(200)
 
     def body(self):
         cfg=AttrDict(self.cfg)
-
-
-        # print('WARNING: DOING SOME FUNKY THINGS STILL!!')
-        # freq = self.freq2reg(801.6560698688288, gen_ch=0)
-        # waveform = f'q2_pi'
-        # sigma_cycles = self.us2cycles(0.047, gen_ch=0)
-        # self.add_gauss(ch=0, name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-        # gain = 20682
-        # self.setup_and_pulse(ch=0, style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-        # self.sync_all()
-        # self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
-
         self.pulse(ch=self.qubit_ch)
         self.sync_all() # align channels
         self.sync(self.q_rp, self.r_wait) # wait for the time stored in the wait variable register
@@ -105,7 +94,14 @@ class T1Program(RAveragerProgram):
              adc_trig_offset=cfg.device.readout.trig_offset,
              wait=True,
              syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
-
+        
+    def collect_shots(self):
+        # collect shots for the relevant adc and I and Q channels
+        cfg=AttrDict(self.cfg)
+        shots_i0 = self.di_buf[0] / self.readout_length_adc #[self.cfg.expt.qubit]
+        shots_q0 = self.dq_buf[0] / self.readout_length_adc #[self.cfg.expt.qubit]
+        return shots_i0, shots_q0
+    
     def update(self):
         self.mathi(self.q_rp, self.r_wait, self.r_wait, '+', self.us2cycles(self.cfg.expt.step)) # update wait time
 
@@ -145,8 +141,9 @@ class T1Experiment(Experiment):
         avgq = avgq[0][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
         phases = np.angle(avgi+1j*avgq) # Calculating the phase        
-
-        data={'xpts': x_pts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases}
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        data={'xpts': x_pts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases, 'time':current_time}
         self.data=data
         return data
 
@@ -164,17 +161,6 @@ class T1Experiment(Experiment):
     def display(self, data=None, fit=True, **kwargs):
         if data is None:
             data=self.data 
-        
-        # plt.figure(figsize=(12, 8))
-        # plt.subplot(111,title="$T_1$", xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
-        # plt.plot(data["xpts"][:-1], data["amps"][:-1],'o-')
-        # if fit:
-        #     p = data['fit_amps']
-        #     pCov = data['fit_err_amps']
-        #     captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-        #     plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_amps"]), label=captionStr)
-        #     plt.legend()
-        #     print(f'Fit T1 amps [us]: {data["fit_amps"][3]}')
 
         plt.figure(figsize=(10,10))
         plt.subplot(211, title="$T_1$", ylabel="I [ADC units]")
@@ -186,6 +172,7 @@ class T1Experiment(Experiment):
             plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgi"]), label=captionStr)
             plt.legend()
             print(f'Fit T1 avgi [us]: {data["fit_avgi"][3]}')
+            data["err_ratio_i"] = np.sqrt(data['fit_err_avgi'][3][3])/data['fit_avgi'][3]
         plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC units]")
         plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
         if fit:
@@ -195,10 +182,123 @@ class T1Experiment(Experiment):
             plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgq"]), label=captionStr)
             plt.legend()
             print(f'Fit T1 avgq [us]: {data["fit_avgq"][3]}')
+            data["err_ratio_q"] = np.sqrt(data['fit_err_avgq'][3][3])/data['fit_avgq'][3]
+
 
         plt.show()
+    
+    def save_T1_Values(self, fit = True, data = None): 
+        if data is None:
+            data=self.data  
+        
+        length_scan = len(data["xpts"])
+        t1_points = np.linspace(0, length_scan, self.cfg.expt.num_saved_points)
+        data['t1_save_i'] = np.zeros(len(t1_points)-1)
+        data['t1_save_q'] = np.zeros(len(t1_points)-1)
+
+        if fit:
+            for i in range(len(t1_points)-1):
+                data['t1_save_i'][i] = data["avgi"][int(t1_points[i])]
+            for i in range(len(t1_points)-1):
+                data['t1_save_q'][i] = data["avgq"][int(t1_points[i])]
         
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
         return self.fname
+    
+# ====================================================== #
+
+class T1Continuous(Experiment):
+    """
+    T1 Continuous
+    Experimental Config:
+    expt = dict(
+        start: wait time sweep start [us]
+        step: wait time sweep step
+        expts: number steps in sweep
+        reps: number averages per experiment
+        rounds: number rounds to repeat experiment sweep
+    )
+    """
+    def __init__(self, soccfg=None, path='', prefix='T1Continuous', config_file=None, progress=None):
+        super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
+    
+    def acquire(self, progress=False, debug=False):
+        q_ind = self.cfg.expt.qubit
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, list):
+                    subcfg.update({key: value[q_ind]})
+                elif isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if isinstance(value3, list):
+                                value2.update({key3: value3[q_ind]})                                
+        t1 = T1Program(soccfg=self.soccfg, cfg=self.cfg)
+        x_pts, avgi, avgq = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+
+        shots_i, shots_q = t1.collect_shots()
+
+
+        avgi = avgi[0][0]
+        avgq = avgq[0][0]
+        amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
+        phases = np.angle(avgi+1j*avgq) # Calculating the phase        
+
+        now = datetime.now()
+        current_time = np.array([now.strftime("%H:%M:%S")])
+        data={'xpts': x_pts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases, 'time':current_time, 'raw_i': shots_i, 'raw_q': shots_q, 'raw_amps': np.abs(shots_i+1j*shots_q)}   
+        
+        self.data=data
+        return data
+
+    def analyze(self, data=None, **kwargs):
+        if data is None:
+            data=self.data
+            
+        # fitparams=[y-offset, amp, x-offset, decay rate]
+        # Remove the last point from fit in case weird edge measurements
+        data['fit_amps'], data['fit_err_amps'] = fitter.fitexp(data['xpts'][:-1], data['amps'][:-1], fitparams=None)
+        data['fit_avgi'], data['fit_err_avgi'] = fitter.fitexp(data['xpts'][:-1], data['avgi'][:-1], fitparams=None)
+        data['fit_avgq'], data['fit_err_avgq'] = fitter.fitexp(data['xpts'][:-1], data['avgq'][:-1], fitparams=None)
+        return data
+
+        
+    def display(self, data=None, fit=True, show = False, **kwargs):
+        if data is None:
+            data=self.data 
+    
+        plt.figure(figsize=(10,10))
+        plt.subplot(211, title="$T_1$", ylabel="I [ADC units]")
+        plt.plot(data["xpts"], data["avgi"],'o-', label = 'Current Data')
+        plt.plot(self.cfg.expt.prev_data_x, self.cfg.expt.prev_data_i,'o-', label = 'Previous Data')
+        if fit:
+            p = data['fit_avgi']
+            pCov = data['fit_err_avgi']
+            captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgi"]), label=captionStr)
+            plt.legend()
+            print(f'Fit T1 avgi [us]: {data["fit_avgi"][3]}')
+            data["err_ratio_i"] = np.sqrt(data['fit_err_avgi'][3][3])/data['fit_avgi'][3]
+        plt.legend()
+        plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC units]")
+        plt.plot(data["xpts"], data["avgq"],'o-', label = 'Current Data')
+        plt.plot(self.cfg.expt.prev_data_x, self.cfg.expt.prev_data_q,'o-', label = 'Previous Data')
+        if fit:
+            p = data['fit_avgq']
+            pCov = data['fit_err_avgq']
+            captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
+            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgq"]), label=captionStr)
+            plt.legend()
+            print(f'Fit T1 avgq [us]: {data["fit_avgq"][3]}')
+            data["err_ratio_q"] = np.sqrt(data['fit_err_avgq'][3][3])/data['fit_avgq'][3]
+
+        plt.legend()
+        if show:
+            plt.show() 
+
+    
+
+
+        

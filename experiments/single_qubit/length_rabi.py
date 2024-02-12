@@ -142,10 +142,26 @@ class LengthRabiProgram(AveragerProgram):
         # play pi pulse that we want to calibrate
         if self.pi_test_sigma > 0:
             # print(self.pi_test_sigma, self.gain_pi_test)
-            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
+            for i in range(cfg.expt.num_pulses):
+                self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
             # pass
-        self.sync_all(5)
+                self.sync_all(5)
 
+        # if self.pi_test_sigma > 0:
+        #     # print(self.pi_test_sigma, self.gain_pi_test)
+        #     self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
+        #     # pass
+        # self.sync_all(5)
+        # if self.pi_test_sigma > 0:
+        #     # print(self.pi_test_sigma, self.gain_pi_test)
+        #     self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
+        #     # pass
+        # self.sync_all(5)
+        # if self.pi_test_sigma > 0:
+        #     # print(self.pi_test_sigma, self.gain_pi_test)
+        #     self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
+        #     # pass
+        # self.sync_all(5)
         # if self.checkEF: # map excited back to qubit ground state for measurement
         #     self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
 
@@ -173,6 +189,7 @@ class LengthRabiExperiment(Experiment):
         checkZZ: True/False for putting another qubit in e (specify as qA)
         checkEF: does ramsey on the EF transition instead of ge
         qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qA in e , qB sweeps length rabi]
+        num_pulses: number of pulses to play # must be an odd number
     )
     """
 

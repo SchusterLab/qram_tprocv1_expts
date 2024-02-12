@@ -251,7 +251,7 @@ def hangerphasefunc(x, *p):
 def fithanger(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*7
     if fitparams[0] is None: fitparams[0]=np.average(xdata)
-    if fitparams[1] is None: fitparams[1]=5000
+    if fitparams[1] is None: fitparams[1]=5000 
     if fitparams[2] is None: fitparams[2]=1000
     if fitparams[3] is None: fitparams[3]=0
     if fitparams[4] is None: fitparams[4]=max(ydata)-min(ydata)
