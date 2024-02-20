@@ -34,18 +34,18 @@ def hist(data, plot=True, span=None, verbose=True):
         if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
-        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(16, 10))
+        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10, 6))
         fig.tight_layout()
-        
-        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.')
+
         axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.')
+        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.')
         
         if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.')
         axs[0,0].scatter(xg, yg, color='k', marker='o')
         axs[0,0].scatter(xe, ye, color='k', marker='o')
         if plot_f: axs[0,0].scatter(xf, yf, color='k', marker='o')
 
-        axs[0,0].set_xlabel('I [ADC levels]')
+        # axs[0,0].set_xlabel('I [ADC levels]')
         axs[0,0].set_ylabel('Q [ADC levels]')
         axs[0,0].legend(loc='upper right')
         axs[0,0].set_title('Unrotated')
@@ -79,7 +79,7 @@ def hist(data, plot=True, span=None, verbose=True):
 
     if span is None:
         span = (np.max(np.concatenate((Ie_new, Ig_new))) - np.min(np.concatenate((Ie_new, Ig_new))))/2
-    xlims = [xg-span, xg+span]
+    xlims = [(xg+xe)/2-span, (xg+xe)/2+span]
     ylims = [yg-span, yg+span]
 
     if plot:
@@ -90,7 +90,7 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[0,1].scatter(xe, ye, color='k', marker='o')    
         if plot_f: axs[0, 1].scatter(xf, yf, color='k', marker='o')    
 
-        axs[0,1].set_xlabel('I [ADC levels]')
+        # axs[0,1].set_xlabel('I [ADC levels]')
         axs[0,1].legend(loc='upper right')
         axs[0,1].set_title('Rotated')
         axs[0,1].axis('equal')
@@ -222,7 +222,7 @@ class HistogramProgram(AveragerProgram):
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=self.deg2reg(0, gen_ch = self.res_ch), gain=cfg.device.readout.gain, length=self.readout_length_dac)
 
         self.sync_all(200)
     

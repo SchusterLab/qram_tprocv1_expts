@@ -221,7 +221,8 @@ class HistogramProgram(AveragerProgram):
        # add readout pulses to respective channels
         if self.res_ch_types[qubit] == 'mux4':
             self.set_pulse_registers(ch=self.res_chs[qubit], style="const", length=self.readout_lengths_dac[qubit], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_regs[qubit], phase=0, gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
+        else: 
+            self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_regs[qubit], phase= self.deg2reg(self.cfg.device.readout.phase[qubit], gen_ch = self.res_chs[qubit]), gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
 
 
         # get aliases for the sigmas we need in clock cycles

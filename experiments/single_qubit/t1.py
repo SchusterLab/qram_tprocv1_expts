@@ -72,14 +72,14 @@ class T1Program(RAveragerProgram):
         # add qubit and readout pulses to respective channels
         if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
-            self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=self.deg2reg(self.cfg.device.readout.phase), gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+            self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
         else:
-            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=self.deg2reg(self.cfg.device.readout.phase), gain=cfg.expt.start, length=self.pi_sigma)
+            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
         
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=self.deg2reg(self.cfg.device.readout.phase), gain=cfg.device.readout.gain, length=self.readout_length_dac)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=self.deg2reg(self.cfg.device.readout.phase + 180, gen_ch = self.res_ch), gain=cfg.device.readout.gain, length=self.readout_length_dac)
 
         self.sync_all(200)
 
