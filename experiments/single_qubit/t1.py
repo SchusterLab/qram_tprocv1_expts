@@ -23,6 +23,7 @@ class T1Program(RAveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
+        self.checkEF = self.cfg.expt.checkEF
         
         self.adc_ch = cfg.hw.soc.adcs.readout.ch
         self.res_ch = cfg.hw.soc.dacs.readout.ch
@@ -35,6 +36,7 @@ class T1Program(RAveragerProgram):
         self.safe_regwi(self.q_rp, self.r_wait, self.us2cycles(cfg.expt.start))
         
         self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
+        self.f_ef_reg = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
         self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
         self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
         self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
@@ -72,9 +74,10 @@ class T1Program(RAveragerProgram):
         # add qubit and readout pulses to respective channels
         if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
             self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
-            self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
-        else:
-            self.set_pulse_registers(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
+
+        if self.checkEF:
+            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
+            self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
 
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
@@ -85,21 +88,21 @@ class T1Program(RAveragerProgram):
     def body(self):
         cfg=AttrDict(self.cfg)
 
+        if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
+            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+        else:
+            self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
+        self.sync_all()
 
-        # print('WARNING: DOING SOME FUNKY THINGS STILL!!')
-        # freq = self.freq2reg(801.6560698688288, gen_ch=0)
-        # waveform = f'q2_pi'
-        # sigma_cycles = self.us2cycles(0.047, gen_ch=0)
-        # self.add_gauss(ch=0, name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-        # gain = 20682
-        # self.setup_and_pulse(ch=0, style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-        # self.sync_all()
-        # self.set_pulse_registers(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+        if self.checkEF:
+            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef_reg, phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain, waveform="pi_ef_qubit")
+        self.sync_all()
 
-        self.pulse(ch=self.qubit_ch)
-        self.sync_all() # align channels
-        self.sync(self.q_rp, self.r_wait) # wait for the time stored in the wait variable register
-        self.sync_all(self.us2cycles(0.05)) # align channels and wait 50ns
+        # wait for the time stored in the wait variable register
+        self.sync(self.q_rp, self.r_wait)
+
+        self.sync_all()
+        
         self.measure(pulse_ch=self.res_ch, 
              adcs=[self.adc_ch],
              adc_trig_offset=cfg.device.readout.trig_offset,
@@ -138,6 +141,10 @@ class T1Experiment(Experiment):
                             if isinstance(value3, list):
                                 value2.update({key3: value3[q_ind]})                                
 
+        if 'checkEF' not in self.cfg.expt:
+            self.cfg.expt.checkEF = False
+        if self.cfg.expt.checkEF:
+            self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
         t1 = T1Program(soccfg=self.soccfg, cfg=self.cfg)
         x_pts, avgi, avgq = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
 
@@ -150,18 +157,41 @@ class T1Experiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, **kwargs):
+    def analyze(self, data=None, fit_log=True, fit_slice=None):
         if data is None:
             data=self.data
             
         # fitparams=[y-offset, amp, x-offset, decay rate]
         # Remove the last point from fit in case weird edge measurements
-        data['fit_amps'], data['fit_err_amps'] = fitter.fitexp(data['xpts'][:-1], data['amps'][:-1], fitparams=None)
-        data['fit_avgi'], data['fit_err_avgi'] = fitter.fitexp(data['xpts'][:-1], data['avgi'][:-1], fitparams=None)
-        data['fit_avgq'], data['fit_err_avgq'] = fitter.fitexp(data['xpts'][:-1], data['avgq'][:-1], fitparams=None)
+        xpts = data['xpts']
+
+        for fit_axis in ['avgi', 'avgq', 'amps']:
+            ypts_fit = data[fit_axis]
+
+            data[f'fit_{fit_axis}'], data[f'fit_err_{fit_axis}'] = fitter.fitexp(xpts, ypts_fit, fitparams=None)
+
+            if not fit_log: continue
+
+            ypts_fit = np.copy(ypts_fit)
+            if ypts_fit[0] > ypts_fit[-1]: ypts_fit = (ypts_fit - min(ypts_fit))/(max(ypts_fit) - min(ypts_fit))
+            else: ypts_fit = (ypts_fit - max(ypts_fit))/(min(ypts_fit) - max(ypts_fit))
+
+            # need to get rid of the 0 at the minimum
+            xpts_fit = xpts
+            min_ind = np.argmin(ypts_fit)
+            ypts_fit[min_ind] = ypts_fit[min_ind-1] + ypts_fit[min_ind+(1 if min_ind+1<len(xpts) else 0)]
+
+            if fit_slice is None:
+                fit_slice = (0, len(xpts_fit))
+            xpts_fit = xpts_fit[fit_slice[0]:fit_slice[1]]
+            ypts_fit = ypts_fit[fit_slice[0]:fit_slice[1]]
+
+            ypts_logscale = np.log(ypts_fit)
+
+            data[f'fit_log_{fit_axis}'], data[f'fit_log_err_{fit_axis}'] = fitter.fitlogexp(xpts_fit, ypts_logscale, fitparams=None)
         return data
 
-    def display(self, data=None, fit=True, **kwargs):
+    def display(self, data=None, fit=True, fit_log=True):
         if data is None:
             data=self.data 
         
@@ -176,26 +206,66 @@ class T1Experiment(Experiment):
         #     plt.legend()
         #     print(f'Fit T1 amps [us]: {data["fit_amps"][3]}')
 
+        xpts = data["xpts"]
+        avgi = data["avgi"]
+        avgq = data["avgq"]
+
         plt.figure(figsize=(10,10))
-        plt.subplot(211, title="$T_1$", ylabel="I [ADC units]")
-        plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
+        qubit = self.cfg.expt.qubit
+        title = "$T_1$" + (' EF' if self.cfg.expt.checkEF else '') + f' on Q{qubit}'
+        plt.subplot(211, title=title, ylabel="I [ADC units]")
+        plt.plot(xpts, avgi,'o-')
         if fit:
             p = data['fit_avgi']
             pCov = data['fit_err_avgi']
             captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgi"]), label=captionStr)
+            fit_data = fitter.expfunc(xpts, *data["fit_avgi"])
+            plt.plot(xpts, fit_data, label=captionStr)
             plt.legend()
             print(f'Fit T1 avgi [us]: {data["fit_avgi"][3]}')
         plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC units]")
-        plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
+        plt.plot(xpts, avgq,'o-')
         if fit:
             p = data['fit_avgq']
             pCov = data['fit_err_avgq']
             captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_avgq"]), label=captionStr)
+            fit_data = fitter.expfunc(xpts, *data["fit_avgq"])
+            plt.plot(xpts, fit_data, label=captionStr)
             plt.legend()
             print(f'Fit T1 avgq [us]: {data["fit_avgq"][3]}')
+        plt.show()
 
+        if not fit_log: return
+
+        plt.figure(figsize=(10,10))
+        plt.subplot(211, title="$T_1$", ylabel="I [ADC units]")
+        plt.yscale('log')
+        ypts_scaled = np.copy(data['avgi'])
+        if ypts_scaled[0] > ypts_scaled[-1]: ypts_scaled = (ypts_scaled - min(ypts_scaled))/(max(ypts_scaled) - min(ypts_scaled))
+        else: ypts_scaled = (ypts_scaled - max(ypts_scaled))/(min(ypts_scaled) - max(ypts_scaled))
+        plt.plot(xpts, ypts_scaled,'o-')
+        if fit:
+            p = data['fit_log_avgi']
+            pCov = data['fit_log_err_avgi']
+            captionStr = '$T_{1}$'+ f' fit [us]: {p[0]:.3} $\pm$ {np.sqrt(pCov[0][0]):.3}'
+            fit_data = fitter.expfunc(xpts, 0, 1, 0, *data["fit_log_avgi"])
+            plt.plot(xpts, fit_data, label=captionStr)
+            plt.legend()
+            print(f'Fit T1 avgq [us]: {data["fit_log_avgi"][0]} $\pm$ {np.sqrt(pCov[0][0])}')
+        plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC units]")
+        plt.yscale('log')
+        ypts_scaled = np.copy(data['avgq'])
+        if ypts_scaled[0] > ypts_scaled[-1]: ypts_scaled = (ypts_scaled - min(ypts_scaled))/(max(ypts_scaled) - min(ypts_scaled))
+        else: ypts_scaled = (ypts_scaled - max(ypts_scaled))/(min(ypts_scaled) - max(ypts_scaled))
+        plt.plot(xpts, ypts_scaled,'o-')
+        if fit:
+            p = data['fit_log_avgq']
+            pCov = data['fit_log_err_avgq']
+            captionStr = '$T_{1}$'+ f' fit [us]: {p[0]:.3} $\pm$ {np.sqrt(pCov[0][0]):.3}'
+            fit_data = fitter.expfunc(xpts, 0, 1, 0, *data["fit_log_avgq"])
+            plt.plot(xpts, fit_data, label=captionStr)
+            plt.legend()
+            print(f'Fit T1 avgq [us]: {data["fit_log_avgq"][0]} $\pm$ {np.sqrt(pCov[0][0])}')
         plt.show()
         
     def save_data(self, data=None):

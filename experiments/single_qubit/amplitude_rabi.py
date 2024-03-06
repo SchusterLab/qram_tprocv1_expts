@@ -84,6 +84,10 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.res_ch_types = cfg.hw.soc.dacs.readout.type
         self.qubit_chs = cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = cfg.hw.soc.dacs.qubit.type
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
+            self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
+            mixer_freqs = self.cfg.hw.soc.dacs.swap.mixer_freq
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
@@ -92,6 +96,8 @@ class AmplitudeRabiProgram(RAveragerProgram):
             else: self.f_Q_ZZ1_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q_ZZ1]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
         self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.f_f0g1_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
@@ -123,7 +129,15 @@ class AmplitudeRabiProgram(RAveragerProgram):
             if self.qubit_chs[q] not in gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
                 gen_chs.append(self.qubit_chs[q])
-        
+
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            mixer_freq = 0
+            for q in self.cfg.expt.cool_qubits:
+                if self.swap_ch_types[q] == 'int4':
+                    mixer_freq = mixer_freqs[q]
+                if self.swap_chs[q] not in self.gen_chs: 
+                    self.declare_gen(ch=self.swap_chs[q], nqz=self.cfg.hw.soc.dacs.swap.nyquist[q], mixer_freq=mixer_freq)
+
         # define pi_test_sigma as the ge pulse for the qubit that we are calibrating the pulse on
         self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qTest], gen_ch=self.qubit_chs[qTest]) # default pi_ge value
         self.f_ge_init_reg = self.f_ge_reg[qTest]
@@ -147,7 +161,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if 'f_pi_test' in self.cfg.expt:
             self.f_pi_test_reg = self.freq2reg(self.cfg.expt.f_pi_test, gen_ch=self.qubit_chs[qTest])
         calibrate_half = False # calibrate the pi/2 pulse instead of the pi pulse by taking half the sigma and calibrating the gain
-        
+
         # add qubit and readout pulses to respective channels
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test", sigma=self.pi_test_sigma, length=self.pi_test_sigma*4)
@@ -162,6 +176,13 @@ class AmplitudeRabiProgram(RAveragerProgram):
             self.add_gauss(ch=self.qubit_chs[qZZ], name="pi_qubitZZ", sigma=self.pisigma_ge_qZZ, length=self.pisigma_ge_qZZ*4)
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            for q in self.cfg.expt.cool_qubits:
+                self.pisigma_ef = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q]) # default pi_ef value
+                self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
+                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
+                    self.add_gauss(ch=self.swap_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
+                else: assert False, 'not implemented'
 
         # add readout pulses to respective channels
         if self.res_ch_types[qTest] == 'mux4':
@@ -190,6 +211,21 @@ class AmplitudeRabiProgram(RAveragerProgram):
             # self.sync_all()
         self.sync_all(10)
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            for q in self.cfg.expt.cool_qubits:
+                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.f_ef_reg[q], gain=cfg.device.qubit.pulses.pi_ef.gain[q], waveform=f"pi_ef_qubit{q}")
+                self.sync_all(5)
+
+                pulse_type = self.cfg.device.qubit.pulses.pi_f0g1.type[q]
+                pisigma_f0g1 = self.us2cycles(self.cfg.device.qubit.pulses.pi_f0g1.sigma[q], gen_ch=self.swap_chs[q])
+                if pulse_type == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    flat_length_cycles = pisigma_f0g1 - sigma_ramp_cycles*4
+                    self.setup_and_pulse(ch=self.swap_chs[q], style="flat_top", freq=self.f_f0g1_reg[q], phase=0, gain=self.cfg.device.qubit.pulses.pi_f0g1.gain[q], length=flat_length_cycles, waveform=f"pi_f0g1_{q}")
+                else: assert False, 'not implemented'
+                self.sync_all()
+            self.sync_all(self.us2cycles(self.cfg.expt.cool_idle))
+
         # initializations as necessary
         if self.checkZZ:                    
             self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.f_ge_reg[qZZ], gain=cfg.device.qubit.pulses.pi_ge.gain[qZZ], waveform="pi_qubitZZ")
@@ -217,9 +253,10 @@ class AmplitudeRabiProgram(RAveragerProgram):
                     gain=0, # gain set by update
                     length=self.us2cycles(self.cfg.expt.sigma_test))
         self.mathi(self.q_rps[qTest], self.r_gain, self.r_gain2, "+", 0)
-        self.pulse(ch=self.qubit_chs[qTest])
-        self.sync_all()
-        if 'calibrate_half' in self.cfg.expt and self.cfg.expt.calibrate_half:
+
+        n_pulses = 1
+        if 'n_pulses' in self.cfg.expt: n_pulses = self.cfg.expt.n_pulses
+        for i in range(n_pulses):
             self.pulse(ch=self.qubit_chs[qTest])
             self.sync_all()
 
@@ -333,15 +370,21 @@ class AmplitudeRabiExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=True, fitparams=None):
         if data is None:
             data=self.data
         
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset]
+            # fitparams=[yscale, freq, phase_deg, y0]
             # Remove the first and last point from fit in case weird edge measurements
             xdata = data['xpts']
-            fitparams=None
+            if fitparams is None:
+                fitparams=[None]*4
+                n_pulses = 1
+                if 'n_pusles' in self.cfg.expt: n_pulses = self.cfg.expt.n_pulses
+                fitparams[1]=n_pulses/xdata[-1]
+                print(fitparams[1])
 
             ydata = data["amps"]
             # print(abs(xdata[np.argwhere(ydata==max(ydata))[0,0]] - xdata[np.argwhere(ydata==min(ydata))[0,0]]))
@@ -372,7 +415,9 @@ class AmplitudeRabiExperiment(Experiment):
         else: qTest = self.cfg.expt.qubits[0]
 
         plt.figure(figsize=(10, 6))
-        title = f"Amplitude Rabi on Q{qTest} (Pulse Length {self.cfg.expt.sigma_test}{(', ZZ Q'+str(qZZ)) if self.checkZZ else ''})"
+        n_pulses = 1
+        if 'n_pulses' in self.cfg.expt: n_pulses = self.cfg.expt.n_pulses
+        title = f"Amplitude Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Pulse Length {self.cfg.expt.sigma_test}{(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}, {n_pulses} pulse)"
         plt.subplot(111, title=title, xlabel="Gain [DAC units]", ylabel="Amplitude [ADC units]")
         plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
         if fit:
@@ -381,7 +426,8 @@ class AmplitudeRabiExperiment(Experiment):
             if p[2] > 180: p[2] = p[2] - 360
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
-            else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            else: pi_gain = (3/2 - p[2]/180)/2/p[1]
+            pi_gain += (n_pulses-1)*1/2/p[1]
             pi2_gain = pi_gain/2
             print(f'Pi gain from amps data [dac units]: {int(pi_gain)}')
             print(f'\tPi/2 gain from amps data [dac units]: {int(pi2_gain)}')
@@ -402,6 +448,7 @@ class AmplitudeRabiExperiment(Experiment):
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
             else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi_gain += (n_pulses-1)*1/2/p[1]
             pi2_gain = pi_gain/2
             print(f'Pi gain from avgi data [dac units]: {int(pi_gain)}')
             print(f'\tPi/2 gain from avgi data [dac units]: {int(pi2_gain)}')
@@ -416,6 +463,7 @@ class AmplitudeRabiExperiment(Experiment):
             elif p[2] < -180: p[2] = p[2] + 360
             if p[2] < 0: pi_gain = (1/2 - p[2]/180)/2/p[1]
             else: pi_gain= (3/2 - p[2]/180)/2/p[1]
+            pi_gain += (n_pulses-1)*1/2/p[1]
             pi2_gain = pi_gain/2
             print(f'Pi gain from avgq data [dac units]: {int(pi_gain)}')
             print(f'\tPi/2 gain from avgq data [dac units]: {int(pi2_gain)}')

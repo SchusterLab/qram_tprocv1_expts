@@ -179,7 +179,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
             elif qubits[first_e] == 1:
                 gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qubits[second_e]]
             else: assert False, "There's probably a bug in your conditional statements"
-            print(prep_state, f'pulse {second_e}')
+            # print(prep_state, f'pulse {second_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[second_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
             self.sync_all(10)
             # print('second', second_e)
@@ -191,7 +191,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 gen_ch=self.qubit_chs[qubits[third_e]])
             waveform = f'pi_ge_q{qubits[third_e]}'
             gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[third_e]]
-            print(prep_state, f'pulse {third_e}')
+            # print(prep_state, f'pulse {third_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[third_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
             self.sync_all(10)
             # print('third', third_e)
@@ -203,7 +203,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 gen_ch=self.qubit_chs[qubits[fourth_e]])
             waveform = f'pi_ge_q{qubits[fourth_e]}'
             gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[fourth_e]]
-            print(prep_state, f'pulse {fourth_e}')
+            # print(prep_state, f'pulse {fourth_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[fourth_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
             self.sync_all(10)
             # print('fourth', fourth_e)

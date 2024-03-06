@@ -7,7 +7,7 @@ from copy import deepcopy
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
-def hist(data, plot=True, span=None, verbose=True):
+def hist(data, plot=True, span=None, verbose=True, title=None):
     """
     span: histogram limit is the mean +/- span
     """
@@ -35,14 +35,16 @@ def hist(data, plot=True, span=None, verbose=True):
 
     if plot:
         fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10, 6))
+        if title is not None: plt.suptitle(title)
         fig.tight_layout()
 
         axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.', edgecolor='None', alpha=0.3)
         axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.', edgecolor='None', alpha=0.3)
         if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.', edgecolor='None', alpha=0.3)
-        axs[0,0].scatter(xg, yg, color='k', marker='o', s=20)
-        axs[0,0].scatter(xe, ye, color='k', marker='o', s=20)
-        if plot_f: axs[0,0].scatter(xf, yf, color='k', marker='o', s=20)
+        axs[0,0].plot([xg], [yg], color='k', linestyle=':', marker='o', markerfacecolor='b', markersize=5)
+        axs[0,0].plot([xe], [ye], color='k', linestyle=':', marker='o', markerfacecolor='r', markersize=5)    
+        if plot_f:
+            axs[0,0].plot([xf], [yf], color='k', linestyle=':', marker='o', markerfacecolor='g', markersize=5)    
 
         # axs[0,0].set_xlabel('I [ADC levels]')
         axs[0,0].set_ylabel('Q [ADC levels]')
@@ -84,9 +86,10 @@ def hist(data, plot=True, span=None, verbose=True):
         axs[0,1].scatter(Ig_new, Qg_new, label='g', color='b', marker='.', edgecolor='None', alpha=0.3)
         axs[0,1].scatter(Ie_new, Qe_new, label='e', color='r', marker='.', edgecolor='None', alpha=0.3)
         if plot_f: axs[0, 1].scatter(If_new, Qf_new, label='f', color='g', marker='.', edgecolor='None', alpha=0.3)
-        axs[0,1].scatter(xg, yg, color='k', marker='o', s=20)
-        axs[0,1].scatter(xe, ye, color='k', marker='o', s=20)    
-        if plot_f: axs[0, 1].scatter(xf, yf, color='k', marker='o', s=20)    
+        axs[0,1].plot([xg], [yg], color='k', linestyle=':', marker='o', markerfacecolor='b', markersize=5)
+        axs[0,1].plot([xe], [ye], color='k', linestyle=':', marker='o', markerfacecolor='r', markersize=5)    
+        if plot_f:
+            axs[0,1].plot([xf], [yf], color='k', linestyle=':', marker='o', markerfacecolor='g', markersize=5)    
 
         # axs[0,1].set_xlabel('I [ADC levels]')
         axs[0,1].legend(loc='upper right')
@@ -201,7 +204,8 @@ class HistogramProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
-            self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+            if self.adc_chs[q] not in self.ro_chs:
+                self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # add readout pulses to respective channels
         if self.res_ch_types[qubit] == 'mux4':
@@ -473,7 +477,8 @@ class HistogramExperiment(Experiment):
         if data is None:
             data=self.data 
         
-        fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, span=span)
+        qubit = self.cfg.expt.qubit
+        fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, span=span, title=f'Qubit {qubit}')
             
         print(f'ge fidelity (%): {100*fids[0]}')
         if self.cfg.expt.check_f:

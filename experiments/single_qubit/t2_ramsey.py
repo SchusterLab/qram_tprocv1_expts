@@ -41,6 +41,10 @@ class RamseyProgram(RAveragerProgram):
         self.res_ch_types = cfg.hw.soc.dacs.readout.type
         self.qubit_chs = cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = cfg.hw.soc.dacs.qubit.type
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
+            self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
+            mixer_freqs = self.cfg.hw.soc.dacs.swap.mixer_freq
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
@@ -49,6 +53,9 @@ class RamseyProgram(RAveragerProgram):
             else: self.f_Q_ZZ1_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q_ZZ1]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
         self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        print('readout freq', cfg.device.readout.frequency)
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.f_f0g1_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
@@ -80,6 +87,14 @@ class RamseyProgram(RAveragerProgram):
             if self.qubit_chs[q] not in gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
                 gen_chs.append(self.qubit_chs[q])
+
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            mixer_freq = 0
+            for q in self.cfg.expt.cool_qubits:
+                if self.swap_ch_types[q] == 'int4':
+                    mixer_freq = mixer_freqs[q]
+                if self.swap_chs[q] not in self.gen_chs: 
+                    self.declare_gen(ch=self.swap_chs[q], nqz=self.cfg.hw.soc.dacs.swap.nyquist[q], mixer_freq=mixer_freq)
 
         # declare registers for phase incrementing
         self.r_wait = 3
@@ -117,6 +132,13 @@ class RamseyProgram(RAveragerProgram):
             self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qTest]/2, gen_ch=self.qubit_chs[qTest])
             self.f_pi_test_reg = self.f_ef_reg[qTest] # freq we are trying to calibrate
             self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.gain[qTest] # gain of the pulse we are trying to calibrate
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            for q in self.cfg.expt.cool_qubits:
+                self.pisigma_ef = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q]) # default pi_ef value
+                self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
+                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
+                    self.add_gauss(ch=self.swap_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
+                else: assert False, 'not implemented'
 
         # add qubit pulses to respective channels
         self.add_gauss(ch=self.qubit_chs[qTest], name="pi2_test", sigma=self.pi2sigma, length=self.pi2sigma*4)
@@ -149,6 +171,21 @@ class RamseyProgram(RAveragerProgram):
             # self.sync_all()
         self.sync_all(10)
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            for q in self.cfg.expt.cool_qubits:
+                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.f_ef_reg[q], gain=cfg.device.qubit.pulses.pi_ef.gain[q], waveform=f"pi_ef_qubit{q}")
+                self.sync_all(5)
+
+                pulse_type = self.cfg.device.qubit.pulses.pi_f0g1.type[q]
+                pisigma_f0g1 = self.us2cycles(self.cfg.device.qubit.pulses.pi_f0g1.sigma[q], gen_ch=self.swap_chs[q])
+                if pulse_type == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    flat_length_cycles = pisigma_f0g1 - sigma_ramp_cycles*4
+                    self.setup_and_pulse(ch=self.swap_chs[q], style="flat_top", freq=self.f_f0g1_reg[q], phase=0, gain=self.cfg.device.qubit.pulses.pi_f0g1.gain[q], length=flat_length_cycles, waveform=f"pi_f0g1_{q}")
+                else: assert False, 'not implemented'
+                self.sync_all()
+            self.sync_all(self.us2cycles(self.cfg.expt.cool_idle))
+
         # initializations as necessary
         if self.checkZZ:
             self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.f_ge_reg[qZZ], gain=cfg.device.qubit.pulses.pi_ge.gain[qZZ], waveform="pi_qubitZZ")
@@ -173,7 +210,8 @@ class RamseyProgram(RAveragerProgram):
         self.pulse(ch=self.qubit_chs[qTest])
 
         if self.checkEF: # map excited back to qubit ground state for measurement
-            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
+            if self.cfg.device.readout.frequency[qTest] != self.cfg.device.readout.frequency_ef[qTest]:
+                self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
 
         # align channels and measure
         self.sync_all(5)
@@ -240,24 +278,35 @@ class RamseyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, fit_twofreq=False, **kwargs):
+    def analyze(self, data=None, fit=True, fit_num_sin=1):
         if data is None:
             data=self.data
 
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset]
-            # fitparams=[yscale0, freq0, phase_deg0, decay0, y00, x00, yscale1, freq1, phase_deg1, y01] # two fit freqs
+            # fitparams=[yscale0, freq0, phase_deg0, decay0, yscale1, freq1, phase_deg1, y0] # two fit freqs
+            # fitparams=[yscale0, freq0, phase_deg0, decay0, y00, x00, yscale1, freq1, phase_deg1, y01, yscale2, freq2, phase_deg2, y02] # three fit freqs
             
             # Remove the first and last point from fit in case weird edge measurements
             fitparams = None
-            if fit_twofreq:
+            if fit_num_sin == 2:
                 fitfunc = fitter.fittwofreq_decaysin
-                fitparams = [None]*10
+                fitparams = [None]*8
                 fitparams[1] = self.cfg.expt.ramsey_freq
-                fitparams[2] = 0
-                fitparams[7] = 2/data['xpts'][-1]
+                fitparams[3] = 15 # decay
+                fitparams[4] = 0.05 # yscale1 (ratio relative to base oscillations)
+                fitparams[5] = 1/12.5 # freq1
                 # print('FITPARAMS', fitparams[7])
-                fitparams[8] = 0
+            elif fit_num_sin == 3:
+                fitfunc = fitter.fitthreefreq_decaysin
+                fitparams = [None]*14
+                fitparams[1] = self.cfg.expt.ramsey_freq
+                fitparams[3] = 15 # decay
+                fitparams[6] = 1.1 # yscale1
+                fitparams[7] = 0.415 # freq1
+                fitparams[-4] = 1.1 # yscale2
+                fitparams[-3] = 0.494 # freq2
+                # print('FITPARAMS', fitparams[7])
             else:
                 fitfunc = fitter.fitdecaysin
                 fitparams=[None, self.cfg.expt.ramsey_freq, None, None, None]
@@ -267,6 +316,7 @@ class RamseyExperiment(Experiment):
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
             data['fit_amps'] = p_amps
+            print('p_amps', data['fit_amps'])
             data['fit_err_avgi'] = pCov_avgi   
             data['fit_err_avgq'] = pCov_avgq
             data['fit_err_amps'] = pCov_amps
@@ -279,13 +329,13 @@ class RamseyExperiment(Experiment):
             if isinstance(p_avgq, (list, np.ndarray)): data['f_adjust_ramsey_avgq'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[1], -self.cfg.expt.ramsey_freq - p_avgq[1]), key=abs)
             if isinstance(p_amps, (list, np.ndarray)): data['f_adjust_ramsey_amps'] = sorted((self.cfg.expt.ramsey_freq - p_amps[1], -self.cfg.expt.ramsey_freq - p_amps[1]), key=abs)
 
-            if fit_twofreq:
-                data['f_adjust_ramsey_avgi2'] = sorted((self.cfg.expt.ramsey_freq - p_avgi[7], -self.cfg.expt.ramsey_freq - p_avgi[6]), key=abs)
-                data['f_adjust_ramsey_avgq2'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[7], -self.cfg.expt.ramsey_freq - p_avgq[6]), key=abs)
-                data['f_adjust_ramsey_amps2'] = sorted((self.cfg.expt.ramsey_freq - p_amps[7], -self.cfg.expt.ramsey_freq - p_amps[6]), key=abs)
+            if fit_num_sin == 2:
+                data['f_adjust_ramsey_avgi2'] = sorted((self.cfg.expt.ramsey_freq - p_avgi[5], -self.cfg.expt.ramsey_freq - p_avgi[5]), key=abs)
+                data['f_adjust_ramsey_avgq2'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[5], -self.cfg.expt.ramsey_freq - p_avgq[5]), key=abs)
+                data['f_adjust_ramsey_amps2'] = sorted((self.cfg.expt.ramsey_freq - p_amps[5], -self.cfg.expt.ramsey_freq - p_amps[5]), key=abs)
         return data
 
-    def display(self, data=None, fit=True, fit_twofreq=False, **kwargs):
+    def display(self, data=None, fit=True, fit_num_sin=1):
         if data is None:
             data=self.data
 
@@ -309,7 +359,8 @@ class RamseyExperiment(Experiment):
 
         title = ('EF' if self.checkEF else '') + f'Ramsey on Q{qTest}' + (f'with Q{qZZ} in e' if self.checkZZ else '') 
 
-        if fit_twofreq: fitfunc = fitter.twofreq_decaysin
+        if fit_num_sin == 2: fitfunc = fitter.twofreq_decaysin
+        elif fit_num_sin == 3: fitfunc = fitter.threefreq_decaysin
         else: fitfunc = fitter.decaysin
 
         plt.figure(figsize=(10, 6))
@@ -322,16 +373,22 @@ class RamseyExperiment(Experiment):
                 pCov = data['fit_err_amps']
                 captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
                 plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *p), label=captionStr)
-                x0 = -(p[2]+180)/360/p[1]
-                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], x0, p[3]), color='0.2', linestyle='--')
-                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], x0, p[3]), color='0.2', linestyle='--')
+                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[-1], p[0], 0, p[3]), color='0.2', linestyle='--')
+                print('ps amps', p[-1], p[0], p[3])
+                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[-1], -p[0], 0, p[3]), color='0.2', linestyle='--')
                 plt.legend()
                 print(f'Current pi pulse frequency: {f_pi_test}')
                 print(f"Fit frequency from amps [MHz]: {p[1]} +/- {np.sqrt(pCov[1][1])}")
                 if p[1] > 2*self.cfg.expt.ramsey_freq: print('WARNING: Fit frequency >2*wR, you may be too far from the real pi pulse frequency!')
                 print(f'Suggested new pi pulse frequencies from fit amps [MHz]:\n',
-                      f'\t{f_pi_test + data["f_adjust_ramsey_amps"][0]}\n',
-                      f'\t{f_pi_test + data["f_adjust_ramsey_amps"][1]}')
+                      f'\t{data["f_adjust_ramsey_amps"][0]}\n',
+                      f'\t{data["f_adjust_ramsey_amps"][1]}')
+                if fit_num_sin == 2:
+                    print('Beating frequencies from fit amps [MHz]:\n',
+                          f'\tyscale base: {1-p[4]}',
+                          f'\tfit freq {p[1]}\n',
+                          f'\tyscale1: {p[4]}'
+                          f'\tfit freq {p[5]}\n')
                 print(f'T2 Ramsey from fit amps [us]: {p[3]}')
 
         plt.figure(figsize=(10,9))
@@ -345,9 +402,8 @@ class RamseyExperiment(Experiment):
                 pCov = data['fit_err_avgi']
                 captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
                 plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *p), label=captionStr)
-                x0 = -(p[2]+180)/360/p[1]
-                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], x0, p[3]), color='0.2', linestyle='--')
-                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], x0, p[3]), color='0.2', linestyle='--')
+                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[-1], p[0], 0, p[3]), color='0.2', linestyle='--')
+                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[-1], -p[0], 0, p[3]), color='0.2', linestyle='--')
                 plt.legend()
                 print(f'Current pi pulse frequency: {f_pi_test}')
                 print(f'Fit frequency from I [MHz]: {p[1]} +/- {np.sqrt(pCov[1][1])}')
@@ -355,10 +411,12 @@ class RamseyExperiment(Experiment):
                 print('Suggested new pi pulse frequency from fit I [MHz]:\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgi"][0]}\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgi"][1]}')
-                if fit_twofreq:
-                    print('Beating frequency from fit I [MHz]:\n',
-                          f'\t{f_pi_test + data["f_adjust_ramsey_avgi2"][0]}\n',
-                          f'\t{f_pi_test + data["f_adjust_ramsey_avgi2"][1]}')
+                if fit_num_sin == 2:
+                    print('Beating frequencies from fit avgi [MHz]:\n',
+                          f'\tyscale base: {1-p[4]}',
+                          f'\tfit freq {p[1]}\n',
+                          f'\tyscale1: {p[4]}'
+                          f'\tfit freq {p[5]}\n')
                 print(f'T2 Ramsey from fit I [us]: {p[3]}')
         plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
         plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
@@ -368,19 +426,20 @@ class RamseyExperiment(Experiment):
                 pCov = data['fit_err_avgq']
                 captionStr = f'$T_2$ Ramsey fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
                 plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *p), label=captionStr)
-                x0 = -(p[2]+180)/360/p[1]
-                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], p[0], x0, p[3]), color='0.2', linestyle='--')
-                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[4], -p[0], x0, p[3]), color='0.2', linestyle='--')
+                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[-1], p[0], 0, p[3]), color='0.2', linestyle='--')
+                plt.plot(data["xpts"][:-1], fitter.expfunc(data['xpts'][:-1], p[-1], -p[0], 0, p[3]), color='0.2', linestyle='--')
                 plt.legend()
                 print(f'Fit frequency from Q [MHz]: {p[1]} +/- {np.sqrt(pCov[1][1])}')
                 if p[1] > 2*self.cfg.expt.ramsey_freq: print('WARNING: Fit frequency >2*wR, you may be too far from the real pi pulse frequency!')
                 print('Suggested new pi pulse frequencies from fit Q [MHz]:\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgq"][0]}\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_avgq"][1]}')
-                if fit_twofreq:
-                    print('Beating frequency from fit Q [MHz]:\n',
-                          f'\t{f_pi_test + data["f_adjust_ramsey_avgq2"][0]}\n',
-                          f'\t{f_pi_test + data["f_adjust_ramsey_avgq2"][1]}')
+                if fit_num_sin == 2:
+                    print('Beating frequencies from fit avgq [MHz]:\n',
+                          f'\tyscale base: {1-p[4]}',
+                          f'\tfit freq {p[1]}\n',
+                          f'\tyscale1: {p[4]}'
+                          f'\tfit freq {p[5]}\n')
                 print(f'T2 Ramsey from fit Q [us]: {p[3]}')
 
         plt.tight_layout()

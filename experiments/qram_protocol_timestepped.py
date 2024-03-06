@@ -67,7 +67,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         if 'timestep' in cfg.expt:
             self.timestep_us = cfg.expt.timestep
 
-        # add qubit pulses to respective channels
+        # add 2Q pulses to respective channels
         for q in self.all_qubits:
             if q != 1:
                 if self.pi_EgGf_types[q] == 'gauss':
@@ -149,17 +149,29 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         counts_psq1 = sort_counts(shotsA=shots_psq1[0], shotsB=shots_psq1[1])
         return (counts_psq0, counts_psq1)
 
+
     """
     Protocol pulses
     """
-    def eegg_eggf(self, count_us, pihalf=False, sync_after=True):
-        assert not pihalf, "pihalf on eegg-eggf not implemented"
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[3], freq_reg=self.f_EgGf_Q_regs[3], type=self.pi_EgGf_Q_types[3], phase=self.deg2reg(0, gen_ch=self.swap_Q_chs[3]), gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[3], sigma_us=self.pi_EgGf_Q_sigmas_us[3], waveform='pi_EgGf_Q_swap3')
+    def gegg_ggfg(self, count_us, pihalf=False, sync_after=True):
+        # 2Q on Q2
+        phase = self.deg2reg(0, gen_ch=self.swap_Q_chs[2])
+        # phase = self.deg2reg(181.8, gen_ch=self.swap_Q_chs[2])
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=phase, gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
         if sync_after: self.sync_all()
         return count_us
 
-    def gegg_ggfg(self, count_us, pihalf=False, sync_after=True):
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[2], freq_reg=self.f_EgGf_Q_regs[2], type=self.pi_EgGf_Q_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[2], sigma_us=self.pi_EgGf_Q_sigmas_us[2], waveform='pi_EgGf_Q_swap2')
+    def eegg_eggf(self, count_us, pihalf=False, sync_after=True):
+        # 2Q on Q3
+        assert not pihalf, "pihalf on eegg-eggf not implemented"
+        phase = self.deg2reg(0, gen_ch=self.swap_Q_chs[3])
+        # phase = self.deg2reg(80, gen_ch=self.swap_Q_chs[3])
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.swap_Q_chs[3], freq_reg=self.f_EgGf_Q_regs[3], type=self.pi_EgGf_Q_types[3], phase=phase, gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[3], sigma_us=self.pi_EgGf_Q_sigmas_us[3], waveform='pi_EgGf_Q_swap3')
+        if sync_after: self.sync_all()
+        return count_us
+
+    def q2_ef(self, count_us, pihalf=False, sync_after=True):
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
         if sync_after: self.sync_all()
         return count_us
 
@@ -168,10 +180,6 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         if sync_after: self.sync_all()
         return count_us
 
-    def q2_ef(self, count_us, pihalf=False, sync_after=True):
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.f_ef_regs[2], type=self.pi_ef_types[2], phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[2], sigma_us=self.pi_ef_sigmas_us[2], waveform='pi_ef_q2')
-        if sync_after: self.sync_all()
-        return count_us
 
 
     def state_prep_pulse(self, qubits=None, **kwargs):
@@ -200,13 +208,18 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         elif init_state == '|1>|0+1>':
             self.Y_pulse(q=0, play=True)
-            self.sync_all(0)
+            self.sync_all()
 
-            pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0]/2, gen_ch=self.qubit_chs[1])
-            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
-            # phase = self.deg2reg(-90+260.6060606060606, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
             phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
+            # phase = self.deg2reg(0, gen_ch=self.qubit_chs[1])
+            freq = self.f_Q1_ZZ_regs[0]
+
+            waveform = 'qubit1_ZZ0_half'
+            sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0]/2, gen_ch=self.qubit_chs[1])
+            gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
+            self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+
             # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
             self.sync_all()
 
@@ -221,29 +234,53 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
             self.sync_all()
 
-            freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-            sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
-            pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
+            # freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
+            # gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
+            # sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
+            # pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
+            # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+            # self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
+            # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
+            # self.sync_all()
+
+
+            # SLOW 2X PULSE VERSION
             phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
-            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
+
+            freq = self.f_Q1_ZZ_regs[0]
+            waveform = 'qubit1_ZZ0_half_slow'
+            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q1_ZZ_slow.sigma[0]/2, gen_ch=self.qubit_chs[1])
+            gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ_slow.gain[0]
+            self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
             self.sync_all()
+
+            freq = self.f_ge_regs[1]
+            waveform = 'qubit1_pi_ge_half_slow'
+            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge_slow.sigma[1]/2, gen_ch=self.qubit_chs[1])
+            gain = self.cfg.device.qubit.pulses.pi_ge_slow.gain[1]
+            self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+            self.sync_all()
+
 
         elif init_state == '|0+1>|0>':
             self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
             self.sync_all()
 
         elif init_state == '|0+1>|1>':
-            self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
+            self.Y_pulse(q=1, play=True) # -> 1
             self.sync_all()
 
-            waveform = f'qubit0_ZZ1'
-            freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[0], gen_ch=self.qubit_chs[0])
-            gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
-            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0], gen_ch=self.qubit_chs[0])
+            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[0]) # +Y/2 -> 0+1
+            freq = self.f_Q_ZZ1_regs[0]
+
+            waveform = f'qubit0_ZZ1_half'
+            gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0]
+            # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
+            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0]/2, gen_ch=self.qubit_chs[0])
             self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-            self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
+            self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
             self.sync_all()
 
         elif init_state == '|0+i1>|0+1>':
@@ -430,6 +467,7 @@ class QramProtocolExperiment(Experiment):
         self.tomo_qubits = self.cfg.expt.tomo_qubits
         if 'post_select' in self.cfg.expt and self.cfg.expt.post_select: data.update({'counts_tomo_ps0':[], 'counts_tomo_ps1':[],'counts_calib':[]})
         else: data.update({'counts_tomo':[], 'counts_calib':[]})
+        if 'post_select' not in self.cfg.expt: self.cfg.expt.post_select = False
         if 'calib_apply_q1_pi2' not in self.cfg.expt: self.cfg.expt.calib_apply_q1_pi2 = False
 
         # ================= #
@@ -442,6 +480,7 @@ class QramProtocolExperiment(Experiment):
         if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt and None not in (self.cfg.expt.angles, self.cfg.expt.thresholds, self.cfg.expt.ge_avgs, self.cfg.expt.counts_calib):
             angles_q = self.cfg.expt.angles
             thresholds_q = self.cfg.expt.thresholds
+            ge_avgs_q = self.cfg.expt.ge_avgs
             for q in range(num_qubits_sample):
                 if ge_avgs_q[q] is None:
                     ge_avgs_q[q] = np.zeros_like(ge_avgs_q[qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
@@ -530,9 +569,10 @@ class QramProtocolExperiment(Experiment):
                     print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
 
             data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
-        print(f'thresholds={thresholds_q}')
-        print(f'angles={angles_q}')
-        print(f'ge_avgs={ge_avgs_q}')
+        print(f'thresholds={thresholds_q},')
+        print(f'angles={angles_q},')
+        print(f'ge_avgs={ge_avgs_q},')
+        print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
         # ================= #
         # Begin protocol stepping
@@ -562,7 +602,9 @@ class QramProtocolExperiment(Experiment):
                     if cfg.expt.post_select:
                         data['counts_tomo_ps0'].append(counts[0])
                         data['counts_tomo_ps1'].append(counts[1])
-                    else: data['counts_tomo'].append(counts)
+                    else:
+                        data['counts_tomo'].append(counts)
+                        print(basis, counts)
                     self.pulse_dict.update({basis:tomo_prog.pulse_dict})
 
             else:
@@ -682,7 +724,7 @@ class QramProtocolExperiment(Experiment):
 
 # ===================================================================== #
 
-def multihist(data, qubit, check_states, play_pulses, g_states, theta=None, plot=True, verbose=True):
+def multihist(data, qubit, check_states, play_pulses, g_states, e_states, theta=None, plot=True, verbose=True):
     """
     span: histogram limit is the mean +/- span
     theta given and returned in deg
@@ -723,7 +765,7 @@ def multihist(data, qubit, check_states, play_pulses, g_states, theta=None, plot
             if check_i in g_states:
                 Ig_tot = np.concatenate((Ig_tot, I))
                 Qg_tot = np.concatenate((Qg_tot, Q))
-            else:
+            elif check_i in e_states:
                 Ie_tot = np.concatenate((Ig_tot, I))
                 Qe_tot = np.concatenate((Qg_tot, Q))
 
@@ -768,15 +810,18 @@ def multihist(data, qubit, check_states, play_pulses, g_states, theta=None, plot
             print(f'I {xmed_new} +/- {np.std(I_new)} \t Q {ymed_new} +/- {np.std(Q_new)} \t Amp {np.abs(xmed_new+1j*ymed_new)}')
 
         if plot:
-            label = f'{check_state} BP {play_pulses}'
+            label = f'{check_state}'
+            if len(play_pulses) > 1:
+                label += f' play {play_pulses}'
             axs[0,0].scatter(I, Q, label=label, color=default_colors[check_i], marker='.', edgecolor='None', alpha=0.3)
-            axs[0,0].scatter(xmed, ymed, color='k', marker='o', s=20)
+            axs[0,0].plot([xmed], [ymed], color='k', linestyle=':', marker='o', markerfacecolor=default_colors[check_i], markersize=5)
 
             axs[0,1].scatter(I_new, Q_new, label=label, color=default_colors[check_i], marker='.', edgecolor='None', alpha=0.3)
-            axs[0,1].scatter(xmed_new, ymed_new, color='k', marker='o', s=20)
+            axs[0,1].plot([xmed_new], [ymed_new], color='k', linestyle=':', marker='o', markerfacecolor=default_colors[check_i], markersize=5)
 
             if check_i in g_states: linestyle = linestyle_cycle[0]
-            else: linestyle = linestyle_cycle[1]
+            elif check_i in e_states: linestyle = linestyle_cycle[1]
+            else: linestyle = linestyle_cycle[2]
 
             n, bins, p = axs[1,0].hist(I_new, bins=numbins, range=xlims, color=default_colors[check_i], label=label, histtype='step', linestyle=linestyle)
 
@@ -786,7 +831,7 @@ def multihist(data, qubit, check_states, play_pulses, g_states, theta=None, plot
             n, bins = np.histogram(I_new, bins=numbins, range=xlims)
 
         if check_i in g_states: n_tot_g += n
-        else: n_tot_e += n
+        elif check_i in e_states: n_tot_e += n
 
     """Compute the fidelity using overlap of the histograms"""
     fids = []
@@ -809,7 +854,7 @@ def multihist(data, qubit, check_states, play_pulses, g_states, theta=None, plot
         prop = {'size': 9}
         axs[0,0].legend(loc='upper right', prop=prop)
         axs[0,1].legend(loc='upper right', prop=prop)
-        axs[1,0].legend(loc='upper right', prop=prop)
+        axs[1,0].legend(loc='upper left', prop=prop)
         axs[1,1].legend(prop=prop)
 
         plt.show()
@@ -885,11 +930,11 @@ class QramProtocolSingleShotExperiment(Experiment):
         
         return data
 
-    def display(self, data=None, qubit=None, theta=None, check_states=None, play_pulses=None, g_states=None, verbose=True, **kwargs):
+    def display(self, data=None, qubit=None, theta=None, check_states=None, play_pulses=None, g_states=None, e_states=None, verbose=True, **kwargs):
         if data is None:
             data=self.data 
         
-        fids, thresholds, angle = multihist(data=data, qubit=qubit, check_states=check_states, play_pulses=play_pulses, g_states=g_states, theta=theta, plot=True, verbose=verbose)
+        fids, thresholds, angle = multihist(data=data, qubit=qubit, check_states=check_states, play_pulses=play_pulses, g_states=g_states, e_states=e_states, theta=theta, plot=True, verbose=verbose)
             
         print(f'average ge fidelity (%): {100*fids[0]}')
         print(f'rotation angle (deg): {angle}')
@@ -1150,9 +1195,9 @@ class QramProtocol1QTomoExperiment(Experiment):
             for prep_state in self.calib_order:
                 counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
                 data['counts_calib'].append(counts)
-            if progress: print(f"counts_calib={data['counts_calib']}")
+            if progress: print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
-            data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
+        data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
 
         # ================= #
         # Begin protocol stepping
@@ -1294,19 +1339,20 @@ class QramProtocol3QTomoExperiment(Experiment):
                 thresholds_q[q] = threshold[0]
                 angles_q[q] = angle
                 ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                print('fidelity (%)', fid[0]*100)
 
-            print('thresholds', thresholds_q)
-            print('angles', angles_q)
-            print(f'ge_avgs={ge_avgs_q}')
+            print(f'thresholds={thresholds_q},')
+            print(f'angles={angles_q},')
+            print(f'ge_avgs={ge_avgs_q}',',')
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for prep_state in self.calib_order:
                 counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
                 data['counts_calib'].append(counts)
-            print(f"counts_calib={data['counts_calib']}")
+            print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
-            data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
-            print()
+        data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
+        print()
 
         # ================= #
         # Begin protocol stepping
@@ -1639,7 +1685,7 @@ class QramProtocolExperiment4Q(Experiment):
             for prep_state in self.calib_order:
                 counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
                 data['counts_calib'].append(counts)
-            print(f"counts_calib={data['counts_calib']}")
+            print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
 
         # ================= #

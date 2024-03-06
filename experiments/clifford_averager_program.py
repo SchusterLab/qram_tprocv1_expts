@@ -215,7 +215,7 @@ class CliffordAveragerProgram(AveragerProgram):
     special: adiabatic, pulseiq
     """
     # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=False, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=True, **kwargs):
+    def X_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=True, **kwargs):
         # q: qubit number in config
         f_ge = self.cfg.device.qubit.f_ge[q]
         gain = self.cfg.device.qubit.pulses.pi_ge.gain[q]
@@ -299,6 +299,7 @@ class CliffordAveragerProgram(AveragerProgram):
         self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[1]) for f in self.cfg.device.qubit.f_Q1_ZZ]
+        self.f_Q_ZZ1_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[q]) for q, f in enumerate(self.cfg.device.qubit.f_Q_ZZ1)]
 
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
@@ -345,7 +346,8 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
-            self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+            if self.adc_chs[q] not in self.ro_chs:
+                self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
 
 

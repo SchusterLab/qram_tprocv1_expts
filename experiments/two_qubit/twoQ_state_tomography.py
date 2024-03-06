@@ -286,25 +286,40 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
     def state_prep_pulse(self, qubits, **kwargs):
         qA, qB = self.cfg.expt.tomo_qubits
         
-        self.Y_pulse(q=1, play=True, pihalf=False)
+        self.Y_pulse(q=2, play=True)
+        self.X_pulse(q=0, play=True, pihalf=True)
         # self.sync_all()
         # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[second_e]) # +Y/2 -> 0+1
         # self.setup_and_pulse(ch=self.qubit_chs[3], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
         # self.sync_all()
 
-        ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-        qubits = range(4)
-        second_e = 3
-        first_e = 1
-        freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[second_e]] + ZZs[qubits[second_e], qubits[first_e]], gen_ch=self.qubit_chs[qubits[second_e]])
-        waveform = f'qubit{qubits[second_e]}_ZZ{qubits[first_e]}'
-        if waveform not in self.envelopes:
-            sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[second_e]], gen_ch=self.qubit_chs[qubits[second_e]])
-            self.add_gauss(ch=self.qubit_chs[qubits[second_e]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-            gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[second_e]]
-        phase = self.deg2reg(-90, gen_ch=self.qubit_chs[second_e]) # +Y/2 -> 0+1
-        self.setup_and_pulse(ch=self.qubit_chs[qubits[second_e]], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-        self.sync_all()
+        # self.Y_pulse(q=2, play=True, pihalf=True)
+        # waveform = f'qubit2_ZZ1'
+        # freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[2], gen_ch=self.qubit_chs[2])
+        # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[2] //2
+        # sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[2], gen_ch=self.qubit_chs[2])
+        # self.add_gauss(ch=self.qubit_chs[2], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+        # self.setup_and_pulse(ch=self.qubit_chs[2], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[2]), gain=gain, waveform=waveform)
+        # self.sync_all()
+
+        # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
+        # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[2], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[2]//2, waveform='qubit1_ZZ2')
+        # self.sync_all()
+
+        # ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
+        # qubits = range(4)
+        # second_e = 3
+        # first_e = 1
+        # freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[second_e]] + ZZs[qubits[second_e], qubits[first_e]], gen_ch=self.qubit_chs[qubits[second_e]])
+        # waveform = f'qubit{qubits[second_e]}_ZZ{qubits[first_e]}'
+        # if waveform not in self.envelopes:
+        #     sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[second_e]], gen_ch=self.qubit_chs[qubits[second_e]])
+        #     self.add_gauss(ch=self.qubit_chs[qubits[second_e]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+        #     gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[second_e]]
+        # phase = self.deg2reg(-90, gen_ch=self.qubit_chs[second_e]) # +Y/2 -> 0+1
+        # self.setup_and_pulse(ch=self.qubit_chs[qubits[second_e]], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+        # self.sync_all()
 
         # self.X_pulse(q=0, play=True, pihalf=True, neg=True)
         # self.X_pulse(q=1, play=True)
@@ -615,8 +630,8 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         # self.X_pulse(q=1, special='pulseiq', play=True, **kwargs)
 
         # count_us = 0
-        # self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
-        # self.sync_all()
+        self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
+        self.sync_all()
 
         # waveform = f'qubit0_ZZ1'
         # freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[0], gen_ch=self.qubit_chs[0])
@@ -657,13 +672,13 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         # self.sync_all()
 
         # ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-        # waveform = f'qubit0_ZZ1'
-        # freq = self.freq2reg(self.cfg.device.qubit.f_ge[0] + ZZs[0, 1], gen_ch=self.qubit_chs[0])
-        # gain = self.cfg.device.qubit.pulses.pi_ge.gain[0] //2
-        # sigma_cycles = self.us2cycles(self.pi_sigmas_us[0], gen_ch=self.qubit_chs[0])
-        # self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-        # self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
-        # self.sync_all()
+        waveform = f'qubit2_ZZ1'
+        freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[2], gen_ch=self.qubit_chs[2])
+        gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[2] //2
+        sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[2], gen_ch=self.qubit_chs[2])
+        self.add_gauss(ch=self.qubit_chs[2], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+        self.setup_and_pulse(ch=self.qubit_chs[2], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[2]), gain=gain, waveform=waveform)
+        self.sync_all()
 
         # # init state: |1>|1>
         # self.Y_pulse(q=0, play=True)

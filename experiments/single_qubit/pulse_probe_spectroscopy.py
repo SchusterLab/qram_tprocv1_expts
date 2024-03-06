@@ -193,11 +193,17 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         if fit:
             plt.plot(xpts, signs[1]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgi"]))
             print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
+        # freq = 4386.167531612781
+        # shift = 0.494
+        # plt.axvline(freq, c='k', ls='--')
+        # plt.axvline(freq-shift, c='k', ls='--')
+        # plt.axvline(freq-2*shift, c='k', ls='--')
+        # plt.axvline(freq-3*shift, c='k', ls='--')
+        # plt.axvline(freq+shift, c='k', ls='--')
+        # plt.axvline(freq+2*shift, c='k', ls='--')
+        # plt.axvline(freq+3*shift, c='k', ls='--')
         plt.subplot(313, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
         plt.plot(xpts, data["avgq"][1:-1],'o-')
-        # plt.axvline(3476, c='k', ls='--')
-        # plt.axvline(3376+50, c='k', ls='--')
-        # plt.axvline(3376, c='k', ls='--')
         if fit:
             plt.plot(xpts, signs[2]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgq"]))
             # plt.axvline(3593.2, c='k', ls='--')

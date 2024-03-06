@@ -107,9 +107,9 @@ class ResonatorSpectroscopyExperiment(Experiment):
             if isinstance(data['fit'], (list, np.ndarray)):
                 f0, Qi, Qe, phi, scale, a0, slope = data['fit']
                 if 'lo' in self.cfg.hw:
-                    print(float(self.cfg.hw.lo.readout.frequency)*1e-6)
-                    print(self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit]))
-                    print(f0)
+                    print('lo freq', float(self.cfg.hw.lo.readout.frequency)*1e-6)
+                    print('mux mixer', self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit]))
+                    print('fit resonator freq', f0)
                     f0 = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + f0)
                 if verbose:
                     print(f'\nFreq with minimum transmission: {xdata[np.argmin(ydata)]}')
@@ -137,10 +137,11 @@ class ResonatorSpectroscopyExperiment(Experiment):
             xpts = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + data['xpts'][1:-1])
         else:
             xpts = data['xpts'][1:-1]
+        ydata = data['amps'][1:-1]
 
         plt.figure(figsize=(16,16))
         plt.subplot(311, title=f"Resonator Spectroscopy at gain {self.cfg.device.readout.gain[self.qubit]}",  ylabel="Amps [ADC units]")
-        plt.plot(xpts, data['amps'][1:-1],'o-')
+        plt.plot(xpts, ydata,'o-')
         if fit:
             plt.plot(xpts, fitter.hangerS21func_sloped(data["xpts"][1:-1], *data["fit"]))
         if findpeaks:
@@ -149,10 +150,20 @@ class ResonatorSpectroscopyExperiment(Experiment):
                 plt.axvline(peak[0], linestyle='--', color='0.2')
                 print(f'Found peak [MHz]: {peak[0]}')
         # plt.axvline(5787.75)
-        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.75), c='k', ls='--')
-        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.1), c='k', ls='--')
-        plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] - 0.8), c='k', ls='--') # |0>|1>
-        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband*(self.cfg.hw.soc.dacs.readout.mixer_freq + self.cfg.device.readout.frequency - 0.7), c='k', ls='--') # |0>|0+1>
+        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] + 0.75), c='k', ls='--')
+        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit]), c='k', ls='--')
+        # plt.axvline(float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + self.cfg.device.readout.frequency[self.qubit] - 0.8), c='k', ls='--') # |0>|1>
+
+        minfreq = xpts[np.argmin(ydata)]
+        plt.axvline(minfreq, c='k', ls='--') # |0>|1>
+        plt.axvline(minfreq-0.1, c='k', ls='--') # |0>|1>
+
+
+        f0, Qi, Qe, phi, scale, a0, slope = data['fit']
+        if 'lo' in self.cfg.hw:
+            f0 = float(self.cfg.hw.lo.readout.frequency)*1e-6 + self.cfg.device.readout.lo_sideband[self.qubit]*(self.cfg.hw.soc.dacs.readout.mixer_freq[self.qubit] + f0)
+        plt.axvline(f0, c='r', ls='--') # |0>|1>
+
 
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1],'o-')

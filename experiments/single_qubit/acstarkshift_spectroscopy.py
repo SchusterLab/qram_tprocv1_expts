@@ -108,7 +108,7 @@ class ACStarkShiftProgram(RAveragerProgram):
         # pump tone (always const pulse)
         if cfg.expt.pump_gain > 0:
             self.setup_and_pulse(ch=self.pump_ch, style="const", freq=self.f_pump, phase=0, gain=cfg.expt.pump_gain, length=self.pump_length_dac)
-        self.sync_all()
+        # self.sync_all()
 
         # self.setup_and_pulse(ch=self.qubit_ch, t=self.pump_length_dac - self.qubit_length_dac) # play qubit pulse at end of pump tone
         length = self.qubit_length_dac
