@@ -15,8 +15,7 @@
         0, 0, 0, 0.3147817524985885, 0], phase: [44.50689287543607, 0, 0, 0, 123.21716830983146,
         0], readout_length: [15.0, 5, 5, 5, 15.0, 5], relax_delay: [2000.0, 1000,
         1000, 1000, 2000.0, 1000], threshold: [7.511963737198698, 0, 0, 0, 11.580603832758069,
-        0], trig_offset: [150, 150, 150, 150, 150, 150]}}, hw: {soc: {adcs: {readout: {
-          ch: [0, 1, 1, 1, 1, 1]}}, dacs: {qubit: {ch: [0, 4, 4, 4, 4, 4], nyquist: [
-            2, 2, 2, 2, 2, 2], type: [full, full, full, full, full, full]}, readout: {
-          ch: [2, 6, 6, 6, 6, 6], nyquist: [2, 2, 2, 2, 2, 2], type: [full, full,
-            full, full, full, full]}}}}}
+        0], trig_offset: 150}}, hw: {soc: {adcs: {readout: {ch: [0, 1, 1, 1, 1, 1]}},
+      dacs: {qubit: {ch: [0, 4, 4, 4, 4, 4], nyquist: [2, 2, 2, 2, 2, 2], type: [
+            full, full, full, full, full, full]}, readout: {ch: [2, 6, 6, 6, 6, 6],
+          nyquist: [2, 2, 2, 2, 2, 2], type: [full, full, full, full, full, full]}}}}}

@@ -79,7 +79,8 @@ class T1Program(RAveragerProgram):
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
         
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=self.deg2reg(self.cfg.device.readout.phase + 180, gen_ch = self.res_ch), gain=cfg.device.readout.gain, length=self.readout_length_dac)
+        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=self.deg2reg(-self.cfg.device.readout.phase, gen_ch = self.res_ch), gain=cfg.device.readout.gain, length=self.readout_length_dac)
+
 
         self.sync_all(200)
 
@@ -143,6 +144,8 @@ class T1Experiment(Experiment):
         phases = np.angle(avgi+1j*avgq) # Calculating the phase        
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
+        current_time = current_time.encode('ascii','replace')
+
         data={'xpts': x_pts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases, 'time':current_time}
         self.data=data
         return data
@@ -244,10 +247,12 @@ class T1Continuous(Experiment):
         avgi = avgi[0][0]
         avgq = avgq[0][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
-        phases = np.angle(avgi+1j*avgq) # Calculating the phase        
+        phases = np.angle(avgi+1j*avgq) # Calculating the phase    
 
         now = datetime.now()
-        current_time = np.array([now.strftime("%H:%M:%S")])
+        current_time = now.strftime("%H:%M:%S")
+        current_time = current_time.encode('ascii','replace')
+
         data={'xpts': x_pts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases, 'time':current_time, 'raw_i': shots_i, 'raw_q': shots_q, 'raw_amps': np.abs(shots_i+1j*shots_q)}   
         
         self.data=data
