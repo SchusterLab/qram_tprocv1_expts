@@ -335,7 +335,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         for pulse_num in play_pulses:
             # 1. apply Eg-Gf with qDrive=2: gegg -> ggfg [path 1]
             if pulse_num == 1:
-                count_us = self.gegg_ggfg(count_us, pihalf=False)
+                count_us = self.gegg_ggfg(count_us, pihalf=False, sync_after=False)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
 
             # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]

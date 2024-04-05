@@ -101,6 +101,47 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
+        # add swap pulse
+        if 'apply_EgGf' in self.cfg.expt and self.cfg.expt.apply_EgGf:
+            assert 'qubits_EgGf' in self.cfg.expt
+            assert 'qDrive' in self.cfg.expt
+
+            qA, qB = self.cfg.expt.qubits_EgGf
+
+            qSort = qA
+            if qA == 1: qSort = qB
+            qDrive = 1
+            if 'qDrive' in self.cfg.expt and self.cfg.expt.qDrive is not None:
+                qDrive = self.cfg.expt.qDrive
+            qNotDrive = -1
+            if qA == qDrive: qNotDrive = qB
+            else: qNotDrive = qA
+            self.qDrive = qDrive
+            self.qNotDrive = qNotDrive
+            self.qSort = qSort
+
+            if qDrive == 1:
+                self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
+                self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
+                mixer_freqs = self.cfg.hw.soc.dacs.swap.mixer_freq
+                self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf[qSort], gen_ch=self.swap_chs[qSort])
+                self.gain_EgGf = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
+                self.type_EgGf = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
+                self.sigma_EgGf_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort], gen_ch=self.swap_chs[qSort])
+            else:
+                self.swap_chs = self.cfg.hw.soc.dacs.swap_Q.ch
+                self.swap_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
+                mixer_freqs = self.cfg.hw.soc.dacs.swap_Q.mixer_freq
+                self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=self.swap_chs[qSort])
+                self.gain_EgGf = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+                self.type_EgGf = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
+                self.sigma_EgGf_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort], gen_ch=self.swap_chs[qSort])
+            
+            if self.type_EgGf.lower() == "gauss" and self.sigma_EgGf_cycles > 0:
+                self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=self.sigma_EgGf_cycles, length=self.sigma_EgGf_cycles*4)
+            elif self.type_EgGf.lower() == "flat_top" and self.sigma_EgGf_cycles > 0:
+                self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=3, length=3*4)
+
         gen_chs = []
         
         # declare res dacs
@@ -150,7 +191,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
                 self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qSort], gen_ch=self.qubit_chs[qTest])
                 self.f_ge_init_reg = self.f_Q1_ZZ_reg[qSort] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
                 self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qSort] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
-                if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_Q1_ZZ_reg[qZZ] # freq we are trying to calibrate
+                if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_Q1_ZZ_reg[qSort] # freq we are trying to calibrate
             else:
                 self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qSort], gen_ch=self.qubit_chs[qTest])
                 self.f_ge_init_reg = self.f_Q_ZZ1_reg[qSort] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
@@ -233,6 +274,27 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if self.checkEF and self.pulse_ge:
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
             self.sync_all(0)
+        if 'apply_EgGf' in self.cfg.expt:
+            if self.type_EgGf == "gauss":
+                self.setup_and_pulse(ch=self.swap_chs[self.qSort], style="arb", freq=self.f_EgGf_reg, phase=0, gain=self.gain_EgGf, waveform="pi_EgGf_swap") #, phrst=1)
+            elif self.type_EgGf == 'flat_top':
+                sigma_ramp_cycles = 3
+                if 'sigma_ramp_cycles' in self.cfg.expt:
+                    sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
+                flat_length_cycles = self.sigma_EgGf_cycles - sigma_ramp_cycles*4
+                if flat_length_cycles >= 3:
+                    self.setup_and_pulse(
+                        ch=self.swap_chs[self.qSort],
+                        style="flat_top",
+                        freq=self.f_EgGf_reg,
+                        phase=0,
+                        gain=self.gain_EgGf,
+                        length=flat_length_cycles,
+                        waveform="pi_EgGf_swap",
+                    )
+            else: # const
+                self.setup_and_pulse(ch=self.swap_chs[self.qSort], style="const", freq=self.f_EgGf_reg, phase=0, gain=self.gain_EgGf, length=self.sigma_EgGf_cycles)
+            self.sync_all(5)
 
         if self.pi_test_sigma > 0:
             # print(self.f_pi_test_reg)
@@ -596,9 +658,9 @@ class AmplitudeRabiChevronExperiment(Experiment):
         plt.tight_layout()
         plt.show()
 
-        plt.plot(y_sweep, data['amps'][:,-1])
-        plt.title(f'Gain {x_sweep[-1]}')
-        plt.show()
+        # plt.plot(y_sweep, data['amps'][:,-1])
+        # plt.title(f'Gain {x_sweep[-1]}')
+        # plt.show()
 
         
     def save_data(self, data=None):

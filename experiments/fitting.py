@@ -11,6 +11,7 @@ If fitfunc is specified, uses R^2 to determine best fit.
 """
 def get_best_fit(data, fitfunc=None, prefixes=['fit'], check_measures=('amps', 'avgi', 'avgq'), get_best_data_params=(), override=None):
     fit_errs = [data[f'{prefix}_err_{check}'] for check in check_measures for prefix in prefixes]
+    all_check_measures = [f'{prefix}_err_{check}' for check in check_measures for prefix in prefixes]
 
     # fix the error matrix so "0" error is adjusted to inf
     for fit_err_check in fit_errs:
@@ -19,12 +20,11 @@ def get_best_fit(data, fitfunc=None, prefixes=['fit'], check_measures=('amps', '
 
     fits = [data[f'{prefix}_{check}'] for check in check_measures for prefix in prefixes]
 
-    if override is not None and override in check_measures:
-        i_best = np.argwhere(np.array(check_measures) == override)[0][0]
-        print(i_best)
+    if override is not None and override in all_check_measures:
+        i_best = np.argwhere(np.array(all_check_measures) == override)[0][0]
     else:
         if fitfunc is not None:
-            ydata = [data[check] for check in check_measures]  # need to figure out how to make this support multiple qubits readout
+            ydata = [data[check] for check in all_check_measures]  # need to figure out how to make this support multiple qubits readout
             xdata = data['xpts']
 
             # residual sum of squares
@@ -50,11 +50,14 @@ def get_best_fit(data, fitfunc=None, prefixes=['fit'], check_measures=('amps', '
             # print(errs)
             i_best = np.argmin(errs)
             # print(i_best)
+    print(i_best)
 
     best_data = [fits[i_best], fit_errs[i_best]]
-    best_meas = check_measures[i_best]
 
     for param in get_best_data_params:
+        assert len(fit_errs) == len(check_measures), 'this is a pathological use of this function anyway, so just restrict to these cases'
+        # best_meas = all_check_measures[i_best]
+        best_meas = check_measures[i_best]
         best_data.append(data[f'{param}_{best_meas}'])
     return best_data
 
@@ -449,3 +452,68 @@ def adiabatic_iqamp(t, amp_max, mu, beta, period):
     iamp = amp * (np.cos(phase) + 1j*np.sin(phase))
     qamp = amp * (-np.sin(phase) + 1j*np.cos(phase))
     return np.real(iamp), np.real(qamp)
+
+# ====================================================== #
+# Correcting for over/under rotation
+# delta: angle error in degrees
+
+def probg_Xhalf(n, *p):
+    a, delta = p
+    delta = delta * np.pi/180
+    return a + (0.5 * (-1)**n * np.cos(np.pi/2 + 2*n*delta))
+
+
+def probg_X(n, *p):
+    a, delta = p
+    delta = delta * np.pi/180
+    return a + (0.5 * np.cos(np.pi/2 + 2*n*delta))
+
+
+def fit_probg_Xhalf(xdata, ydata, fitparams=None):
+    if fitparams is None: fitparams = [None]*2
+    else: fitparams = np.copy(fitparams)
+    if fitparams[0] is None: fitparams[0]=np.average(ydata)
+    if fitparams[1] is None: fitparams[1]=0.0
+    bounds = (
+        [min(ydata), -20.0],
+        [max(ydata), 20.0],
+        )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(f'Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}')
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(probg_Xhalf, xdata, ydata, p0=fitparams, bounds=bounds)
+        # return pOpt, pCov
+    except RuntimeError: 
+        print('Warning: fit failed!')
+        # return 0, 0
+    return pOpt, pCov
+
+
+def fit_probg_X(xdata, ydata, fitparams=None):
+    if fitparams is None: fitparams = [None]*2
+    else: fitparams = np.copy(fitparams)
+    if fitparams[0] is None: fitparams[0]=np.average(ydata)
+    if fitparams[1] is None: fitparams[1]=0.0
+    bounds = (
+        [min(ydata), -20.0],
+        [max(ydata), 20.0],
+        )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(f'Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}')
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(probg_X, xdata, ydata, p0=fitparams, bounds=bounds)
+        # return pOpt, pCov
+    except RuntimeError: 
+        print('Warning: fit failed!')
+        # return 0, 0
+    return pOpt, pCov
+
+    

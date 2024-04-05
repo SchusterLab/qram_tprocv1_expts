@@ -1,12 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm_notebook as tqdm
+from copy import deepcopy
 
 from qick import *
 from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 
 import experiments.fitting as fitter
+from experiments.single_qubit.single_shot import hist
+from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts
 
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
@@ -33,11 +36,12 @@ class LengthRabiProgram(AveragerProgram):
         self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         self.qubits = self.cfg.expt.qubits
         
-        if self.checkZZ:
+        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
             assert len(self.qubits) == 2
-            qA, qTest = self.qubits
-            assert qA != 1
-            assert qTest == 1
+            assert 1 in self.qubits
+            qZZ, qTest = self.qubits
+            qSort = qZZ # qubit by which to index for parameters on qTest
+            if qZZ == 1: qSort = qTest
         else: qTest = self.qubits[0]
 
         self.adc_chs = cfg.hw.soc.adcs.readout.ch
@@ -52,7 +56,9 @@ class LengthRabiProgram(AveragerProgram):
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
-        if self.checkZZ: self.f_Q1_ZZ_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q1_ZZ]
+        if self.checkZZ:
+            if qTest == 1: self.f_Q1_ZZ_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q1_ZZ]
+            else: self.f_Q_ZZ1_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q_ZZ1]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
         self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
@@ -96,8 +102,10 @@ class LengthRabiProgram(AveragerProgram):
                 if self.swap_chs[q] not in self.gen_chs: 
                     self.declare_gen(ch=self.swap_chs[q], nqz=self.cfg.hw.soc.dacs.swap.nyquist[q], mixer_freq=mixer_freq)
 
-        # define pi_test_sigma as the pulse that we are calibrating with ramsey, update in outer loop over averager program
+        # define pi_test_sigma as the pulse that we are calibrating, update in outer loop over averager program
         self.pi_test_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest])
+        if 'test_pi_half' in self.cfg.expt and self.cfg.expt.test_pi_half:
+            self.pi_test_sigma = self.pi_test_sigma // 2
         self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
         if 'gain' in self.cfg.expt: self.gain_pi_test = self.cfg.expt.gain 
         else: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.gain[qTest] # gain of the pulse we are trying to calibrate
@@ -106,21 +114,29 @@ class LengthRabiProgram(AveragerProgram):
         self.f_ge_init_reg = self.f_ge_reg[qTest]
         self.gain_ge_init = self.cfg.device.qubit.pulses.pi_ge.gain[qTest]
         if self.checkZZ:
-            self.pisigma_ge_qA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
-            self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qA], gen_ch=self.qubit_chs[qTest])
-            self.f_ge_init_reg = self.f_Q1_ZZ_reg[qA] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
-            self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
-            self.f_pi_test_reg = self.f_Q1_ZZ_reg[qA] - 1 # freq we are trying to calibrate
-            if 'gain' not in self.cfg.expt: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qA] # gain of the pulse we are trying to calibrate
+            self.pisigma_ge_qZZ = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qZZ], gen_ch=self.qubit_chs[qZZ])
+            if qTest == 1:
+                self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qSort], gen_ch=self.qubit_chs[qTest])
+                self.f_ge_init_reg = self.f_Q1_ZZ_reg[qSort] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
+                self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qSort] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
+                if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_Q1_ZZ_reg[qSort] # freq we are trying to calibrate
+                if 'gain' not in self.cfg.expt: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qSort] # gain of the pulse we are trying to calibrate
+            else:
+                self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qSort], gen_ch=self.qubit_chs[qTest])
+                self.f_ge_init_reg = self.f_Q_ZZ1_reg[qSort] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
+                self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qSort] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
+                if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_Q_ZZ1_reg[qSort] # freq we are trying to calibrate
+                if 'gain' not in self.cfg.expt: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qSort] # gain of the pulse we are trying to calibrate
         if self.checkEF:
             self.f_pi_test_reg = self.f_ef_reg[qTest] # freq we are trying to calibrate
             if 'gain' not in self.cfg.expt: self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.gain[qTest] # gain of the pulse we are trying to calibrate
+
 
         # add qubit pulses to respective channels
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test", sigma=self.pi_test_sigma, length=self.pi_test_sigma*4)
         if self.checkZZ:
-            self.add_gauss(ch=self.qubit_chs[qA], name="pi_qubitA", sigma=self.pisigma_ge_qA, length=self.pisigma_ge_qA*4)
+            self.add_gauss(ch=self.qubit_chs[qZZ], name="pi_qubitA", sigma=self.pisigma_ge_qZZ, length=self.pisigma_ge_qZZ*4)
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
@@ -130,6 +146,9 @@ class LengthRabiProgram(AveragerProgram):
                 if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
                 else: assert False, 'not implemented'
+        if 'n_pulses' in self.cfg.expt and self.cfg.expt.n_pulses is not None: # add pihalf initialization pulse for error amplification
+            self.pi_test_half_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest]) // 2
+            self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test_half", sigma=self.pi_test_half_sigma, length=self.pi_test_half_sigma*4)
 
 
         # add readout pulses to respective channels
@@ -142,7 +161,7 @@ class LengthRabiProgram(AveragerProgram):
     
     def body(self):
         cfg=AttrDict(self.cfg)
-        if self.checkZZ: qA, qTest = self.qubits
+        if self.checkZZ: qZZ, qTest = self.qubits
         else: qTest = self.qubits[0]
 
         # Phase reset all channels
@@ -170,7 +189,7 @@ class LengthRabiProgram(AveragerProgram):
 
         # initializations as necessary
         if self.checkZZ:
-            self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qubitA")
+            self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.f_ge_reg[qZZ], gain=cfg.device.qubit.pulses.pi_ge.gain[qZZ], waveform="pi_qubitA")
             self.sync_all(5)
         if self.checkEF and self.pulse_ge:
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
@@ -178,16 +197,20 @@ class LengthRabiProgram(AveragerProgram):
 
         # play pi pulse that we want to calibrate
         if self.pi_test_sigma > 0:
-            # print(self.pi_test_sigma, self.gain_pi_test)
-            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test") #, phrst=1)
-            # pass
-        self.sync_all(5)
+            if 'n_pulses' in self.cfg.expt and self.cfg.expt.n_pulses is not None:
+                n_pulses = self.cfg.expt.n_pulses
+                self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test_half")
+                self.sync_all()
+            else: n_pulses = 0.5
+            for i in range(int(2*n_pulses)):
+                self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi_test")
+                self.sync_all()
 
         if self.checkEF: # map excited back to qubit ground state for measurement
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
 
         # align channels and measure
-        self.sync_all(5)
+        self.sync_all()
         self.measure(
             pulse_ch=self.res_chs[qTest], 
             adcs=[self.adc_chs[qTest]],
@@ -195,7 +218,53 @@ class LengthRabiProgram(AveragerProgram):
             wait=True,
             syncdelay=self.us2cycles(cfg.device.readout.relax_delay[qTest])
         )
-        
+
+    """
+    If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
+    If post_process == 'scale': uses angle + ge_avgs to scale the average of all shots on a scale of 0 to 1. ge_avgs should be of shape (num_total_qubits, 4) and should represent the pre-rotation Ig, Qg, Ie, Qe
+    If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
+    """
+    def acquire_rotated(self, soc, progress, angle=None, threshold=None, ge_avgs=None, post_process=None, verbose=False):
+        avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
+        if post_process == None: 
+            avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
+            if angle is None: return avgi_rot, avgq_rot
+            else: return avgi_rot, avgi_err
+        elif post_process == 'threshold':
+            assert threshold is not None
+            popln, avgq_rot, popln_err, avgq_err = self.get_shots(angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, return_err=True)
+            return popln, popln_err
+        elif post_process == 'scale':
+            assert ge_avgs is not None
+            avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
+
+            ge_avgs_rot = [None]*4
+            for q, angle_q in enumerate(angle):
+                if not isinstance(ge_avgs[q], (list, np.ndarray)): continue # this qubit was not calibrated
+                Ig_q, Qg_q, Ie_q, Qe_q = ge_avgs[q]
+                ge_avgs_rot[q] = [
+                    Ig_q*np.cos(np.pi/180*angle_q) - Qg_q*np.sin(np.pi/180*angle_q),
+                    Ie_q*np.cos(np.pi/180*angle_q) - Qe_q*np.sin(np.pi/180*angle_q)
+                ]
+            shape = None
+            for q in range(4):
+                if ge_avgs_rot[q] is not None:
+                    shape = np.shape(ge_avgs_rot[q])
+                    break
+            for q in range(4):
+                if ge_avgs_rot[q] is None: ge_avgs_rot[q] = np.zeros(shape=shape)
+                
+            ge_avgs_rot = np.asarray(ge_avgs_rot)
+            avgi_rot -= ge_avgs_rot[:,0]
+            avgi_rot /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
+            avgi_err /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
+            return avgi_rot, avgi_err
+        else:
+            assert False, 'Undefined post processing flag, options are None, threshold, scale'
+
+
+# ====================================================== #
+
 class LengthRabiExperiment(Experiment):
     """
     Length Rabi Experiment
@@ -207,9 +276,9 @@ class LengthRabiExperiment(Experiment):
         reps: number of reps,
         gain: gain to use for the qubit pulse
         pulse_type: 'gauss' or 'const'
-        checkZZ: True/False for putting another qubit in e (specify as qA)
+        checkZZ: True/False for putting another qubit in e (specify as qZZ)
         checkEF: does ramsey on the EF transition instead of ge
-        qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qA in e , qB sweeps length rabi]
+        qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
     )
     """
 
@@ -330,6 +399,268 @@ class LengthRabiExperiment(Experiment):
             print(f'Pi/2 length from avgq data [us]: {pi2_length}')
             plt.axvline(pi_length*1e3, color='0.2', linestyle='--')
             plt.axvline(pi2_length*1e3, color='0.2', linestyle='--')
+        plt.tight_layout()
+        plt.show()
+
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
+        super().save_data(data=data)
+        return self.fname
+
+# ====================================================== #
+
+class NPulseExperiment(Experiment):
+    """
+    Play a pi/2 or pi pulse variable N times 
+    Experimental Config
+    expt = dict(
+        start: start N [us],
+        step
+        expts 
+        reps: number of reps,
+        gain: gain to use for the calibration pulse (uses config value by default, calculated based on flags)
+        pulse_type: 'gauss' or 'const' (uses config value by default)
+        checkZZ: True/False for putting another qubit in e (specify as qZZ)
+        checkEF: does ramsey on the EF transition instead of ge
+        qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
+        test_pi_half: calibrate the pi/2 instead of pi pulse by dividing length cycles // 2
+    )
+    """
+
+    def __init__(self, soccfg=None, path='', prefix='NPulseExpt', config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=False, debug=True):
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+
+        cycles = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
+
+        data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[], 'counts_calib':[]}
+
+        self.checkZZ = self.cfg.expt.checkZZ
+        self.checkEF = self.cfg.expt.checkEF
+        self.qubits = self.cfg.expt.qubits
+        
+        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
+            assert len(self.qubits) == 2
+            assert 1 in self.qubits
+            qZZ, qTest = self.qubits
+            qSort = qZZ # qubit by which to index for parameters on qTest
+            if qZZ == 1: qSort = qTest
+            self.qZZ = qZZ
+        else: qTest = self.qubits[0]
+        self.qTest = qTest
+
+        # ================= #
+        # Get single shot calibration for 1 qubit
+        # ================= #
+        thresholds_q = ge_avgs_q = angles_q = fids_q = None
+        if 'post_process' not in self.cfg.expt.keys(): # threshold or scale
+            self.cfg.expt.post_process = None
+            assert False, "you probably want to be doing this experiment with post processing or the fit will be weird"
+
+        if self.cfg.expt.post_process is not None:
+            if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt and self.cfg.expt.angles is not None and self.cfg.expt.thresholds is not None and self.cfg.expt.ge_avgs is not None and self.cfg.expt.counts_calib is not None:
+                angles_q = self.cfg.expt.angles
+                thresholds_q = self.cfg.expt.thresholds
+                ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
+                data['counts_calib'] = self.cfg.expt.counts_calib
+                print('Re-using provided angles, thresholds, ge_avgs')
+            else:
+                thresholds_q = [0]*4
+                ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+                angles_q = [0]*4
+                fids_q = [0]*4
+
+                # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = sscfg.expt.singleshot_reps
+                sscfg.expt.tomo_qubits = [qTest, (qTest+1)%4]
+
+                calib_prog_dict = dict()
+                calib_order = ['gg', 'eg']
+                for prep_state in tqdm(calib_order):
+                    # print(prep_state)
+                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
+                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                    calib_prog_dict.update({prep_state:err_tomo})
+
+                g_prog = calib_prog_dict['gg']
+                Ig, Qg = g_prog.get_shots(verbose=False)
+
+                # Get readout angle + threshold for qubits
+                e_prog = calib_prog_dict['eg']
+                Ie, Qe = e_prog.get_shots(verbose=False)
+                shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
+                print(f'Qubit  ({qTest})')
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                thresholds_q[qTest] = threshold[0]
+                ge_avgs_q[qTest] = [np.average(Ig[qTest]), np.average(Qg[qTest]), np.average(Ie[qTest]), np.average(Qe[qTest])]
+                angles_q[qTest] = angle
+                fids_q[qTest] = fid[0]
+                print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[qTest]} \t threshold ge: {thresholds_q[qTest]}')
+
+
+                # Process the shots taken for the confusion matrix with the calibration angles
+                for prep_state in calib_order:
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    data['counts_calib'].append(counts)
+
+                if debug:
+                    print(f'thresholds={thresholds_q},')
+                    print(f'angles={angles_q},')
+                    print(f'ge_avgs={ge_avgs_q},')
+                    print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
+
+            data['thresholds'] = thresholds_q
+            data['angles'] = angles_q
+            data['ge_avgs'] = ge_avgs_q
+            data['counts_calib'] = np.array(data['counts_calib'])
+
+        # ================= #
+        # Begin actual experiment
+        # ================= #
+        # define as the length for the pi pulse ** this is still the specification even when calibrating the pi/2 pulse
+        length = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest] # length of pulse whose error we are trying to find
+        if self.checkZZ:
+            if qTest == 1: length = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qSort]
+            else: length = self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qSort]
+        if self.checkEF:
+            length = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
+
+        self.cfg.expt.length_placeholder = float(length)
+
+        if 'loops' not in self.cfg.expt: self.cfg.expt.loops = 1
+        for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
+            for n_cycle in tqdm(cycles, disable=not progress or self.cfg.expt.loops > 1):
+
+                self.cfg.expt.n_pulses = n_cycle
+                lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
+                self.prog = lengthrabi
+                avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
+                avgi = avgi[0][0]
+                avgq = avgq[0][0]
+                amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
+                phase = np.angle(avgi+1j*avgq) # Calculating the phase
+                data["avgi"].append(avgi)
+                data["avgq"].append(avgq)
+                data["amps"].append(amp)
+                data["phases"].append(phase)
+        data["xpts"] = cycles
+
+        for k, a in data.items():
+            data[k]=np.array(a)
+
+        data['avgi'] = np.average(np.reshape(data['avgi'], (self.cfg.expt.loops, len(cycles))), axis=0)
+        data['avgq'] = np.average(np.reshape(data['avgq'], (self.cfg.expt.loops, len(cycles))), axis=0)
+        data['amps'] = np.average(np.reshape(data['amps'], (self.cfg.expt.loops, len(cycles))), axis=0)
+        data['phases'] = np.average(np.reshape(data['phases'], (self.cfg.expt.loops, len(cycles))), axis=0)
+
+        self.data = data
+
+        return data
+
+    def analyze(self, data=None, fit=True, scale=None):
+        # scale should be [Ig, Qg, Ie, Qe] single shot experiment
+        if data is None:
+            data=self.data
+        if fit:
+            xdata = data['xpts']
+            fitparams = None
+            if self.cfg.expt.test_pi_half: fit_fitfunc = fitter.fit_probg_Xhalf
+            else: fit_fitfunc = fitter.fit_probg_X
+            if scale is not None:
+                Ig, Qg, Ie, Qe = scale[self.qTest]
+                reformatted_scale = [(Ig, Ie), (Qg, Qe), (np.abs(Ig+1j*Qg), np.abs(Ie+1j*Qe))]
+            for fit_i, fit_axis in enumerate(['avgi', 'avgq', 'amps']):
+                if scale is not None:
+                    g_avg, e_avg = reformatted_scale[fit_i]
+                    fit_data = (data[fit_axis] - g_avg) / (e_avg - g_avg)
+                p, pCov = fit_fitfunc(xdata, fit_data, fitparams=fitparams)
+                data[f'fit_{fit_axis}'] = p
+                data[f'fit_err_{fit_axis}'] = pCov
+        return data
+
+    def display(self, data=None, fit=True, scale=None):
+        if data is None:
+            data=self.data 
+
+        xdata = data['xpts']
+        if self.cfg.expt.test_pi_half: fit_func = fitter.probg_Xhalf
+        else: fit_func = fitter.probg_X
+
+        title = f"Angle Error Q{self.qTest}" + (f' ZZ Q{self.qZZ}' if self.checkZZ else '') + (' EF' if self.checkEF else '') + (' $\pi/2$' if self.cfg.expt.test_pi_half else ' $\pi$')
+
+        if scale is not None:
+            Ig, Qg, Ie, Qe = scale[self.qTest]
+            reformatted_scale = [(Ig, Ie), (Qg, Qe), (np.abs(Ig+1j*Qg), np.abs(Ie+1j*Qe))]
+
+        plt.figure(figsize=(10, 5))
+        label = '($X_{\pi/2}, X_{'+ ('\pi' if not self.cfg.expt.test_pi_half else '\pi/2') + '}^{2n}$)'
+        plt.subplot(111, title=title, xlabel=f"Number repeated gates {label} [n]", ylabel="Amplitude (scaled)")
+        plot_data = data['amps']
+        if scale is not None:
+            g_avg, e_avg = reformatted_scale[2]
+            plot_data = (plot_data - g_avg) / (e_avg - g_avg)
+        plt.plot(xdata, plot_data,'o-')
+        if fit:
+            p = data['fit_amps']
+            pCov = data['fit_err_amps']
+            captionStr = f'$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}'
+            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
+            plt.legend()
+            if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
+            else: amp_ratio = (180 - p[1])/180
+            print(f'From amps: adjust amplitude to (current gain) / {amp_ratio}')
+        plt.show()
+
+        plt.figure(figsize=(10,8))
+        if 'gain' in self.cfg.expt: gain = self.cfg.expt.gain
+        else: gain = self.cfg.device.qubit.pulses.pi_ge.gain[self.cfg.expt.qubits[-1]] # gain of the pulse we are trying to calibrate
+        plt.subplot(211, title=title, ylabel="I (scaled)")
+        plot_data = data['avgi']
+        if scale is not None:
+            g_avg, e_avg = reformatted_scale[0]
+            plot_data = (plot_data - g_avg) / (e_avg - g_avg)
+        plt.plot(xdata, plot_data,'o-')
+        if fit:
+            p = data['fit_avgi']
+            pCov = data['fit_err_avgi']
+            captionStr = f'$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}'
+            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
+            plt.legend()
+            if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
+            else: amp_ratio = (180 - p[1])/180
+            print(f'From avgi: adjust amplitude to (current gain) / {amp_ratio}')
+        print()
+        
+        label = '($X_{\pi/2}, X_{'+ ('\pi' if not self.cfg.expt.test_pi_half else '\pi/2') + '}^{2n}$)'
+        plt.subplot(212, xlabel=f"Number repeated gates {label} [n]", ylabel="Q (scaled)")
+        plot_data = data['avgq']
+        if scale is not None:
+            g_avg, e_avg = reformatted_scale[1]
+            plot_data = (plot_data - g_avg) / (e_avg - g_avg)
+        plt.plot(xdata, plot_data,'o-')
+        if fit:
+            p = data['fit_avgq']
+            pCov = data['fit_err_avgq']
+            captionStr = f'$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}'
+            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
+            plt.legend()
+            if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
+            else: amp_ratio = (180 - p[1])/180
+            print(f'From avgq: adjust amplitude to (current gain) / {amp_ratio}')
         plt.tight_layout()
         plt.show()
 
