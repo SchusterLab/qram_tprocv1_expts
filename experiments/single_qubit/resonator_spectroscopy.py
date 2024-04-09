@@ -183,7 +183,7 @@
 #         self.qubit = self.cfg.expt.qubit
 #         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
 #         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
-#             for key, value in subcfg.items() :
+#             for key, value in subcfg.itFpoems() :
 #                 if isinstance(value, dict):
 #                     for key2, value2 in value.items():
 #                         if isinstance(value2, dict):
@@ -428,6 +428,7 @@ import time
 from qick import *
 from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
+from scipy.signal import find_peaks
 
 import experiments.fitting as fitter
 
@@ -654,7 +655,9 @@ class ResonatorSpectroscopyExperiment(Experiment):
         if coarse_scan: 
             xdata = data["xpts"][1:-1]
             ydata = data['amps'][1:-1]
-            coarse_peaks = find_peaks(-ydata, distance=100, prominence= 0.9, width=3, threshold = 0.9, rel_height=1)  
+            #coarse_peaks = find_peaks(-ydata, distance=100, prominence= 0.99, width=3, threshold = 0.9, rel_height=1) 
+            coarse_peaks = find_peaks(-ydata, distance=100, prominence=0.9, width=2, threshold=0.2, rel_height=0.35)
+
             data['coarse_peaks_index'] = coarse_peaks 
             data['coarse_peaks'] = xdata[coarse_peaks[0]]
         return data
