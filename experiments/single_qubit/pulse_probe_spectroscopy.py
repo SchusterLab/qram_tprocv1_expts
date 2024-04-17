@@ -153,9 +153,13 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, signs=[1,1,1], **kwargs):
+    def analyze(self, data=None, fit=True, signs=[1,1,1], coarse=False, **kwargs):
         if data is None:
             data=self.data
+        if coarse:            
+            xval=data['xpts'][np.argmax(data['amps'])]
+            yval = data['amps'][np.argmax(data['amps'])]
+            data['fit_amps']=[xval, yval]
         if fit:
             xdata = data['xpts'][1:-1]
             data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*data['amps'][1:-1])
@@ -163,7 +167,7 @@ class PulseProbeSpectroscopyExperiment(Experiment):
             data['fit_avgq'], data['fit_err_avgq'] = fitter.fitlor(xdata, signs[2]*data['avgq'][1:-1])
         return data
 
-    def display(self, data=None, fit=True, signs=[1,1,1], **kwargs):
+    def display(self, data=None, fit=True, signs=[1,1,1], coarse=False, **kwargs):
         if data is None:
             data=self.data 
 
@@ -175,6 +179,9 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         plt.figure(figsize=(9, 11))
         plt.subplot(311, title=f"Qubit {self.cfg.expt.qubit} Spectroscopy (Gain {self.cfg.expt.gain})", ylabel="Amplitude [ADC units]")
         plt.plot(xpts, data["amps"][1:-1],'o-')
+        if coarse:
+            plt.plot(data['fit_amps'][0], data['fit_amps'][1], '.',color='r')
+            print(f'Found peak in amps at [MHz] {data["fit_amps"]}')
         if fit:
             plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))
             print(f'Found peak in amps at [MHz] {data["fit_amps"][2]}, HWHM {data["fit_amps"][3]}')
