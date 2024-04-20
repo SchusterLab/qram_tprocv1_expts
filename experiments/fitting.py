@@ -38,8 +38,7 @@ def get_best_fit(data, fitfunc=None, prefixes=['fit'], check_measures=('amps', '
             for icheck, fit_err_check in enumerate(fit_errs):
                 for i, fit_err in enumerate(np.diag(fit_err_check)):
                     if fit_err == np.inf: r2[icheck] = np.inf
-            i_best = np.argmin(r2)
-            
+            i_best = np.argmin(r2)            
         else:
             # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])
             # i_best = np.argmin([np.sqrt(np.abs(fit_err[compare_param_i][compare_param_i] / fit[compare_param_i])) for fit, fit_err in zip(fits, fit_errs)])

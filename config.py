@@ -1,5 +1,12 @@
 import yaml
 from slab import AttrDict
+from functools import reduce
+
+
+def nested_set(dic, keys, value):
+    for key in keys[:-1]:
+        dic = dic.setdefault(key, {})
+    dic[keys[-1]] = value
 
 def load(file_name):
     with open(file_name,'r') as file:
@@ -20,21 +27,35 @@ def save(cfg, file_name):
     
     return cfg
 
+
+def recursive_get(d, keys):
+    return reduce(lambda c, k: c.get(k, {}), keys, d)
+
 def update_qubit(file_name, field, value, qubit_i, verbose=True):
     cfg=load(file_name)
-    cfg['device']['qubit'][field][qubit_i] = value
+    if isinstance(field, tuple):
+        v=recursive_get(cfg['device']['qubit'], field)
+        old_value=v[qubit_i]
+        v[qubit_i]=value
+        nested_set(cfg['device']['qubit'], field, v)
+        if verbose: 
+            print(f'*Set cfg qubit {qubit_i} {field} to {value} from {old_value}*')
+    else:
+        old_value = cfg['device']['qubit'][field][qubit_i]
+        cfg['device']['qubit'][field][qubit_i] = value
+        if verbose: 
+            print(f'*Set cfg qubit {qubit_i} {field} to {value} from {old_value}*')
     save(cfg, file_name)
-    if verbose: 
-        print(f'*Set cfg qubit {qubit_i} {field} to {value}*')
 
     return cfg 
 
 def update_readout(file_name, field, value, qubit_i, verbose=True):
     cfg=load(file_name)
+    old_value = cfg['device']['readout'][field][qubit_i]
     cfg['device']['readout'][field][qubit_i] = value
     save(cfg, file_name)
 
-    print(f'*Set cfg resonator {qubit_i} {field} to {value}*')
+    print(f'*Set cfg resonator {qubit_i} {field} to {value} from {old_value}*')
     return cfg 
 
 def init_config(file_name, num_qubits):

@@ -360,4 +360,111 @@ class HistogramExperiment(Experiment):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
 
+
+
 # ====================================================== #
+class SingleShotOptExperiment(Experiment):
+    """
+    Single Shot optimization experiment over readout parameters
+    expt = dict(
+        reps: number of shots per expt
+        start_f: start frequency (MHz)
+        step_f: frequency step (MHz)
+        expts_f: number of experiments in frequency
+
+        start_gain: start gain (dac units)
+        step_gain: gain step (dac units)
+        expts_gain: number of experiments in gain sweep
+
+        start_len: start readout len (dac units)
+        step_len: length step (dac units)
+        expts_len: number of experiments in length sweep
+
+        check_f: optimize fidelity for g/f (as opposed to g/e)
+    )
+    """
+
+    def __init__(self, soccfg=None, path='', prefix='Histogram', config_file=None, progress=None):
+        super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=True):
+        fpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"]*np.arange(self.cfg.expt["expts_f"])
+        gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"]*np.arange(self.cfg.expt["expts_gain"])
+        lenpts = self.cfg.expt["start_len"] + self.cfg.expt["step_len"]*np.arange(self.cfg.expt["expts_len"])
+        # print(fpts)
+        # print(gainpts)
+        # print(lenpts)
+        
+        fid = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
+        threshold = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
+        angle = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
+
+        qubit = self.cfg.expt.qubit
+
+        for f_ind, f in enumerate(tqdm(fpts, disable=not progress)):
+            for g_ind, gain in enumerate(gainpts):
+                for l_ind, l in enumerate(lenpts):
+                    shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
+                    shot.cfg = self.cfg
+                    shot.cfg.device.readout.frequency[qubit] = f
+                    shot.cfg.device.readout.gain[qubit] = gain
+                    shot.cfg.device.readout.readout_length = l 
+                    check_e = True
+                    if 'check_f' not in self.cfg.expt: check_f = False
+                    else:
+                        check_f = self.cfg.expt.check_f
+                        check_e = not check_f
+                    shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_e=check_e, check_f=check_f, qubit=self.cfg.expt.qubit)
+                    shot.go(analyze=False, display=False, progress=True, save=False)
+                    results = shot.analyze(verbose=False)
+                    fid[f_ind, g_ind, l_ind] = results['fids'][0] if not check_f else results['fids'][1]
+                    threshold[f_ind, g_ind, l_ind] = results['thresholds'][0] if not check_f else results['thresholds'][1]
+                    angle[f_ind, g_ind, l_ind] = results['angle']
+                    # print(f'freq: {f}, gain: {gain}, len: {l}')
+                    # print(f'\tfid ge [%]: {100*results["fids"][0]}')
+                    if check_f: print(f'\tfid gf [%]: {100*results["fids"][1]}')
+
+        self.data = dict(fpts=fpts, gainpts=gainpts, lenpts=lenpts, fid=fid, threshold=threshold, angle=angle)
+        return self.data
+
+    def analyze(self, data=None, **kwargs):
+        if data == None: data = self.data
+        fid = data['fid']
+        threshold = data['threshold']
+        angle = data['angle']
+        fpts = data['fpts']
+        gainpts = data['gainpts']
+        lenpts = data['lenpts']
+
+        imax = np.unravel_index(np.argmax(fid), shape=fid.shape)
+        print(imax)
+        print(fpts)
+        print(gainpts)
+        print(lenpts)
+        print(f'Max fidelity {100*fid[imax]} %')
+        print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
+
+        return imax
+
+    def display(self, data=None, **kwargs):
+        if data is None:
+            data=self.data 
+        
+        fid = data['fid']
+        fpts = data['fpts'] # outer sweep, index 0
+        gainpts = data['gainpts'] # middle sweep, index 1
+        lenpts = data['lenpts'] # inner sweep, index 2
+
+        # lenpts = [data['lenpts'][0]]
+        for g_ind, gain in enumerate(gainpts):
+            for l_ind, l in enumerate(lenpts):
+                plt.plot(fpts, 100*fid[:,g_ind, l_ind], 'o-', label=f'gain: {gain:.2}, len [us]: {l}')
+        plt.xlabel('Frequency [MHz]')
+        plt.ylabel(f'Fidelity [%]')
+        plt.legend()
+        plt.show()
+
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
+        super().save_data(data=data)
+        return self.fname
