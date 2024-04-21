@@ -92,10 +92,34 @@ def make_rpowspec(soc, expt_path, cfg_file, qubit_i, res_freq, span_f=5, npts_f=
     rpowspec.cfg.device.readout.readout_length = 5
     return rpowspec
 
-def make_qspec(soc, expt_path, cfg_path, qubit_i, span=None, npts=1500, reps=50, rounds=20, gain=None, coarse=True):
+def make_chi(soc, expt_path, cfg_file, qubit_i, span=3, npts=151, reps=3000):
+    rspec_chi = meas.ResonatorSpectroscopyExperiment(
+        soccfg=soc,
+        path=expt_path,
+        prefix=f"resonator_spectroscopy_chi_qubit{qubit_i}",
+        config_file=config_path,
+        )
 
-    if coarse is True and span is None:
-        span=700 
+    span = span # MHz
+    npts = npts
+    rspec_chi.cfg.expt = dict(
+        start=rspec_chi.cfg.device.readout.frequency[qubit_i]-span/2, # MHz
+        # start=rspec_chi.cfg.device.readout.frequency[qubit_i]-rspec_chi.cfg.device.readout.lo_sideband[qubit_i]*span, # MHz
+        step=span/npts,
+        expts=npts,
+        reps=reps,
+        pulse_e=True, # add ge pi pulse prior to measurement
+        pulse_f=False, # add ef pi pulse prior to measurement
+        qubit=qubit_i,
+    )
+    # rspec_chi.cfg.device.readout.relax_delay = 100 # Wait time between experiments [us]
+    rspec_chi.go(analyze=False, display=False, progress=True, save=False)
+    return rspec
+
+def make_qspec(soc, expt_path, cfg_path, qubit_i, span=None, npts=1500, reps=50, rounds=20, gain=None, coarse=False, ef=False):
+
+    if coarse and span is None:
+        span=800 
         prefix = f"qubit_spectroscopy_coarse_qubit{qubit_i}"
     elif span is None:
         span=3
@@ -103,8 +127,8 @@ def make_qspec(soc, expt_path, cfg_path, qubit_i, span=None, npts=1500, reps=50,
     else:
         prefix = f"qubit_spectroscopy_qubit{qubit_i}"
 
-    if coarse is True and gain is None: 
-        gain=1000
+    if coarse is True and gain is None:
+        gain=2000
     elif gain is None:
         gain=100
 
@@ -114,9 +138,19 @@ def make_qspec(soc, expt_path, cfg_path, qubit_i, span=None, npts=1500, reps=50,
     prefix = f"qubit_spectroscopy_coarse_qubit{qubit_i}",
     config_file=cfg_path,
     )
+    if ef:
+        freq = qspec.cfg.device.qubit.f_ef[qubit_i]
+        if coarse:
+            prefix = f"qubit_spectroscopy_qubit_coarse_ef{qubit_i}"
+            span=450
+        else:
+            prefix = f"qubit_spectroscopy_qubit_fine_ef{qubit_i}"
+    else:
+        freq = qspec.cfg.device.qubit.f_ge[qubit_i]
 
+    
     qspec.cfg.expt = dict(
-        start= qspec.cfg.device.qubit.f_ge[qubit_i]-span/2, # qubit frequency to be mixed up [MHz]
+        start= freq-span/2, # qubit frequency to be mixed up [MHz]
         step = span/npts, # min step ~1 Hz
         expts = npts, # Number experiments stepping from start
         reps = reps, # Number averages per point
@@ -156,7 +190,7 @@ def make_lengthrabi(soc, expt_path, cfg_path, qubit_i, npts = 200, reps = 1000, 
 
     return lengthrabi
 
-def make_amprabi(soc, expt_path, cfg_path, qubit_i, npts = 100, reps = 1000, rounds=1, gain=10000):
+def make_amprabi(soc, expt_path, cfg_path, qubit_i, npts = 100, reps = 1000, rounds=1, gain=15000):
     #auto_cfg.device.qubit.pulses.pi_ge.gain[qubit_i]
     amprabi = meas.AmplitudeRabiExperiment(
         soccfg=soc,
@@ -182,7 +216,7 @@ def make_amprabi(soc, expt_path, cfg_path, qubit_i, npts = 100, reps = 1000, rou
     )
     return amprabi
 
-def make_t2r(soc, expt_path, cfg_path, qubit_i, npts = 350, reps = 400, rounds=2, step=0.1, ramsey_freq=0.1):
+def make_t2r(soc, expt_path, cfg_path, qubit_i, npts = 300, reps = 200, rounds=2, step=0.5, ramsey_freq=0.1):
     t2r = meas.RamseyExperiment(
         soccfg=soc,
         path=expt_path,
@@ -205,7 +239,32 @@ def make_t2r(soc, expt_path, cfg_path, qubit_i, npts = 350, reps = 400, rounds=2
 
     return t2r
 
-def make_t1(soc, expt_path, cfg_path, qubit_i,span=600, npts=200, reps=1000, rounds=1):
+def make_t2e(soc, expt_path, cfg_path, qubit_i, npts = 201, reps = 100, rounds=20, ramsey_freq=2, short_T1=False):
+
+    t2e = meas.RamseyEchoExperiment(
+        soccfg=soc,
+        path=expt_path,
+        prefix=f"echo_qubit{qubit_i}",
+        config_file=config_path,
+        )
+
+    t2e.cfg.expt = dict(
+        start=0, # total wait time b/w the two pi/2 pulses [us]
+        # step=soc.cycles2us(80), # make sure nyquist freq = 0.5*(1/step) > ramsey (signal) freq!
+        step=soc.cycles2us(3) if short_T1 else soc.cycles2us(150), # [us] 
+        expts=npts,
+        ramsey_freq=ramsey_freq, # frequency by which to advance phase [MHz]
+        num_pi=1, # number of pi pulses
+        cpmg=True, # set either cp or cpmg to True
+        cp=False, # set either cp or cpmg to True
+        reps=reps,
+        rounds=rounds,
+        qubit=qubit_i,
+    )
+    t2e.go(analyze=True, display=True, progress=True, save=True)
+    return t2e
+
+def make_t1(soc, expt_path, cfg_path, qubit_i,span=600, npts=200, reps=500, rounds=1):
 
     t1 = meas.T1Experiment(
       soccfg=soc,
@@ -230,24 +289,24 @@ def make_t1(soc, expt_path, cfg_path, qubit_i,span=600, npts=200, reps=1000, rou
 
     return t1
 
-def make_t1_cont(soc, expt_path, cfg_path, qubit_i, reps=1000, rounds=1):
+def make_t1_cont(soc, expt_path, cfg_path, qubit_i, reps=2000000):
     t1_cont = meas.T1Continuous(
-            soccfg=soc,
-            path=expt_path,
-            prefix=f"t1_continuous_qubit{qubit_i}",
-            config_file= cfg_path,
-        )
+        soccfg=soc,
+        path=expt_path,
+        prefix=f"t1_continuous_qubit{qubit_i}",
+        config_file=cfg_path,
+    )
 
-    span = t1.cfg.expt.length_scan 
-    npts = t1.cfg.expt.num_saved_points #eventually need to change this to t1.cfg.expt.num_saved_points
+    span = t1_cont.cfg.device.qubit.T1[qubit_i]
+    npts = 1
 
     t1_cont.cfg.expt = dict(
-        start=0, # wait time [us]
-        step=int(span/npts), 
+        start=span / npts,  # wait time [us]
+        step=0,
         expts=npts,
-        reps=reps, # number of times we repeat a time point 
-        rounds=rounds, # number of start to finish sweeps to average over
-        qubit=qubit_i
+        reps= reps,  # number of times we repeat a time point
+        rounds=1,  # number of start to finish sweeps to average over
+        qubit=qubit_i,
     )
 
     return t1_cont
@@ -318,11 +377,6 @@ def make_amprabiEF(soc, expt_path, config_path, qubit_i, span=20000, npts=101, r
         pulse_type='gauss',
         # sigma_test=0.013, # gaussian sigma for pulse length - default from cfg [us]
         checkZZ=False,
-        # checkEF=True, 
-        # pulse_ge=True,
-        # cool_qubits=[1],
-        # cool_idle=9.1, # us
-        # check heating from swap
         checkEF=True, 
         pulse_ge=False,
         apply_EgGf=True,

@@ -6,6 +6,7 @@ from qick import *
 from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
 import time
+from scipy.signal import find_peaks
 
 import experiments.fitting as fitter
 
@@ -156,10 +157,15 @@ class PulseProbeSpectroscopyExperiment(Experiment):
     def analyze(self, data=None, fit=True, signs=[1,1,1], coarse=False, **kwargs):
         if data is None:
             data=self.data
-        if coarse:            
-            xval=data['xpts'][np.argmax(data['amps'])]
-            yval = data['amps'][np.argmax(data['amps'])]
-            data['fit_amps']=[xval, yval]
+        if coarse:
+            xdata = data['xpts'][1:-1]
+            coarse_peaks = find_peaks(data['amps'][1:-1], distance=50, prominence=3, width=[1,100])#, width=3, threshold=0.2, rel_height=0.3)            
+            data['coarse_peaks_x'] = xdata[coarse_peaks[0]]
+            data['coarse_peaks_y'] = data['amps'][coarse_peaks[0]]
+
+            #xval=data['xpts'][np.argmax(data['amps'])]
+            #yval = data['amps'][np.argmax(data['amps'])]
+            #data['fit_amps']=[xval, yval]
         if fit:
             xdata = data['xpts'][1:-1]
             data['fit_amps'], data['fit_err_amps'] = fitter.fitlor(xdata, signs[0]*data['amps'][1:-1])
@@ -180,8 +186,9 @@ class PulseProbeSpectroscopyExperiment(Experiment):
         plt.subplot(311, title=f"Qubit {self.cfg.expt.qubit} Spectroscopy (Gain {self.cfg.expt.gain})", ylabel="Amplitude [ADC units]")
         plt.plot(xpts, data["amps"][1:-1],'o-')
         if coarse:
-            plt.plot(data['fit_amps'][0], data['fit_amps'][1], '.',color='r')
-            print(f'Found peak in amps at [MHz] {data["fit_amps"]}')
+            for i in range(len(data['coarse_peaks_x'])):
+                plt.plot(data['coarse_peaks_x'][i], data['coarse_peaks_y'][i], '.',color='r')
+                print(f'Found peak in amps at [MHz] {data["coarse_peaks_x"][i]}')
         if fit:
             plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))
             print(f'Found peak in amps at [MHz] {data["fit_amps"][2]}, HWHM {data["fit_amps"][3]}')

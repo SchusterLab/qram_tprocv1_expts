@@ -252,6 +252,16 @@ class LengthRabiExperiment(Experiment):
             data['fit_err_avgi'] = pCov_avgi   
             data['fit_err_avgq'] = pCov_avgq
             data['fit_err_amps'] = pCov_amps
+
+            p = data['fit_avgi']     
+            if p[2] > 180: p[2] = p[2] - 360
+            elif p[2] < -180: p[2] = p[2] + 360
+            if p[2] < 0: 
+                pi_length = (1/2 - p[2]/180)/2/p[1]
+            else: 
+                pi_length= (3/2 - p[2]/180)/2/p[1]
+            data['pi_length']=pi_length
+        
         return data
 
     def display(self, data=None, fit=True, **kwargs):

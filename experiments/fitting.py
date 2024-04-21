@@ -145,17 +145,24 @@ def decaysin(x, *p):
     # x0 = 0
     return yscale * np.sin(2*np.pi*freq*x + phase_deg*np.pi/180) * np.exp(-(x-x0)/decay) + y0
 
-def fitdecaysin(xdata, ydata, fitparams=None):
+def fitdecaysin(xdata, ydata, fitparams=None, debug=False):
+    import matplotlib.pyplot as plt 
     if fitparams is None: fitparams = [None]*5
     fourier = np.fft.fft(ydata)
     fft_freqs = np.fft.fftfreq(len(ydata), d=xdata[1]-xdata[0])
     fft_phases = np.angle(fourier)
+    # if debug:
+    #     plt.figure()
+    #     plt.plot(fourier, fft_phases,'.')
+    #     plt.xlim([0,20])
+    #     print(max_phase)
     sorted_fourier = np.sort(fourier)
     max_ind = np.argwhere(fourier == sorted_fourier[-1])[0][0]
     if max_ind == 0:
         max_ind = np.argwhere(fourier == sorted_fourier[-2])[0][0]
     max_freq = np.abs(fft_freqs[max_ind])
     max_phase = fft_phases[max_ind]
+    
     if fitparams[0] is None: fitparams[0]=max(ydata)-min(ydata)
     if fitparams[1] is None: fitparams[1]=max_freq
     # if fitparams[2] is None: fitparams[2]=0
@@ -176,9 +183,16 @@ def fitdecaysin(xdata, ydata, fitparams=None):
         pOpt, pCov = sp.optimize.curve_fit(decaysin, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
     except RuntimeError: 
-        print('Warning: fit failed!')
+        try: 
+            fitparams[2]=-fitparams[2]
+            pOpt, pCov = sp.optimize.curve_fit(decaysin, xdata, ydata, p0=fitparams, bounds=bounds)
+        except:
+            print('Warning: fit failed!')
         # return 0, 0
-    return pOpt, pCov
+    if debug:
+        return pOpt, pCov, fitparams
+    else:
+        return pOpt, pCov
 
 # ====================================================== #
 

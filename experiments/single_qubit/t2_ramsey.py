@@ -240,7 +240,7 @@ class RamseyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, fit_twofreq=False, **kwargs):
+    def analyze(self, data=None, fit=True, fit_twofreq=False,debug=False, **kwargs):
         if data is None:
             data=self.data
 
@@ -252,19 +252,23 @@ class RamseyExperiment(Experiment):
             # fitparams=[8, 0.5, 0, 20, None, None]
             if fit_twofreq: fitfunc = fitter.fittwofreq_decaysin
             else: fitfunc = fitter.fitdecaysin
-            p_avgi, pCov_avgi = fitfunc(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
-            p_avgq, pCov_avgq = fitfunc(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
-            p_amps, pCov_amps = fitfunc(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
+            if debug:
+                p_avgi, pCov_avgi, init_guess_i = fitfunc(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams, debug=True)
+                p_avgq, pCov_avgq,init_guess_q = fitfunc(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams, debug=True)
+                p_amps, pCov_amps,init_guess_amps = fitfunc(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams, debug=True)
+                data['init_guess_i']=init_guess_i
+                data['init_guess_q']=init_guess_q
+                data['init_guess_amps']=init_guess_amps
+            else:
+                p_avgi, pCov_avgi = fitfunc(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
+                p_avgq, pCov_avgq = fitfunc(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
+                p_amps, pCov_amps = fitfunc(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
             data['fit_avgi'] = p_avgi   
             data['fit_avgq'] = p_avgq
             data['fit_amps'] = p_amps
             data['fit_err_avgi'] = pCov_avgi   
             data['fit_err_avgq'] = pCov_avgq
             data['fit_err_amps'] = pCov_amps
-
-            # print('p avgi', p_avgi)
-            # print('p avgq', p_avgq)
-            # print('p amps', p_amps)
 
             if isinstance(p_avgi, (list, np.ndarray)): data['f_adjust_ramsey_avgi'] = sorted((self.cfg.expt.ramsey_freq - p_avgi[1], -self.cfg.expt.ramsey_freq - p_avgi[1]), key=abs)
             if isinstance(p_avgq, (list, np.ndarray)): data['f_adjust_ramsey_avgq'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[1], -self.cfg.expt.ramsey_freq - p_avgq[1]), key=abs)
@@ -274,9 +278,18 @@ class RamseyExperiment(Experiment):
                 data['f_adjust_ramsey_avgi2'] = sorted((self.cfg.expt.ramsey_freq - p_avgi[7], -self.cfg.expt.ramsey_freq - p_avgi[6]), key=abs)
                 data['f_adjust_ramsey_avgq2'] = sorted((self.cfg.expt.ramsey_freq - p_avgq[7], -self.cfg.expt.ramsey_freq - p_avgq[6]), key=abs)
                 data['f_adjust_ramsey_amps2'] = sorted((self.cfg.expt.ramsey_freq - p_amps[7], -self.cfg.expt.ramsey_freq - p_amps[6]), key=abs)
+
+            t2r_fit, t2r_fit_err, t2r_adjust = fitter.get_best_fit(self.data, get_best_data_params=['f_adjust_ramsey'])
+
+            old_qubit_freq = self.cfg.device.qubit.f_ge[self.cfg.expt.qubits[0]]
+            if t2r_adjust[0] < np.abs(t2r_adjust[1]):
+                new_freq = old_qubit_freq + t2r_adjust[0]
+            else:       
+                new_freq = old_qubit_freq + t2r_adjust[1]
+            data['new_freq']=new_freq
         return data
 
-    def display(self, data=None, fit=True, fit_twofreq=False, **kwargs):
+    def display(self, data=None, fit=True, fit_twofreq=False,debug=False, **kwargs):
         if data is None:
             data=self.data
 
@@ -324,7 +337,9 @@ class RamseyExperiment(Experiment):
                       f'\t{f_pi_test + data["f_adjust_ramsey_amps"][0]}\n',
                       f'\t{f_pi_test + data["f_adjust_ramsey_amps"][1]}')
                 print(f'T2 Ramsey from fit amps [us]: {p[3]}')
-
+        if debug: 
+            pinit = data['init_guess_amps']
+            plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *pinit), label='Initial Guess')
         plt.figure(figsize=(10,9))
         plt.subplot(211, 
             title=f"{title} (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
@@ -351,6 +366,11 @@ class RamseyExperiment(Experiment):
                           f'\t{f_pi_test + data["f_adjust_ramsey_avgi2"][0]}\n',
                           f'\t{f_pi_test + data["f_adjust_ramsey_avgi2"][1]}')
                 print(f'T2 Ramsey from fit I [us]: {p[3]}')
+        if debug: 
+            pinit = data['init_guess_i']
+            plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *pinit), label='Initial Guess')
+
+
         plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
         plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
         if fit:
@@ -373,6 +393,9 @@ class RamseyExperiment(Experiment):
                           f'\t{f_pi_test + data["f_adjust_ramsey_avgq2"][0]}\n',
                           f'\t{f_pi_test + data["f_adjust_ramsey_avgq2"][1]}')
                 print(f'T2 Ramsey from fit Q [us]: {p[3]}')
+            if debug: 
+                pinit = data['init_guess_q']
+                plt.plot(data["xpts"][:-1], fitfunc(data["xpts"][:-1], *pinit), label='Initial Guess')
 
         plt.tight_layout()
         plt.show()

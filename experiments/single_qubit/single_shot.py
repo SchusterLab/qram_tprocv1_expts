@@ -442,7 +442,7 @@ class SingleShotOptExperiment(Experiment):
         print(gainpts)
         print(lenpts)
         print(f'Max fidelity {100*fid[imax]} %')
-        print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n gain [dac units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
+        print(f'Set params: \n angle (deg) {-angle[imax]} \n threshold {threshold[imax]} \n freq [Mhz] {fpts[imax[0]]} \n Gain [DAC units] {gainpts[imax[1]]} \n readout length [us] {lenpts[imax[2]]}')
 
         return imax
 
