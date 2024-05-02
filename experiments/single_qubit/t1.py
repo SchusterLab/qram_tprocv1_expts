@@ -159,6 +159,27 @@ class T1Experiment(Experiment):
         data['fit_amps'], data['fit_err_amps'] = fitter.fitexp(data['xpts'][:-1], data['amps'][:-1], fitparams=None)
         data['fit_avgi'], data['fit_err_avgi'] = fitter.fitexp(data['xpts'][:-1], data['avgi'][:-1], fitparams=None)
         data['fit_avgq'], data['fit_err_avgq'] = fitter.fitexp(data['xpts'][:-1], data['avgq'][:-1], fitparams=None)
+
+        t1_err_i = np.sqrt(data['fit_err_avgi'][3][3])
+        t1_fit_i =data['fit_avgi'][3]
+        err_ratio_i = t1_err_i/t1_fit_i
+        print('t1_i error:fit ratio=', err_ratio_i)
+
+        t1_err_q = np.sqrt(data['fit_err_avgq'][3][3])
+        t1_fit_q =data['fit_avgq'][3]
+        err_ratio_q = t1_err_q/t1_fit_q
+        print('t1_q error:fit ratio=', err_ratio_q)
+
+        if err_ratio_i< err_ratio_q:
+            print('t1_i is better, saving T1_i to results cfg file') 
+            new_t1 = t1_fit_i
+        else: 
+            print('t1_q is better, saving t1_q to results cfg file')
+            new_t1 = t1_fit_q
+
+
+        data['new_t1']=new_t1
+
         return data
 
     def display(self, data=None, fit=True, **kwargs):
@@ -267,6 +288,7 @@ class T1Continuous(Experiment):
         data['fit_amps'], data['fit_err_amps'] = fitter.fitexp(data['xpts'][:-1], data['amps'][:-1], fitparams=None)
         data['fit_avgi'], data['fit_err_avgi'] = fitter.fitexp(data['xpts'][:-1], data['avgi'][:-1], fitparams=None)
         data['fit_avgq'], data['fit_err_avgq'] = fitter.fitexp(data['xpts'][:-1], data['avgq'][:-1], fitparams=None)
+                
         return data
 
         

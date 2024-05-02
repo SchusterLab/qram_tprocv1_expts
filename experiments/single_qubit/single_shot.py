@@ -406,16 +406,16 @@ class SingleShotOptExperiment(Experiment):
                 for l_ind, l in enumerate(lenpts):
                     shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
                     shot.cfg = self.cfg
-                    shot.cfg.device.readout.frequency[qubit] = f
-                    shot.cfg.device.readout.gain[qubit] = gain
-                    shot.cfg.device.readout.readout_length = l 
+                    shot.cfg.device.readout.frequency = float(f)
+                    shot.cfg.device.readout.gain = int(gain)
+                    shot.cfg.device.readout.readout_length = float(l) 
                     check_e = True
                     if 'check_f' not in self.cfg.expt: check_f = False
                     else:
                         check_f = self.cfg.expt.check_f
                         check_e = not check_f
                     shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_e=check_e, check_f=check_f, qubit=self.cfg.expt.qubit)
-                    shot.go(analyze=False, display=False, progress=True, save=False)
+                    shot.go(analyze=False, display=False, progress=progress, save=False)
                     results = shot.analyze(verbose=False)
                     fid[f_ind, g_ind, l_ind] = results['fids'][0] if not check_f else results['fids'][1]
                     threshold[f_ind, g_ind, l_ind] = results['thresholds'][0] if not check_f else results['thresholds'][1]

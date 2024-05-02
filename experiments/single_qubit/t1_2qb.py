@@ -126,6 +126,7 @@ class T1Program_2QB(AveragerProgram):
 
     def body(self):
         cfg=AttrDict(self.cfg)
+        qA, qB = self.qubits
 
         self.sync_all()
         self.pulse(ch=self.qubit_chA)
@@ -251,22 +252,22 @@ class T1_2qbExperiment(Experiment):
         #                         value2.update({key3: value3[q_ind]})                                
 
         t1 = T1Program_2QB(soccfg=self.soccfg, cfg=self.cfg)
-        x_ptsA, avgiA, avgqA = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        avgi, avgq = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
 
         shots_iA, shots_qA, shots_iB, shots_qB = t1.collect_shots()
 
        
 
-        avgiA = avgiA[0][0]
-        avgqA = avgqA[0][0]
+        avgiA = avgi[0][0]
+        avgqA = avgq[0][0]
         ampsA = np.abs(avgiA+1j*avgqA) # Calculating the magnitude
         phasesA = np.angle(avgiA+1j*avgqA) # Calculating the phase      
 
-        avgiB = avgiB[0][1]
-        avgqB = avgqB[0][1]
+        avgiB = avgi[1][0]
+        avgqB = avgq[1][0]
         ampsB = np.abs(avgiB+1j*avgqB) # Calculating the magnitude
         phasesB = np.angle(avgiB+1j*avgqB) # Calculating the phase      
-        data={'xptsA': x_ptsA, 'xptsB': x_ptsB, 'avgiA':avgiA, 'avgiB':avgiB,'avgqA':avgqA, 'avgqB':avgqB, 'ampsA':ampsA, 'ampsB':ampsB,'phasesA':phasesA, 'phasesB':phasesB, 'raw_iA': shots_iA,'raw_iB': shots_iB, 'raw_A': shots_qA, 'raw_B': shots_qB}  
+        data={'avgiA':avgiA, 'avgiB':avgiB,'avgqA':avgqA, 'avgqB':avgqB, 'ampsA':ampsA, 'ampsB':ampsB,'phasesA':phasesA, 'phasesB':phasesB, 'raw_iA': shots_iA,'raw_iB': shots_iB, 'raw_A': shots_qA, 'raw_B': shots_qB}  
 
         self.data=data
         return data
@@ -373,26 +374,28 @@ class T1_2qbContinuous(Experiment):
         #                 for key3, value3 in value2.items():
         #                     if isinstance(value3, list):
         #                         value2.update({key3: value3[q_ind]})                                
-        t1A = T1Program_2QB(soccfg=self.soccfg, cfg=self.cfg)
-        x_ptsA, avgiA, avgqA = t1A.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)        
+        t1 = T1Program_2QB(soccfg=self.soccfg, cfg=self.cfg)
+        avgi, avgq = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress, debug=debug)
+          
 
-        shots_iA, shots_qA, shots_iB, shots_qB = t1A.collect_shots()
+        shots_iA, shots_qA, shots_iB, shots_qB = t1.collect_shots()
        
 
 
-        avgiA = avgiA[0][0]
-        avgqA = avgqA[0][0]
+        avgiA = avgi[0][0]
+        avgqA = avgq[0][0]
         ampsA = np.abs(avgiA+1j*avgqA) # Calculating the magnitude
         phasesA = np.angle(avgiA+1j*avgqA) # Calculating the phase      
 
-        avgiB = avgiB[0][0]
-        avgqB = avgqB[0][0]
+        avgiB = avgi[1][0]
+        avgqB = avgq[1][0]
         ampsB = np.abs(avgiB+1j*avgqB) # Calculating the magnitude
         phasesB = np.angle(avgiB+1j*avgqB) # Calculating the phase      
 
         now = datetime.now()
-        current_time = np.array([now.strftime("%H:%M:%S")])
-        data={'xptsA': x_ptsA, 'xptsB': x_ptsB, 'avgiA':avgiA, 'avgiB':avgiB,'avgqA':avgqA, 'avgqB':avgqB, 'ampsA':ampsA, 'ampsB':ampsB,'phasesA':phasesA, 'phasesB':phasesB, 'time':current_time, 'raw_iA': shots_iA,'raw_iB': shots_iB, 'raw_A': shots_qA, 'raw_B': shots_qB}   
+        current_time = now.strftime("%H:%M:%S")
+        current_time = current_time.encode('ascii','replace')
+        data={'avgiA':avgiA, 'avgiB':avgiB,'avgqA':avgqA, 'avgqB':avgqB, 'ampsA':ampsA, 'ampsB':ampsB,'phasesA':phasesA, 'phasesB':phasesB, 'time':current_time, 'raw_iA': shots_iA,'raw_iB': shots_iB, 'raw_A': shots_qA, 'raw_B': shots_qB}   
         
         self.data=data
         return data
