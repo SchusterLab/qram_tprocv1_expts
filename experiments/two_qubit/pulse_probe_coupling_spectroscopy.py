@@ -12,12 +12,31 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     """
     Qubit A: E<->G
@@ -41,38 +60,46 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
-        self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-        gen_chs = []
-        # declare res dacs
-        mask = None
-        if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
-            assert np.all([ch == 6 for ch in self.res_chs])
-            mask = range(4) # indices of mux_freqs, mux_gains list to play
-            # mux_freqs = [0 if i not in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
-            # mux_gains = [0 if i not in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
-            mux_freqs = [cfg.device.readout.frequency[qA], 0, 0, 0]
-            mux_gains = [cfg.device.readout.gain[qA], 0, 0, 0]
-            self.declare_gen(ch=6, nqz=cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
-            gen_chs.append(6)
-        else:
-            for q in self.qubits:
-                mixer_freq = 0
-                if self.res_ch_types[q] == 'int4':
-                    mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
-                self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
-                gen_chs.append(self.res_chs[q])
+        # declare all res dacs
+        self.measure_chs = []
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
 
         # declare qubit dacs
         for q in self.qubits:
-            mixer_freq = 0
+            mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            if self.qubit_chs[q] not in gen_chs:
+            if self.qubit_chs[q] not in self.gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
-                gen_chs.append(self.qubit_chs[q])
 
         # declare adc for qA
         self.declare_readout(ch=self.adc_chs[qA], length=self.readout_lengths_adc[qA], freq=cfg.device.readout.frequency[qA], gen_ch=self.res_chs[qA])
@@ -99,16 +126,22 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
         self.add_gauss(ch=self.qubit_chs[qB], name="pi_qubitB", sigma=self.pi_sigmaB, length=self.pi_sigmaB*4)
 
         # add readout pulses to respective channels
-        if self.res_ch_types[0] == 'mux4':
+        if 'mux4' in self.res_ch_types:
             self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
-        else:
-            self.set_pulse_registers(ch=self.res_chs[qA], style="const", freq=self.f_res_reg[qA], phase=0, gain=cfg.device.readout.gain[qA], length=self.readout_lengths_dac[qA])
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
+        self.set_gen_delays()
         self.sync_all(200)
 
     def body(self):
         cfg=AttrDict(self.cfg)
         qA, qB = self.qubits
+
+        self.reset_and_sync()
  
         # initialize qubit B to E
         if self.cfg.expt.pulseB:
@@ -128,10 +161,8 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
         self.sync_all(5)
 
         self.sync_all(5)
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=[self.adc_chs[qA]],
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
@@ -218,7 +249,7 @@ class PulseProbeCouplingSpectroscopyExperiment(Experiment):
         xpts = self.cfg.hw.soc.dacs.qubit.mixer_freq[qA] + data['xpts'][1:-1]
 
         plt.figure(figsize=(9, 11))
-        plt.subplot(311, title=f"Qubit Spectroscopy on Q{qA} with Pi Pulse on Q{qB}", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
+        plt.subplot(311, title=f"Qubit Spectroscopy on Q{qA} with Pi on Q{qB} (Gain {self.cfg.expt.gain})", xlabel="Pulse Frequency [MHz]", ylabel="Amplitude [ADC units]")
         plt.plot(xpts, data["amps"][1:-1],'o-')
         if fit:
             plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))

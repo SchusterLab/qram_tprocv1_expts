@@ -73,9 +73,7 @@ class AbstractStateTomo2qutritProgram(QutritAveragerProgram):
 
         # Simultaneous measurement
         syncdelay = self.us2cycles(max(self.cfg.device.readout.relax_delay))
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
-        self.measure(pulse_ch=measure_chs, adcs=self.adc_chs, adc_trig_offset=self.cfg.device.readout.trig_offset[0], wait=True, syncdelay=syncdelay) 
+        self.measure(pulse_ch=self.measure_chs, adcs=self.adc_chs, adc_trig_offset=self.cfg.device.readout.trig_offset[0], wait=True, syncdelay=syncdelay) 
 
     def collect_counts(self, angle=None, threshold_ge=None, threshold_ef=None, shot_avg=1):
         # collect shots for 2 adcs (indexed by qubit order) in the I channel, then sorts into e, g based on >/< threshold and angle rotation

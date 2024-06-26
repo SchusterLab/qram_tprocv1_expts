@@ -18,11 +18,30 @@ class LengthRabiProgram(AveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -60,42 +79,56 @@ class LengthRabiProgram(AveragerProgram):
             if qTest == 1: self.f_Q1_ZZ_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q1_ZZ]
             else: self.f_Q_ZZ1_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q_ZZ1]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
-        self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             self.f_f0g1_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-        # declare res dacs
-        mask = None
-        mixer_freq = 0 # MHz
-        mux_freqs = None # MHz
-        mux_gains = None
-        ro_ch = None
-        if self.res_ch_types[qTest] == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
-        elif self.res_ch_types[qTest] == 'mux4':
-            assert self.res_chs[qTest] == 6
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
-            mux_freqs = [0]*4
-            mux_freqs[qTest] = cfg.device.readout.frequency[qTest]
-            mux_gains = [0]*4
-            mux_gains[qTest] = cfg.device.readout.gain[qTest]
-            ro_ch=self.adc_chs[qTest]
-        self.declare_gen(ch=self.res_chs[qTest], nqz=cfg.hw.soc.dacs.readout.nyquist[qTest], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
-        self.declare_readout(ch=self.adc_chs[qTest], length=self.readout_lengths_adc[qTest], freq=cfg.device.readout.frequency[qTest], gen_ch=self.res_chs[qTest])
+        # declare all res dacs
+        self.measure_chs = []
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if self.adc_chs[q] not in self.ro_chs:
+                self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # declare qubit dacs
         for q in self.qubits:
-            mixer_freq = 0
+            mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
             if self.qubit_chs[q] not in self.gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            mixer_freq = 0
+            mixer_freq = None
             for q in self.cfg.expt.cool_qubits:
                 if self.swap_ch_types[q] == 'int4':
                     mixer_freq = mixer_freqs[q]
@@ -152,11 +185,15 @@ class LengthRabiProgram(AveragerProgram):
 
 
         # add readout pulses to respective channels
-        if self.res_ch_types[qTest] == 'mux4':
-            self.set_pulse_registers(ch=self.res_chs[qTest], style="const", length=self.readout_lengths_dac[qTest], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qTest], style="const", freq=self.f_res_reg[qTest], phase=0, gain=cfg.device.readout.gain[qTest], length=self.readout_lengths_dac[qTest])
+        if 'mux4' in self.res_ch_types:
+            self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
-
+        self.set_gen_delays()
         self.sync_all(200)
     
     def body(self):
@@ -164,13 +201,7 @@ class LengthRabiProgram(AveragerProgram):
         if self.checkZZ: qZZ, qTest = self.qubits
         else: qTest = self.qubits[0]
 
-        # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
-        self.sync_all(10)
+        self.reset_and_sync()
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             for q in self.cfg.expt.cool_qubits:
@@ -212,12 +243,47 @@ class LengthRabiProgram(AveragerProgram):
         # align channels and measure
         self.sync_all()
         self.measure(
-            pulse_ch=self.res_chs[qTest], 
-            adcs=[self.adc_chs[qTest]],
+            pulse_ch=self.measure_chs, 
+            adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[qTest],
             wait=True,
-            syncdelay=self.us2cycles(cfg.device.readout.relax_delay[qTest])
+            syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(4)]))
         )
+
+    """ Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
+    Returns avgi, avgq, avgi_err, avgq_err which avgi/q are avg over shot_avg and avgi/q_err is (std dev of each group of shots)/sqrt(shot_avg)
+    """
+    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, return_err=False):
+        buf_len = len(self.di_buf[0])
+
+        if angle is None: angle = [0]*len(self.cfg.device.qubit.f_ge)
+        bufi = np.array([
+            self.di_buf[i]*np.cos(np.pi/180*angle[i]) - self.dq_buf[i]*np.sin(np.pi/180*angle[i])
+            for i, ch in enumerate(self.ro_chs)])
+        bufi = np.array([bufi[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        if threshold is not None: # categorize single shots
+            bufi = np.array([np.heaviside(bufi[ch] - threshold[ch], 0) for ch in range(len(self.adc_chs))])
+        avgi = np.average(bufi, axis=1) # [num_chs]
+        bufi_err = np.std(bufi, axis=1) / np.sqrt(buf_len) # [num_chs]
+        if verbose: print([np.median(bufi[i]) for i in range(4)])
+
+        bufq = np.array([
+            self.di_buf[i]*np.sin(np.pi/180*angle[i]) + self.dq_buf[i]*np.cos(np.pi/180*angle[i])
+            for i, ch in enumerate(self.ro_chs)])
+        bufq = np.array([bufq[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        avgq = np.average(bufq, axis=1) # [num_chs]
+        bufq_err = np.std(bufq, axis=1) / np.sqrt(buf_len) # [num_chs]
+        if verbose: print([np.median(bufq[i]) for i in range(4)])
+
+        if avg_shots:
+            idata = avgi
+            qdata = avgq
+        else:
+            idata = bufi
+            qdata = bufq
+
+        if return_err: return idata, qdata, bufi_err, bufq_err
+        else: return idata, qdata 
 
     """
     If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
@@ -359,7 +425,7 @@ class LengthRabiExperiment(Experiment):
 
         plt.figure(figsize=(10, 5))
         plt.subplot(111, title=f"Length Rabi", xlabel="Length [ns]", ylabel="Amplitude [ADC units]")
-        plt.plot(xpts_ns[:-1], data["amps"][:-1],'o-')
+        plt.plot(xpts_ns[:-1], data["amps"][:-1],'.-')
         if fit:
             p = data['fit_amps']
             plt.plot(xpts_ns[:-1], fit_func(data["xpts"][:-1], *p))
@@ -368,7 +434,7 @@ class LengthRabiExperiment(Experiment):
         if 'gain' in self.cfg.expt: gain = self.cfg.expt.gain
         else: gain = self.cfg.device.qubit.pulses.pi_ge.gain[self.cfg.expt.qubits[-1]] # gain of the pulse we are trying to calibrate
         plt.subplot(211, title=f"Length Rabi (Qubit Gain {gain})", ylabel="I [adc level]")
-        plt.plot(xpts_ns[1:-1], data["avgi"][1:-1],'o-')
+        plt.plot(xpts_ns[1:-1], data["avgi"][1:-1],'.-')
         if fit:
             p = data['fit_avgi']
             plt.plot(xpts_ns[0:-1], fit_func(data["xpts"][0:-1], *p))
@@ -385,7 +451,7 @@ class LengthRabiExperiment(Experiment):
         
         print()
         plt.subplot(212, xlabel="Pulse length [ns]", ylabel="Q [adc levels]")
-        plt.plot(xpts_ns[1:-1], data["avgq"][1:-1],'o-')
+        plt.plot(xpts_ns[1:-1], data["avgq"][1:-1],'.-')
         if fit:
             p = data['fit_avgq']
             plt.plot(xpts_ns[0:-1], fit_func(data["xpts"][0:-1], *p))
@@ -549,8 +615,8 @@ class NPulseExperiment(Experiment):
                 lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = lengthrabi
                 avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
-                avgi = avgi[0][0]
-                avgq = avgq[0][0]
+                avgi = avgi[qTest]
+                avgq = avgq[qTest]
                 amp = np.abs(avgi+1j*avgq) # Calculating the magnitude
                 phase = np.angle(avgi+1j*avgq) # Calculating the phase
                 data["avgi"].append(avgi)
@@ -573,6 +639,21 @@ class NPulseExperiment(Experiment):
 
     def analyze(self, data=None, fit=True, scale=None):
         # scale should be [Ig, Qg, Ie, Qe] single shot experiment
+
+        self.checkZZ = self.cfg.expt.checkZZ
+        self.checkEF = self.cfg.expt.checkEF
+        self.qubits = self.cfg.expt.qubits
+        
+        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
+            assert len(self.qubits) == 2
+            assert 1 in self.qubits
+            qZZ, qTest = self.qubits
+            qSort = qZZ # qubit by which to index for parameters on qTest
+            if qZZ == 1: qSort = qTest
+            self.qZZ = qZZ
+        else: qTest = self.qubits[0]
+        self.qTest = qTest
+
         if data is None:
             data=self.data
         if fit:
@@ -613,7 +694,7 @@ class NPulseExperiment(Experiment):
         if scale is not None:
             g_avg, e_avg = reformatted_scale[2]
             plot_data = (plot_data - g_avg) / (e_avg - g_avg)
-        plt.plot(xdata, plot_data,'o-')
+        plt.plot(xdata, plot_data,'.-')
         if fit:
             p = data['fit_amps']
             pCov = data['fit_err_amps']
@@ -633,7 +714,7 @@ class NPulseExperiment(Experiment):
         if scale is not None:
             g_avg, e_avg = reformatted_scale[0]
             plot_data = (plot_data - g_avg) / (e_avg - g_avg)
-        plt.plot(xdata, plot_data,'o-')
+        plt.plot(xdata, plot_data,'.-')
         if fit:
             p = data['fit_avgi']
             pCov = data['fit_err_avgi']
@@ -651,7 +732,7 @@ class NPulseExperiment(Experiment):
         if scale is not None:
             g_avg, e_avg = reformatted_scale[1]
             plot_data = (plot_data - g_avg) / (e_avg - g_avg)
-        plt.plot(xdata, plot_data,'o-')
+        plt.plot(xdata, plot_data,'.-')
         if fit:
             p = data['fit_avgq']
             pCov = data['fit_err_avgq']

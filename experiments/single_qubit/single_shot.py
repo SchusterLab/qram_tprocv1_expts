@@ -7,9 +7,11 @@ from copy import deepcopy
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
-def hist(data, plot=True, span=None, verbose=True, title=None):
+def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
     """
     span: histogram limit is the mean +/- span
+    fid_avg: if True, calculate fidelity F by the average mis-categorized e/g; otherwise count
+        total number of miscategorized over total counts (gives F^2)
     """
     Ig = data['Ig']
     Qg = data['Qg']
@@ -29,18 +31,18 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
 
     if verbose:
         print('Unrotated:')
-        print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)}')
-        print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)}')
+        print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)} +/- {np.std(np.abs(Ig + 1j*Qg))}')
+        print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)} +/- {np.std(np.abs(Ig + 1j*Qe))}')
         if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
-        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10, 6))
+        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(8, 6))
         if title is not None: plt.suptitle(title)
         fig.tight_layout()
 
-        axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.', edgecolor='None', alpha=0.3)
-        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.', edgecolor='None', alpha=0.3)
-        if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.', edgecolor='None', alpha=0.3)
+        axs[0,0].scatter(Ig, Qg, label='g', color='b', marker='.', edgecolor='None', alpha=0.2)
+        axs[0,0].scatter(Ie, Qe, label='e', color='r', marker='.', edgecolor='None', alpha=0.2)
+        if plot_f: axs[0,0].scatter(If, Qf, label='f', color='g', marker='.', edgecolor='None', alpha=0.2)
         axs[0,0].plot([xg], [yg], color='k', linestyle=':', marker='o', markerfacecolor='b', markersize=5)
         axs[0,0].plot([xe], [ye], color='k', linestyle=':', marker='o', markerfacecolor='r', markersize=5)    
         if plot_f:
@@ -49,12 +51,44 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
         # axs[0,0].set_xlabel('I [ADC levels]')
         axs[0,0].set_ylabel('Q [ADC levels]')
         axs[0,0].legend(loc='upper right')
-        axs[0,0].set_title('Unrotated')
+        axs[0,0].set_title('Unrotated', fontsize=14)
         axs[0,0].axis('equal')
 
     """Compute the rotation angle"""
     theta = -np.arctan2((ye-yg),(xe-xg))
     if plot_f: theta = -np.arctan2((yf-yg),(xf-xg))
+
+    """
+    Adjust rotation angle
+    """
+    best_theta = theta
+    I_tot = np.concatenate((Ie, Ig))
+    span = (np.max(I_tot) - np.min(I_tot))/2
+    midpoint = (np.max(I_tot) + np.min(I_tot))/2
+    xlims = [midpoint-span, midpoint+span]
+    ng, binsg = np.histogram(Ig, bins=numbins, range=xlims)
+    ne, binse = np.histogram(Ie, bins=numbins, range=xlims)
+    contrast = np.abs(((np.cumsum(ng) - np.cumsum(ne)) / (0.5*ng.sum() + 0.5*ne.sum())))
+    best_fid = np.max(contrast)
+    for theta_i in np.linspace(theta-np.pi/12, theta + np.pi/12, 10):
+        Ig_new = Ig*np.cos(theta_i) - Qg*np.sin(theta_i)
+        Qg_new = Ig*np.sin(theta) + Qg*np.cos(theta) 
+        Ie_new = Ie*np.cos(theta_i) - Qe*np.sin(theta_i)
+        Qe_new = Ie*np.sin(theta) + Qe*np.cos(theta)
+        xg, yg = np.median(Ig_new), np.median(Qg_new)
+        xe, ye = np.median(Ie_new), np.median(Qe_new)
+        I_tot_new = np.concatenate((Ie_new, Ig_new))
+        span = (np.max(I_tot_new) - np.min(I_tot_new))/2
+        midpoint = (np.max(I_tot_new) + np.min(I_tot_new))/2
+        xlims = [midpoint-span, midpoint+span]
+        ng, binsg = np.histogram(Ig_new, bins=numbins, range=xlims)
+        ne, binse = np.histogram(Ie_new, bins=numbins, range=xlims)
+        contrast = np.abs(((np.cumsum(ng) - np.cumsum(ne)) / (0.5*ng.sum() + 0.5*ne.sum())))
+        fid = np.max(contrast)
+        if fid > best_fid:
+            best_theta = theta_i
+            best_fid = fid
+    theta = best_theta
 
     """Rotate the IQ data"""
     Ig_new = Ig*np.cos(theta) - Qg*np.sin(theta)
@@ -73,8 +107,8 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
     if plot_f: xf, yf = np.median(If_new), np.median(Qf_new)
     if verbose:
         print('Rotated:')
-        print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)}')
-        print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)}')
+        print(f'Ig {xg} +/- {np.std(Ig)} \t Qg {yg} +/- {np.std(Qg)} \t Amp g {np.abs(xg+1j*yg)} +/- {np.std(np.abs(Ig + 1j*Qg))}')
+        print(f'Ie {xe} +/- {np.std(Ie)} \t Qe {ye} +/- {np.std(Qe)} \t Amp e {np.abs(xe+1j*ye)} +/- {np.std(np.abs(Ig + 1j*Qe))}')
         if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
 
@@ -93,7 +127,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
 
         # axs[0,1].set_xlabel('I [ADC levels]')
         axs[0,1].legend(loc='upper right')
-        axs[0,1].set_title('Rotated')
+        axs[0,1].set_title('Rotated', fontsize=14)
         axs[0,1].axis('equal')
 
         """X and Y ranges for histogram"""
@@ -102,8 +136,8 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
         ne, binse, pe = axs[1,0].hist(Ie_new, bins=numbins, range = xlims, color='r', label='e', alpha=0.5)
         if plot_f:
             nf, binsf, pf = axs[1,0].hist(If_new, bins=numbins, range = xlims, color='g', label='f', alpha=0.5)
-        axs[1,0].set_ylabel('Counts')
-        axs[1,0].set_xlabel('I [ADC levels]')       
+        axs[1,0].set_ylabel('Counts', fontsize=14)
+        axs[1,0].set_xlabel('I [ADC levels]', fontsize=14)
         axs[1,0].legend(loc='upper right')
 
     else:        
@@ -115,29 +149,36 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
     """Compute the fidelity using overlap of the histograms"""
     fids = []
     thresholds = []
-    contrast = np.abs(((np.cumsum(ng) - np.cumsum(ne)) / (0.5*ng.sum() + 0.5*ne.sum())))
+    contrast = np.abs(((np.cumsum(ng) - np.cumsum(ne)) / (0.5*ng.sum() + 0.5*ne.sum()))) # this method calculates fidelity as 1-2(Neg + Nge)/N
     tind=contrast.argmax()
     thresholds.append(binsg[tind])
-    fids.append(contrast[tind])
+    if not fid_avg: fids.append(contrast[tind])
+    else: fids.append(0.5*(1-ng[tind:].sum()/ng.sum() + 1-ne[:tind].sum()/ne.sum())) # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N 
+    if verbose:
+        print(f'g correctly categorized: {100*(1-ng[tind:].sum()/ng.sum())}%')
+        print(f'e correctly categorized: {100*(1-ne[:tind].sum()/ne.sum())}%')
     if plot_f:
         contrast = np.abs(((np.cumsum(ng) - np.cumsum(nf)) / (0.5*ng.sum() + 0.5*nf.sum())))
         tind=contrast.argmax()
         thresholds.append(binsg[tind])
-        fids.append(contrast[tind])
+        if not fid_avg: fids.append(contrast[tind])
+        else: fids.append(0.5*(1-ng[tind:].sum()/ng.sum() + 1-nf[:tind].sum()/nf.sum()))
 
         contrast = np.abs(((np.cumsum(ne) - np.cumsum(nf)) / (0.5*ne.sum() + 0.5*nf.sum())))
         tind=contrast.argmax()
         thresholds.append(binsg[tind])
-        fids.append(contrast[tind])
+        if not fid_avg: fids.append(contrast[tind])
+        else: fids.append(0.5*(1-ne[tind:].sum()/ne.sum() + 1-nf[:tind].sum()/nf.sum()))
         
     if plot: 
-        axs[1,0].set_title(f'Histogram (Fidelity g-e: {100*fids[0]:.3}%)')
+        title = '$\overline{F}_{ge}$' if fid_avg else '$F_{ge}$'
+        axs[1,0].set_title(f'Histogram ({title}: {100*fids[0]:.3}%)', fontsize=14)
         axs[1,0].axvline(thresholds[0], color='0.2', linestyle='--')
         if plot_f:
             axs[1,0].axvline(thresholds[1], color='0.2', linestyle='--')
             axs[1,0].axvline(thresholds[2], color='0.2', linestyle='--')
 
-        axs[1,1].set_title('Cumulative Counts')
+        axs[1,1].set_title('Cumulative Counts', fontsize=14)
         axs[1,1].plot(binsg[:-1], np.cumsum(ng), 'b', label='g')
         axs[1,1].plot(binse[:-1], np.cumsum(ne), 'r', label='e')
         axs[1,1].axvline(thresholds[0], color='0.2', linestyle='--')
@@ -146,7 +187,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None):
             axs[1,1].axvline(thresholds[1], color='0.2', linestyle='--')
             axs[1,1].axvline(thresholds[2], color='0.2', linestyle='--')
         axs[1,1].legend()
-        axs[1,1].set_xlabel('I [ADC levels]')
+        axs[1,1].set_xlabel('I [ADC levels]', fontsize=14)
         
         plt.subplots_adjust(hspace=0.25, wspace=0.15)        
         plt.show()
@@ -159,11 +200,30 @@ class HistogramProgram(AveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -180,27 +240,39 @@ class HistogramProgram(AveragerProgram):
         
         self.f_ge_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ge, self.qubit_chs)]
         self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
-        self.f_res_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.readout.frequency, self.res_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
-        self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
+        self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-        # declare res dacs, add readout pulses
-        # declare res dacs
-        mask = None
-        mixer_freq = 0 # MHz
-        mux_freqs = None # MHz
-        mux_gains = None
-        ro_ch = None
-        if self.res_ch_types[qubit] == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qubit]
-        elif self.res_ch_types[qubit] == 'mux4':
-            assert self.res_chs[qubit] == 6
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qubit]
-            mux_freqs = cfg.device.readout.frequency
-            mux_gains = cfg.device.readout.gain
-            ro_ch=self.adc_chs[qubit]
-        self.declare_gen(ch=self.res_chs[qubit], nqz=cfg.hw.soc.dacs.readout.nyquist[qubit], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+        # declare all res dacs
+        self.measure_chs = []
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
+
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
@@ -208,9 +280,13 @@ class HistogramProgram(AveragerProgram):
                 self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # add readout pulses to respective channels
-        if self.res_ch_types[qubit] == 'mux4':
-            self.set_pulse_registers(ch=self.res_chs[qubit], style="const", length=self.readout_lengths_dac[qubit], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qubit], style="const", freq=self.f_res_regs[qubit], phase=0, gain=cfg.device.readout.gain[qubit], length=self.readout_lengths_dac[qubit])
+        if 'mux4' in self.res_ch_types:
+            self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
@@ -222,7 +298,7 @@ class HistogramProgram(AveragerProgram):
         
         # declare qubit dacs, add qubit pi_ge pulses
         for q in range(len(self.pi_ge_types)):
-            mixer_freq = 0
+            mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
             if self.qubit_chs[q] not in self.gen_chs:
@@ -237,6 +313,7 @@ class HistogramProgram(AveragerProgram):
                 pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
                 self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
 
+        self.set_gen_delays()
         self.sync_all(200)
     
     def body(self):
@@ -244,13 +321,7 @@ class HistogramProgram(AveragerProgram):
 
         qubit = self.cfg.expt.qubit
 
-        # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
-        self.sync_all(10)
+        self.reset_and_sync()
 
         if 'pulse_test' in self.cfg.expt and self.cfg.expt.pulse_test:
             # qDrive = 1
@@ -353,21 +424,21 @@ class HistogramProgram(AveragerProgram):
                     self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], length=pi_ef_sigma_cycles)
         self.sync_all()
 
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
             syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(4)])))
 
-    def collect_shots(self):
+    def collect_shots(self, qubit=None):
         # collect shots for the relevant adc and I and Q channels
         cfg=AttrDict(self.cfg)
         # print(np.average(self.di_buf[0]))
-        shots_i0 = self.di_buf[self.cfg.expt.qubit] / self.readout_lengths_adc[self.cfg.expt.qubit]
-        shots_q0 = self.dq_buf[self.cfg.expt.qubit] / self.readout_lengths_adc[self.cfg.expt.qubit]
+        if qubit is None: qubit = self.cfg.expt.qubit
+        else: assert qubit in range(self.num_qubits_sample), 'qubit out of range'
+        shots_i0 = self.di_buf[qubit] / self.readout_lengths_adc[qubit]
+        shots_q0 = self.dq_buf[qubit] / self.readout_lengths_adc[qubit]
         return shots_i0, shots_q0
         # return shots_i0[:5000], shots_q0[:5000]
 
@@ -423,7 +494,8 @@ class HistogramExperiment(Experiment):
         cfg.expt.pulse_f = False
         cfg.expt.pulse_test = False
         histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-        avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
+        avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
+        self.prog = histpro
         data['Ig'], data['Qg'] = histpro.collect_shots()
 
         # Excited state shots
@@ -436,7 +508,7 @@ class HistogramExperiment(Experiment):
             cfg.expt.pulse_f = False
             cfg.expt.pulse_test = False
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
+            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
             data['Ie'], data['Qe'] = histpro.collect_shots()
 
         # Excited f state shots
@@ -447,7 +519,7 @@ class HistogramExperiment(Experiment):
             cfg.expt.pulse_f = True
             cfg.expt.pulse_test = False
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
-            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True,progress=progress)
+            avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
             data['If'], data['Qf'] = histpro.collect_shots()
 
         # Test state shots
@@ -494,6 +566,7 @@ class HistogramExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname
 
 # ====================================================== #
 

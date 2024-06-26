@@ -12,12 +12,31 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -52,7 +71,8 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
             self.swap_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
             mixer_freqs = self.cfg.hw.soc.dacs.swap_Q.mixer_freq
             self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=self.swap_chs[qSort])
-        mixer_freq = 0
+
+        mixer_freq = None
         if self.swap_ch_types[qSort] == 'int4':
             mixer_freq = mixer_freqs[qSort]
 
@@ -67,37 +87,50 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
-        self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[1]) for f in self.cfg.device.qubit.f_Q1_ZZ]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-        gen_chs = []
-        
-        # declare res dacs
-        mask = None
-        if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
-            assert np.all([ch == 6 for ch in self.res_chs])
-            mask = range(4) # indices of mux_freqs, mux_gains list to play
-            mux_freqs = [0 if i not in self.qubits else cfg.device.readout.frequency[i] for i in range(4)]
-            mux_gains = [0 if i not in self.qubits else cfg.device.readout.gain[i] for i in range(4)]
-            self.declare_gen(ch=6, nqz=cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
-            gen_chs.append(6)
-        else:
-            for q in self.qubits:
-                self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
-                gen_chs.append(self.res_chs[q])
+        # declare all res dacs
+        self.measure_chs = []
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
 
         # declare qubit dacs
         for q in self.qubits:
-            if self.qubit_chs[q] not in gen_chs:
-                self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
-                gen_chs.append(self.qubit_chs[q])
+            if self.qubit_chs[q] not in self.gen_chs:
+                if self.qubit_ch_types[q] == 'full':
+                    self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q])
+                else: assert False, 'qubit gen type not supported'
 
         # declare swap dac indexed by qSort
-        if self.swap_chs[qSort] not in gen_chs: 
-            self.declare_gen(ch=self.swap_chs[qSort], nqz=cfg.hw.soc.dacs.swap.nyquist[qSort], mixer_freq=mixer_freq)
-        gen_chs.append(self.swap_chs[qSort])
+        if self.swap_chs[qSort] not in self.gen_chs: 
+            self.declare_gen(ch=self.swap_chs[qSort], nqz=cfg.hw.soc.dacs.swap.nyquist[qSort])
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
@@ -138,12 +171,15 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
             self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=3, length=3*4)
 
         # add readout pulses to respective channels
-        if self.res_ch_types[0] == 'mux4':
+        if 'mux4' in self.res_ch_types:
             self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
-        else:
-            for q in self.qubits:
-                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_reg[q], phase=0, gain=cfg.device.readout.gain[q], length=self.readout_lengths_dac[q])
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
+        self.set_gen_delays()
         self.sync_all(200)
 
     def body(self):
@@ -153,6 +189,8 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         qNotDrive = self.qNotDrive
         qSort = self.qSort
 
+        self.reset_and_sync()
+
         setup_ZZ = 1
         if 'setup_ZZ' in self.cfg.expt and self.cfg.expt.setup_ZZ is not None: setup_ZZ = self.cfg.expt.setup_ZZ
 
@@ -160,6 +198,7 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
             self.setup_and_pulse(ch=self.qubit_chs[setup_ZZ], style="arb", phase=0, freq=self.f_ge_reg[setup_ZZ], gain=cfg.device.qubit.pulses.pi_ge.gain[setup_ZZ], waveform=f"pi_qubit{setup_ZZ}")
             self.sync_all()
             self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_Q1_ZZ_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[setup_ZZ], waveform=f'qubit{qNotDrive}_ZZ{setup_ZZ}')
+            # print(f'setup init state 11 on Q{setup_ZZ}, Q{qNotDrive}')
             self.sync_all()
         else:
             # initialize qubit A to E: expect to end in Eg
@@ -206,11 +245,9 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
         self.setup_and_pulse(ch=self.qubit_chs[qDrive], style="arb", freq=self.f_ef_reg[qDrive], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qDrive], waveform="pi_ef_qDrive")
         
-        self.sync_all(5)
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
+        self.sync_all()
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
@@ -337,7 +374,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         # plt.figure(figsize=(20,6))
         # plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.pi_EgGf_sigma} us)")
         # plt.subplot(121, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="Amplitude [adc units]", xlabel='Gain [DAC units]')
-        # plt.plot(data["xpts"][0:-1], data["amps"][0][0:-1],'o-')
+        # plt.plot(data["xpts"][0:-1], data["amps"][0][0:-1],'.-')
         # if fit:
         #     p = data['fitA_amps']
         #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -351,7 +388,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         #     plt.axvline(pi_gain, color='0.2', linestyle='--')
         #     plt.axvline(pi2_gain, color='0.2', linestyle='--')
         # plt.subplot(122, title=f'Qubit B ({self.cfg.expt.qubits[1]})', xlabel='Gain [DAC units]')
-        # plt.plot(data["xpts"][0:-1], data["amps"][1][0:-1],'o-')
+        # plt.plot(data["xpts"][0:-1], data["amps"][1][0:-1],'.-')
         # if fit:
         #     p = data['fitB_amps']
         #     plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -369,7 +406,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         plt.suptitle(f"Amplitude Rabi Eg-Gf (Drive Length {self.cfg.expt.pi_EgGf_sigma} us)")
         if self.cfg.expt.singleshot: plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel=r"Probability of $|e\rangle$")
         else: plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})', ylabel="I [ADC units]")
-        plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'o-')
+        plt.plot(data["xpts"][0:-1], data["avgi"][0][0:-1],'.-')
         if fit:
             p = data['fitA_avgi']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -383,7 +420,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi2_gain, color='0.2', linestyle='--')
         plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
-        plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'o-')
+        plt.plot(data["xpts"][0:-1], data["avgq"][0][0:-1],'.-')
         if fit:
             p = data['fitA_avgq']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -398,7 +435,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
             plt.axvline(pi2_gain, color='0.2', linestyle='--')
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
-        plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'o-')
+        plt.plot(data["xpts"][0:-1], data["avgi"][1][0:-1],'.-')
         if fit:
             p = data['fitB_avgi']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -412,7 +449,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi2_gain, color='0.2', linestyle='--')
         plt.subplot(224, xlabel="Gain [DAC units]")
-        plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'o-')
+        plt.plot(data["xpts"][0:-1], data["avgq"][1][0:-1],'.-')
         if fit:
             p = data['fitB_avgq']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -642,7 +679,12 @@ class EgGfFreqGainChevronExperiment(Experiment):
 
         if saveplot: plt.style.use('dark_background')
         plt.figure(figsize=(14,10))
-        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Gain")
+        plt.suptitle(f"Eg-Gf Chevron Frequency vs. Gain (Length {self.cfg.expt.pi_EgGf_sigma} us)")
+
+        max_freq_i, max_gain_i = np.unravel_index(np.argmax(data['amps'][0], axis=None), data['amps'][0].shape)
+        max_gain = data['gainpts'][max_gain_i]
+        max_freq = data['freqpts'][max_freq_i]
+        print('QA: max at gain', data['gainpts'][max_gain_i], 'freq', data['freqpts'][max_freq_i])
 
         if saveplot:
             plt.subplot(221, title=f'Qubit A ({self.cfg.expt.qubits[0]})')
@@ -653,6 +695,9 @@ class EgGfFreqGainChevronExperiment(Experiment):
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][0], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
+        if fit:
+            plt.axhline(max_freq, color='k', linestyle='--')
+            plt.axvline(max_gain, color='k', linestyle='--')
         if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
         else: plt.colorbar(label='I [ADC level]')
 
@@ -666,9 +711,17 @@ class EgGfFreqGainChevronExperiment(Experiment):
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][0], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
+        if fit:
+            plt.axhline(max_freq, color='k', linestyle='--')
+            plt.axvline(max_gain, color='k', linestyle='--')
         if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
         else: plt.colorbar(label='Q [ADC level]')
 
+
+        min_freq_i, min_gain_i = np.unravel_index(np.argmin(data['amps'][1], axis=None), data['amps'][1].shape)
+        min_gain = data['gainpts'][min_gain_i]
+        min_freq = data['freqpts'][min_freq_i]
+        print('QB: min at gain', data['gainpts'][min_gain_i], 'freq', data['freqpts'][min_freq_i])
 
         plt.subplot(222, title=f'Qubit B ({self.cfg.expt.qubits[1]})')
         if saveplot:
@@ -677,6 +730,9 @@ class EgGfFreqGainChevronExperiment(Experiment):
         plt.pcolormesh(x_sweep, y_sweep, data['avgi'][1], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
+        if fit:
+            plt.axhline(min_freq, color='k', linestyle='--')
+            plt.axvline(min_gain, color='k', linestyle='--')
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
         else: plt.colorbar(label='I [ADC level]')
@@ -690,6 +746,9 @@ class EgGfFreqGainChevronExperiment(Experiment):
         plt.pcolormesh(x_sweep, y_sweep, data['avgq'][1], cmap='viridis', shading='auto')
         if plot_freq is not None: plt.axhline(plot_freq, color='r')
         if plot_gain is not None: plt.axvline(plot_gain, color='r')
+        if fit:
+            plt.axhline(max_freq, color='k', linestyle='--')
+            plt.axvline(max_gain, color='k', linestyle='--')
         if saveplot: plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15) 
         else: plt.colorbar(label='Q [ADC level]')
 

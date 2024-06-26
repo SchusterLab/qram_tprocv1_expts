@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from qick import *
+from qick.helpers import ch2list
 
 from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
@@ -9,9 +10,12 @@ import scipy as sp
 
 import experiments.fitting as fitter
 
+import logging
+logger = logging.getLogger('qick.qick_asm')
+logger.setLevel(logging.ERROR)
 
-
-"""Falserager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2 True.:
+"""
+Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2
 """
 class CliffordAveragerProgram(AveragerProgram):
     # def update(self):
@@ -20,6 +24,7 @@ class CliffordAveragerProgram(AveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
@@ -36,13 +41,13 @@ class CliffordAveragerProgram(AveragerProgram):
     If play is True, registers will automatically be set regardless of set_reg flag.
     If play is False, registers will be set based on value of set_reg flag, but pulse will not be played.
     """
-    def handle_const_pulse(self, name, waveformname=None, ch=None, length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_const_pulse(self, name, waveformname=None, ch=None, length=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, ro_ch=None, flag=None, phrst=0, sync_after=True):
         """
         Load/play a constant pulse of given length.
         """
         if name is not None and (name not in self.pulse_dict.keys() or reload):
             assert ch is not None
-            self.pulse_dict.update({name:dict(ch=ch, name=name, type='const', length=length, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
+            self.pulse_dict.update({name:dict(ch=ch, name=name, type='const', length=length, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, ro_ch=ro_ch, flag=flag)})
         if play or set_reg:
             assert name in self.pulse_dict.keys()
             # if not (ch == None):
@@ -51,12 +56,13 @@ class CliffordAveragerProgram(AveragerProgram):
             if freq_MHz is not None: params['freq_MHz'] = freq_MHz
             if phase_deg is not None: params['phase_deg'] = phase_deg
             if gain is not None: params['gain'] = gain
-            self.set_pulse_registers(ch=params['ch'], style='const', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], length=params['length'], phrst=phrst)
+            if ro_ch is not None: params['ro_ch'] = ro_ch
+            self.set_pulse_registers(ch=params['ch'], style='const', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch'], ro_ch=params['ro_ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], length=params['length'], phrst=phrst)
             if play:
                 self.pulse(ch=params['ch'])
-                self.sync_all()
+                if sync_after: self.sync_all()
 
-    def handle_gauss_pulse(self, name, waveformname=None, ch=None, sigma=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_gauss_pulse(self, name, waveformname=None, ch=None, sigma=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, flag=None, phrst=0, sync_after=True):
         """
         Load/play a gaussian pulse of length 4 sigma on channel ch
         """
@@ -78,9 +84,9 @@ class CliffordAveragerProgram(AveragerProgram):
             if play:
                 # print('playing gauss pulse', params['name'], 'on ch', params['ch'])
                 self.pulse(ch=params['ch'])
-                self.sync_all()
+                if sync_after: self.sync_all()
 
-    def handle_flat_top_pulse(self, name, waveformname=None, ch=None, sigma=3, flat_length=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_flat_top_pulse(self, name, waveformname=None, ch=None, sigma=3, flat_length=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, flag=None, phrst=0, sync_after=True):
         """
         Plays a gaussian ramp up (2*sigma), a constant pulse of length flat_length+4*sigma,
         plus a gaussian ramp down (2*sigma) on channel ch.
@@ -108,13 +114,14 @@ class CliffordAveragerProgram(AveragerProgram):
             self.set_pulse_registers(ch=params['ch'], style='flat_top', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['waveformname'], length=params['flat_length'], phrst=phrst)
             if play:
                 self.pulse(ch=params['ch'])
-                self.sync_all()
+                if sync_after: self.sync_all()
 
-    def handle_mux4_pulse(self, name, ch=None, mask=None, length=None, reload=True, play=False, set_reg=False, flag=None):
+    def handle_mux4_pulse(self, name, ch=None, mask=None, length=None, reload=False, play=False, set_reg=False, flag=None):
         """
         Load/play a constant pulse of given length on the mux4 channel.
         """
-        if name is not None and reload: # and name not in self.pulse_dict.keys():
+        # if name is not None or reload: # and name not in self.pulse_dict.keys():
+        if name not in self.pulse_dict.keys() or reload:
             assert ch is not None
             assert ch == 6, 'Only ch 6 on q3diamond supports mux4 currently!'
             self.pulse_dict.update({name:dict(ch=ch, name=name, type='mux4', mask=mask, length=length, flag=flag)})
@@ -123,7 +130,7 @@ class CliffordAveragerProgram(AveragerProgram):
             params = self.pulse_dict[name].copy()
             if mask is not None: params['mask'] = mask
             if length is not None: params['length'] = length
-            self.set_pulse_registers(ch=params['ch'], style='const', length=length, mask=mask)
+            self.set_pulse_registers(ch=params['ch'], style='const', length=params['length'], mask=params['mask'])
             if play:
                 self.pulse(ch=params['ch'])
                 self.sync_all()
@@ -140,7 +147,7 @@ class CliffordAveragerProgram(AveragerProgram):
         iamp, qamp = fitter.adiabatic_iqamp(t, amp_max=1, mu=mu, beta=beta, period=period)
         self.add_pulse(ch=ch, name=name, idata=maxv*iamp, qdata=maxv*qamp)
 
-    def handle_adiabatic_pulse(self, name, waveformname=None, ch=None, mu=None, beta=None, period_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_adiabatic_pulse(self, name, waveformname=None, ch=None, mu=None, beta=None, period_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, flag=None, phrst=0):
         """
         Load/play an adiabatic pi pulse on channel ch
         """
@@ -166,27 +173,34 @@ class CliffordAveragerProgram(AveragerProgram):
 
     # I_mhz_vs_us, Q_mhz_vs_us = functions of time in us, in units of MHz
     # times_us = times at which I_mhz_vs_us and Q_mhz_vs_us are defined
-    def add_IQ(self, ch, name, I_mhz_vs_us, Q_mhz_vs_us, times_us):
+    def add_IQ(self, ch, name, I_mhz_vs_us, Q_mhz_vs_us, times_us, plot_IQ=True):
         gencfg = self.soccfg['gens'][ch]
         maxv = gencfg['maxv']*gencfg['maxv_scale'] - 1
         samps_per_clk = gencfg['samps_per_clk']
         times_cycles = np.linspace(0, self.us2cycles(times_us[-1], gen_ch=ch), len(times_us))
         times_samps = samps_per_clk * times_cycles
         IQ_scale = max((np.max(np.abs(I_mhz_vs_us)), np.max(np.abs(Q_mhz_vs_us))))
-        I_func = sp.interpolate.interp1d(times_samps, I_mhz_vs_us/IQ_scale, kind='linear', fill_value='extrapolate')
-        Q_func = sp.interpolate.interp1d(times_samps, Q_mhz_vs_us/IQ_scale, kind='linear', fill_value='extrapolate')
+        I_func = sp.interpolate.interp1d(times_samps, I_mhz_vs_us/IQ_scale, kind='linear', fill_value=0)
+        Q_func = sp.interpolate.interp1d(times_samps, -Q_mhz_vs_us/IQ_scale, kind='linear', fill_value=0)
         t = np.arange(0, np.round(times_samps[-1]))
         iamps = I_func(t)
         qamps = Q_func(t)
-        plt.plot(maxv*iamps, '.-')
-        # plt.plot(times_samps, I_func(times_samps), '.-')
-        plt.plot(maxv*qamps, '.-')
-        plt.axhline(maxv)
-        # plt.plot(times_samps, Q_func(times_samps), '.-')
-        plt.show()
+        
+        if plot_IQ:
+            plt.figure()
+            plt.title(f"Pulse on ch{ch}, waveform {name}")
+            # plt.plot(iamps, '.-')
+            plt.plot(times_samps, I_func(times_samps), '.-', label='I')
+            # plt.plot(qamps, '.-')
+            plt.plot(times_samps, Q_func(times_samps), '.-', label='Q')
+            plt.ylabel('Amplitude [a.u.]')
+            plt.xlabel('Sample Index')
+            plt.legend()
+            plt.show()
+
         self.add_pulse(ch=ch, name=name, idata=maxv*iamps, qdata=maxv*qamps)        
 
-    def handle_IQ_pulse(self, name, waveformname=None, ch=None, I_mhz_vs_us=None, Q_mhz_vs_us=None, times_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=True, play=False, set_reg=False, flag=None, phrst=0):
+    def handle_IQ_pulse(self, name, waveformname=None, ch=None, I_mhz_vs_us=None, Q_mhz_vs_us=None, times_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, flag=None, phrst=0, sync_after=True, plot_IQ=True):
         """
         Load/play an arbitrary IQ pulse on channel ch
         """
@@ -195,7 +209,7 @@ class CliffordAveragerProgram(AveragerProgram):
             if waveformname is None: waveformname = name
             self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='IQpulse', I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
             if reload or waveformname not in self.envelopes[ch].keys():
-                self.add_IQ(ch=ch, name=waveformname, I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us)
+                self.add_IQ(ch=ch, name=waveformname, I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, plot_IQ=plot_IQ)
         if play or set_reg:
             # if not (ch == sigma == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
@@ -206,7 +220,8 @@ class CliffordAveragerProgram(AveragerProgram):
             self.set_pulse_registers(ch=params['ch'], style='arb', freq=self.freq2reg(params['freq_MHz'], gen_ch=params['ch']), phase=self.deg2reg(params['phase_deg'], gen_ch=params['ch']), gain=params['gain'], waveform=params['waveformname'], phrst=phrst)
             if play:
                 self.pulse(ch=params['ch'])
-                self.sync_all()
+                # print('played iq pulse on ch', ch, params)
+                if sync_after: self.sync_all()
 
 
     """
@@ -215,7 +230,7 @@ class CliffordAveragerProgram(AveragerProgram):
     special: adiabatic, pulseiq
     """
     # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=True, **kwargs):
+    def X_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=False, **kwargs):
         # q: qubit number in config
         f_ge = self.cfg.device.qubit.f_ge[q]
         gain = self.cfg.device.qubit.pulses.pi_ge.gain[q]
@@ -263,7 +278,7 @@ class CliffordAveragerProgram(AveragerProgram):
             self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma, flat_length=flat_length, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         else: assert False, f'Pulse type {type} not supported.'
 
-    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=True):
+    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=False):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
         self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, adiabatic=adiabatic, phrst=phrst, reload=reload)
 
@@ -274,6 +289,24 @@ class CliffordAveragerProgram(AveragerProgram):
         if pihalf: phase_adjust = 90 # the sign of the 180 does not matter, but the sign of the pihalf does!
         if neg: phase_adjust *= -1
         if play: self.overall_phase[q] += phase_adjust + extra_phase
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         self.cfg = AttrDict(self.cfg)
@@ -302,23 +335,47 @@ class CliffordAveragerProgram(AveragerProgram):
         self.f_Q_ZZ1_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[q]) for q, f in enumerate(self.cfg.device.qubit.f_Q_ZZ1)]
 
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
-        self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
+        self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
         # declare res dacs, add readout pulses
-        if self.res_ch_types[0] == 'mux4': # only supports having all resonators be on mux, or none
-            assert np.all([ch == 6 for ch in self.res_chs])
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mux_freqs = self.cfg.device.readout.frequency
-            mux_gains = self.cfg.device.readout.gain
-            self.declare_gen(ch=6, nqz=self.cfg.hw.soc.dacs.readout.nyquist[0], mixer_freq=self.cfg.hw.soc.dacs.readout.mixer_freq[0], mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=0)
-            self.handle_mux4_pulse(name=f'measure', ch=6, length=max(self.readout_lengths_dac), mask=mask, play=False, set_reg=True)
-        else:
-            for q in self.qubits:
-                mixer_freq = 0
-                if self.res_ch_types[q] == 'int4':
-                    mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[q]
-                self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q], mixer_freq=mixer_freq)
-                self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], length=self.readout_length[q], freq_MHz=self.cfg.device.readout.frequency[q], phase=0, gain=self.cfg.device.readout.gain[q], play=False, set_reg=True)
+        self.measure_chs = []
+        self.meas_ch_types = []
+        self.meas_ch_qs = []
+        self.mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=self.cfg.hw.soc.dacs.readout.nyquist[q]) #, ro_ch=self.adc_chs[q])
+
+                    if self.cfg.device.readout.gain[q] < 1:
+                        gain = int(self.cfg.device.readout.gain[q] * 2**15)
+                    self.handle_const_pulse(name=f'measure{q}', ch=self.res_chs[q], ro_ch=self.adc_chs[q], length=max(self.readout_lengths_dac), freq_MHz=self.cfg.device.readout.frequency[q], phase_deg=0, gain=gain, play=False, set_reg=True)
+                    self.measure_chs.append(self.res_chs[q])
+                    self.meas_ch_types.append(self.res_ch_types[q])
+                    self.meas_ch_qs.append(q)
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                self.mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == self.cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = self.cfg.device.readout.frequency[q]
+                mux_gains[q] = self.cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = self.cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+                    self.meas_ch_types.append('mux4')
+                    self.meas_ch_qs.append(-1)
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
+            self.handle_mux4_pulse(name=f'measure', ch=6, length=max(self.readout_lengths_dac), mask=self.mask, play=False, set_reg=True)
 
         # get aliases for the sigmas we need in clock cycles
         self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
@@ -330,7 +387,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare qubit dacs, add qubit pi_ge pulses
         for q in range(len(self.pi_ge_types)):
-            mixer_freq = 0
+            mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
             if self.qubit_chs[q] not in self.gen_chs:
@@ -348,6 +405,9 @@ class CliffordAveragerProgram(AveragerProgram):
         for q in range(self.num_qubits_sample):
             if self.adc_chs[q] not in self.ro_chs:
                 self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+
+        self.set_gen_delays()
+        self.sync_all(200)
 
 
 
@@ -399,8 +459,7 @@ class CliffordAveragerProgram(AveragerProgram):
     #     if return_err: return avgi, avgq, avgi_err, avgq_err
     #     else: return avgi, avgq
 
-    """
-    Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
+    """ Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
     Returns avgi, avgq, avgi_err, avgq_err which avgi/q are avg over shot_avg and avgi/q_err is (std dev of each group of shots)/sqrt(shot_avg)
     """
     def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, return_err=False):

@@ -9,7 +9,7 @@ from tqdm import tqdm_notebook as tqdm
 
 from experiments.clifford_averager_program import QutritAveragerProgram, CliffordAveragerProgram
 from experiments.single_qubit.single_shot import hist
-from experiments.two_qubit.twoQ_state_tomography import correct_readout_err, fix_neg_counts
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, correct_readout_err, fix_neg_counts
 
 def sort_counts_3q(shotsA, shotsB, shotsC):
     # data is returned as n000, n001, ... measured for the 3 qubits
@@ -41,7 +41,8 @@ def make_3q_calib_order():
                 calib_order.append(state0 + state1 + state2)
     return np.array(calib_order)
 
-class AbstractStateTomo3QProgram(QutritAveragerProgram):
+# class AbstractStateTomo3QProgram(QutritAveragerProgram):
+class AbstractStateTomo3QProgram(AbstractStateTomo2QProgram):
     """
     Performs a state_prep_pulse (abstract method) on 3 qubits, then measures in a desired basis.
     Repeat this program multiple times in the experiment to loop over all the bases necessary for tomography.
@@ -54,18 +55,24 @@ class AbstractStateTomo3QProgram(QutritAveragerProgram):
     )
     """
 
-    def setup_measure(self, qubit, basis:str, play=False, flag='ZZcorrection'):
-        """
-        Convert string indicating the measurement basis into the appropriate single qubit pulse (pre-measurement pulse)
-        """
-        assert basis in 'IXYZ'
-        assert len(basis) == 1
-        if basis == 'X':
-            self.Y_pulse(qubit, pihalf=True, play=play, neg=True, flag=flag) # -Y/2 pulse to get from +X to +Z
-            # print('x pulse dict', self.pulse_dict)
-        elif basis == 'Y': self.X_pulse(qubit, pihalf=True, neg=False, play=play, flag=flag) # X/2 pulse to get from +Y to +Z
-        else: pass # measure in I/Z basis
-        self.sync_all(15)
+    # def setup_measure(self, qubit, basis:str, play=False, flag='ZZcorrection'):
+    #     """
+    #     Convert string indicating the measurement basis into the appropriate single qubit pulse (pre-measurement pulse)
+    #     """
+    #     print('THIS FUNCTION NEEDS TO BE DELETED IN ABSTRAT 3Q TOMO')
+    #     assert basis in 'IXYZ'
+    #     assert len(basis) == 1
+    #     print('hello??')
+    #     if basis == 'X':
+    #         # self.Y_pulse(qubit, pihalf=True, play=play, neg=True, flag=flag) # -Y/2 pulse to get from +X to +Z
+    #         print('WARNING FUNKY THINGS')
+    #         self.Y_pulse(0, pihalf=True, play=play, neg=True, flag=flag) # -Y/2 pulse to get from +X to +Z
+    #     elif basis == 'Y':
+    #         # self.X_pulse(qubit, pihalf=True, neg=False, play=play, flag=flag) # X/2 pulse to get from +Y to +Z
+    #         print('WARNING FUNKY THINGS')
+    #         self.X_pulse(0, pihalf=True, play=play, neg=False, flag=flag) # -Y/2 pulse to get from +X to +Z
+    #     else: pass # measure in I/Z basis
+    #     self.sync_all(15)
 
     def state_prep_pulse(self, qubits, **kwargs):
         """
@@ -83,20 +90,14 @@ class AbstractStateTomo3QProgram(QutritAveragerProgram):
         qubits = self.cfg.expt.tomo_qubits
         self.basis = self.cfg.expt.basis
 
-        # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
-        self.sync_all(10)
+        self.reset_and_sync()
 
         # Prep state to characterize
         kwargs = self.cfg.expt.state_prep_kwargs
         if kwargs is None: kwargs = dict()
         # print('kwargs', kwargs)
         self.state_prep_pulse(qubits, **kwargs)
-        self.sync_all(10)
+        self.sync_all() # DO NOT HAVE A WAIT TIME HERE
 
         # Go to the basis for the tomography measurement
         self.setup_measure(qubit=qubits[0], basis=self.basis[0], play=True)
@@ -108,12 +109,11 @@ class AbstractStateTomo3QProgram(QutritAveragerProgram):
             for q in self.cfg.expt.ge_pulse:
                 self.X_pulse(q, pihalf=False, neg=False, play=True) # flagged for ZZ correction
 
-        # self.sync_all(50)
+        self.sync_all()
         # Simultaneous measurement
         syncdelay = self.us2cycles(max(self.cfg.device.readout.relax_delay))
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
-        self.measure(pulse_ch=measure_chs, adcs=self.adc_chs, adc_trig_offset=self.cfg.device.readout.trig_offset[0], wait=True, syncdelay=syncdelay) 
+        # self.sync_all(self.us2cycles(0.05))
+        self.measure(pulse_ch=self.measure_chs, adcs=self.adc_chs, adc_trig_offset=self.cfg.device.readout.trig_offset[0], wait=True, syncdelay=syncdelay) 
 
     def collect_counts(self, angle=None, threshold=None):
         shots, avgq = self.get_shots(angle=angle, threshold=threshold)

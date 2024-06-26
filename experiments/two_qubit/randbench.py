@@ -208,9 +208,9 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
         super().__init__(soccfg, cfg)
 
     def body(self):
-        # Phase reset all channels
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
         for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+            if self.gen_chs[ch]['mux_freqs'] is None and ch not in self.measure_chs: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
             # self.sync_all()
@@ -227,10 +227,8 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
         self.clifford(qubit=self.qubit_list[-1], pulse_name=self.gate_list[-1], inverted=True, play=True)
         self.sync_all(self.us2cycles(0.01)) # align channels and wait 10ns
 
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
@@ -617,9 +615,9 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
     def body(self):
         cfg=AttrDict(self.cfg)
 
-        # Phase reset all channels
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
         for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+            if self.gen_chs[ch]['mux_freqs'] is None and ch not in self.measure_chs: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
         self.sync_all(10)
@@ -647,10 +645,8 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         # Go back to measurement subspace
         self.X_pulse(self.qNotDrive, extra_phase=-self.overall_phase[self.qSort], play=True)
 
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,

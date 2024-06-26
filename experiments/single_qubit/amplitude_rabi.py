@@ -52,12 +52,31 @@ class AmplitudeRabiProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -95,7 +114,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
             if qTest == 1: self.f_Q1_ZZ_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q1_ZZ]
             else: self.f_Q_ZZ1_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q_ZZ1]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
-        self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             self.f_f0g1_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
@@ -144,27 +163,46 @@ class AmplitudeRabiProgram(RAveragerProgram):
 
         gen_chs = []
         
-        # declare res dacs
-        mask = None
-        mixer_freq = 0 # MHz
-        mux_freqs = None # MHz
-        mux_gains = None
-        ro_ch = None
-        if self.res_ch_types[qTest] == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
-        elif self.res_ch_types[qTest] == 'mux4':
-            assert self.res_chs[qTest] == 6
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
-            mux_freqs = cfg.device.readout.frequency
-            mux_gains = cfg.device.readout.gain
-            ro_ch=self.adc_chs[qTest]
-        self.declare_gen(ch=self.res_chs[qTest], nqz=cfg.hw.soc.dacs.readout.nyquist[qTest], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
-        self.declare_readout(ch=self.adc_chs[qTest], length=self.readout_lengths_adc[qTest], freq=cfg.device.readout.frequency[qTest], gen_ch=self.res_chs[qTest])
+        # declare all res dacs
+        self.measure_chs = []
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
+
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if self.adc_chs[q] not in self.ro_chs:
+                self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
+
+
 
         # declare qubit dacs
         for q in self.qubits:
-            mixer_freq = 0
+            mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
             if self.qubit_chs[q] not in gen_chs:
@@ -172,7 +210,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
                 gen_chs.append(self.qubit_chs[q])
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            mixer_freq = 0
+            mixer_freq = None
             for q in self.cfg.expt.cool_qubits:
                 if self.swap_ch_types[q] == 'int4':
                     mixer_freq = mixer_freqs[q]
@@ -226,9 +264,13 @@ class AmplitudeRabiProgram(RAveragerProgram):
                 else: assert False, 'not implemented'
 
         # add readout pulses to respective channels
-        if self.res_ch_types[qTest] == 'mux4':
-            self.set_pulse_registers(ch=self.res_chs[qTest], style="const", length=self.readout_lengths_dac[qTest], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qTest], style="const", freq=self.f_res_reg[qTest], phase=0, gain=cfg.device.readout.gain[qTest], length=self.readout_lengths_dac[qTest])
+        if 'mux4' in self.res_ch_types:
+            self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
         # initialize registers
         if self.qubit_ch_types[qTest] == 'int4':
@@ -237,6 +279,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.r_gain2 = 4
         self.safe_regwi(self.q_rps[qTest], self.r_gain2, self.cfg.expt.start)
 
+        self.set_gen_delays()
         self.sync_all(200)
 
     def body(self):
@@ -244,13 +287,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if self.checkZZ: qZZ, qTest = self.qubits
         else: qTest = self.qubits[0]
 
-        # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
-        self.sync_all(10)
+        self.reset_and_sync()
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             for q in self.cfg.expt.cool_qubits:
@@ -328,8 +365,8 @@ class AmplitudeRabiProgram(RAveragerProgram):
         # align channels and measure
         self.sync_all(5)
         self.measure(
-            pulse_ch=self.res_chs[qTest], 
-            adcs=[self.adc_chs[qTest]],
+            pulse_ch=self.measure_chs, 
+            adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[qTest],
             wait=True,
             syncdelay=self.us2cycles(cfg.device.readout.relax_delay[qTest])
@@ -393,7 +430,7 @@ class AmplitudeRabiExperiment(Experiment):
             if qZZ == 1: qSort = qTest
         else: qTest = self.qubits[0]
 
-        if 'sigma_test' not in self.cfg.expt:
+        if 'sigma_test' not in self.cfg.expt or self.cfg.expt.sigma_test is None:
             if self.cfg.expt.checkZZ:
                 if qTest == 1: self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qSort]
                 else: self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qSort]
@@ -419,11 +456,8 @@ class AmplitudeRabiExperiment(Experiment):
         # shots_q = amprabi.dq_buf[adc_ch] / amprabi.readout_length_adc
         # print(np.std(shots_i), np.std(shots_q))
         
-        # print('WARNING DOING SOMETHING FUNKY')
-        # avgi = avgi[qTest][0]
-        # avgq = avgq[qTest][0]
-        avgi = avgi[0][0]
-        avgq = avgq[0][0]
+        avgi = avgi[qTest][0]
+        avgq = avgq[qTest][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
         phases = np.angle(avgi+1j*avgq) # Calculating the phase        
         
@@ -444,9 +478,9 @@ class AmplitudeRabiExperiment(Experiment):
             if fitparams is None:
                 fitparams=[None]*4
                 n_pulses = 1
-                if 'n_pusles' in self.cfg.expt: n_pulses = self.cfg.expt.n_pulses
+                if 'n_pulses' in self.cfg.expt: n_pulses = self.cfg.expt.n_pulses
                 fitparams[1]=n_pulses/xdata[-1]
-                print(fitparams[1])
+                # print(fitparams[1])
 
             ydata = data["amps"]
             # print(abs(xdata[np.argwhere(ydata==max(ydata))[0,0]] - xdata[np.argwhere(ydata==min(ydata))[0,0]]))
@@ -481,7 +515,7 @@ class AmplitudeRabiExperiment(Experiment):
         if 'n_pulses' in self.cfg.expt: n_pulses = self.cfg.expt.n_pulses
         title = f"Amplitude Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Pulse Length {self.cfg.expt.sigma_test}{(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}, {n_pulses} pulse)"
         plt.subplot(111, title=title, xlabel="Gain [DAC units]", ylabel="Amplitude [ADC units]")
-        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'o-')
+        plt.plot(data["xpts"][1:-1], data["amps"][1:-1],'.-')
         if fit:
             p = data['fit_amps']
             plt.plot(data["xpts"][1:-1], fitter.sinfunc(data["xpts"][1:-1], *p))
@@ -498,7 +532,7 @@ class AmplitudeRabiExperiment(Experiment):
 
         plt.figure(figsize=(10,10))
         plt.subplot(211, title=title, ylabel="I [ADC units]")
-        plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'o-')
+        plt.plot(data["xpts"][1:-1], data["avgi"][1:-1],'.-')
         # plt.axhline(390)
         # plt.axhline(473)
         # plt.axvline(2114)
@@ -517,7 +551,7 @@ class AmplitudeRabiExperiment(Experiment):
             plt.axvline(pi_gain, color='0.2', linestyle='--')
             plt.axvline(pi2_gain, color='0.2', linestyle='--')
         plt.subplot(212, xlabel="Gain [DAC units]", ylabel="Q [ADC units]")
-        plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'o-')
+        plt.plot(data["xpts"][1:-1], data["avgq"][1:-1],'.-')
         if fit:
             p = data['fit_avgq']
             plt.plot(data["xpts"][0:-1], fitter.sinfunc(data["xpts"][0:-1], *p))
@@ -537,6 +571,7 @@ class AmplitudeRabiExperiment(Experiment):
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
+        return self.fname
 
 # ====================================================== #
                       

@@ -28,7 +28,7 @@ class CrosstalkEchoProgram(CliffordAveragerProgram):
 
         # declare swap dacs
         for qDrive in self.qDrives:
-            mixer_freq = 0
+            mixer_freq = None
             if self.swap_ch_types[qDrive] == 'int4':
                 mixer_freq = self.cfg.hw.soc.dacs.swap_Q.mixer_freq[qDrive]
             if self.swap_chs[qDrive] not in self.gen_chs: 
@@ -62,9 +62,9 @@ class CrosstalkEchoProgram(CliffordAveragerProgram):
     def body(self):
         cfg=AttrDict(self.cfg)
 
-        # Phase reset all channels
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
         for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
             # self.sync_all()
@@ -172,10 +172,8 @@ class CrosstalkEchoProgram(CliffordAveragerProgram):
 
         # align channels and measure
         self.sync_all()
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,

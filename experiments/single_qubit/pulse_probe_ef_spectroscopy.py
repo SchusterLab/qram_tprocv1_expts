@@ -12,12 +12,31 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         cfg=AttrDict(self.cfg)
@@ -39,11 +58,11 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
 
         self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
         self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
-        self.readout_length_adc += 1 # ensure the rounding of the clock ticks calculation doesn't mess up the buffer
 
         # declare res dacs
+        self.measure_chs = []
         mask = None
-        mixer_freq = 0 # MHz
+        mixer_freq = None # MHz
         mux_freqs = None # MHz
         mux_gains = None
         ro_ch = None
@@ -51,17 +70,18 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
         elif self.res_ch_type == 'mux4':
             assert self.res_ch == 6
+            ro_ch = self.adc_ch
             mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
             mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
             mux_freqs = [0]*4
             mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
             mux_gains = [0]*4
             mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
-            ro_ch=self.adc_ch
         self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
+        self.measure_chs.append(self.res_ch)
 
         # declare qubit dacs
-        mixer_freq = 0
+        mixer_freq = None
         if self.qubit_ch_type == 'int4':
             mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
         self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
@@ -73,17 +93,24 @@ class PulseProbeEFSpectroscopyProgram(RAveragerProgram):
 
         self.safe_regwi(self.q_rp, self.r_freq2, self.f_start) # send start frequency to r_freq2
 
-        # add pre-defined qubit and readout pulses to respective channels
+        # add qubit pulses to respective channels
         self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
 
+        # add readout pulses to respective channels
         if self.res_ch_type == 'mux4':
             self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
-        else: self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=cfg.device.readout.gain, length=self.readout_length_dac)
+        else:
+            if cfg.device.readout.gain < 1:
+                gain = int(cfg.device.readout.gain * 2**15)
+            self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=gain, length=self.readout_length_dac)
 
-        self.synci(200)
+        self.set_gen_delays()
+        self.sync_all(200)
 
     def body(self):
         cfg=AttrDict(self.cfg)
+
+        self.reset_and_sync()
 
         # init to qubit excited state
         self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge_reg, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
@@ -133,14 +160,16 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
 
     def acquire(self, progress=False):
         q_ind = self.cfg.expt.qubit
+
+        self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
-                if isinstance(value, list):
+                if isinstance(value, list) and len(value) == self.num_qubits_sample:
                     subcfg.update({key: value[q_ind]})
                 elif isinstance(value, dict):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
-                            if isinstance(value3, list):
+                            if isinstance(value3, list) and len(value3) == self.num_qubits_sample:
                                 value2.update({key3: value3[q_ind]})                                
 
         qspec_ef=PulseProbeEFSpectroscopyProgram(soccfg=self.soccfg, cfg=self.cfg)
@@ -176,18 +205,18 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
 
         plt.figure(figsize=(9, 11))
         plt.subplot(311, title=f"Qubit {self.cfg.expt.qubit} EF Spectroscopy (Gain {self.cfg.expt.gain})", ylabel="Amplitude [ADC units]")
-        plt.plot(xpts, data["amps"][1:-1],'o-')
+        plt.plot(xpts, data["amps"][1:-1],'.-')
         if fit:
             plt.plot(xpts, signs[0]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_amps"]))
             print(f'Found peak in amps at [MHz] {data["fit_amps"][2]}, HWHM {data["fit_amps"][3]}')
 
         plt.subplot(312, ylabel="I [ADC units]")
-        plt.plot(xpts, data["avgi"][1:-1],'o-')
+        plt.plot(xpts, data["avgi"][1:-1],'.-')
         if fit:
             plt.plot(xpts, signs[1]*fitter.lorfunc(data["xpts"][1:-1], *data["fit_avgi"]))
             print(f'Found peak in I at [MHz] {data["fit_avgi"][2]}, HWHM {data["fit_avgi"][3]}')
         plt.subplot(313, xlabel="Pulse Frequency (MHz)", ylabel="Q [ADC units]")
-        plt.plot(xpts, data["avgq"][1:-1],'o-')
+        plt.plot(xpts, data["avgq"][1:-1],'.-')
         # plt.axvline(3476, c='k', ls='--')
         # plt.axvline(3376+50, c='k', ls='--')
         # plt.axvline(3376, c='k', ls='--')

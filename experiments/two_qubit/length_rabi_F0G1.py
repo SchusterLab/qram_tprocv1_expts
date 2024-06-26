@@ -45,7 +45,7 @@ class LengthRabiF0G1Program(CliffordAveragerProgram):
             mixer_freqs = self.cfg.hw.soc.dacs.swap_Q.mixer_freq
             self.f_f0g1_reg = self.freq2reg(self.cfg.device.qubit.f_f0g1_Q[qSort], gen_ch=self.swap_chs[qSort])
 
-        mixer_freq = 0
+        mixer_freq = None
         if self.swap_ch_types[qSort] == 'int4':
             mixer_freq = mixer_freqs[qSort]
         if self.swap_chs[qSort] not in self.gen_chs: 
@@ -69,9 +69,9 @@ class LengthRabiF0G1Program(CliffordAveragerProgram):
         qNotDrive = self.qNotDrive
         qSort = self.qSort
 
-        # Phase reset all channels
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
         for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
+            if self.gen_chs[ch]['mux_freqs'] is None and ch not in self.measure_chs: # doesn't work for the mux channels
                 # print('resetting', ch)
                 self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
             # self.sync_all()
@@ -133,10 +133,8 @@ class LengthRabiF0G1Program(CliffordAveragerProgram):
 
         
         self.sync_all(5)
-        measure_chs = self.res_chs
-        if self.res_ch_types[0] == 'mux4': measure_chs = self.res_chs[0]
         self.measure(
-            pulse_ch=measure_chs, 
+            pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,

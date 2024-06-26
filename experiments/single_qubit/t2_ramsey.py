@@ -12,12 +12,31 @@ class RamseyProgram(RAveragerProgram):
     def __init__(self, soccfg, cfg):
         self.cfg = AttrDict(cfg)
         self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0]*len(soccfg['gens']) # need to calibrate via oscilloscope
 
         # copy over parameters for the acquire method
         self.cfg.reps = cfg.expt.reps
         self.cfg.rounds = cfg.expt.rounds
         
         super().__init__(soccfg, self.cfg)
+
+    def reset_and_sync(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        for ch in self.gen_chs.keys():
+            if ch not in self.measure_chs: # doesn't work for the mux ADCs
+                # print('resetting', ch)
+                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
+        self.sync_all(10)
+
+    def set_gen_delays(self):
+        for ch in self.gen_chs:
+            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]]
+            delay_cycles = self.us2cycles(delay_ns*1e-3, gen_ch=ch)
+            self.gen_delays[ch] = delay_cycles
+
+    def sync_all(self, t=0):
+        super().sync_all(t=t, gen_t0=self.gen_delays)
+
 
     def initialize(self):
         cfg = AttrDict(self.cfg)
@@ -58,52 +77,69 @@ class RamseyProgram(RAveragerProgram):
                 self.ZZs = np.reshape(np.array(self.cfg.device.qubit.ZZs), (4,4)) # MHz
                 self.f_Qtest_ZZ_reg = [self.freq2reg(cfg.device.qubit.f_ge[qTest] + delta, gen_ch=self.qubit_chs[qTest]) for delta in self.ZZs[qTest,:]]
         self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
-        self.f_res_reg = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             self.f_f0g1_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-        gen_chs = []
-        
-        # declare res dacs
-        mask = None
-        mixer_freq = 0 # MHz
-        mux_freqs = None # MHz
-        mux_gains = None
-        ro_ch = None
-        if self.res_ch_types[qTest] == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
-        elif self.res_ch_types[qTest] == 'mux4':
-            assert self.res_chs[qTest] == 6
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[qTest]
-            mux_freqs = cfg.device.readout.frequency
-            mux_gains = cfg.device.readout.gain
-            ro_ch=self.adc_chs[qTest]
-        self.declare_gen(ch=self.res_chs[qTest], nqz=cfg.hw.soc.dacs.readout.nyquist[qTest], mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
-        self.declare_readout(ch=self.adc_chs[qTest], length=self.readout_lengths_adc[qTest], freq=cfg.device.readout.frequency[qTest], gen_ch=self.res_chs[qTest])
+        # declare all res dacs
+        self.measure_chs = []
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            # print('mux params', mux_mixer_freq, mux_freqs, mux_gains, mux_ro_ch, mask)
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
+
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if self.adc_chs[q] not in self.ro_chs:
+                self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # declare qubit dacs
         for q in self.qubits:
-            mixer_freq = 0
+            mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            if self.qubit_chs[q] not in gen_chs:
+            if self.qubit_chs[q] not in self.gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
-                gen_chs.append(self.qubit_chs[q])
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            mixer_freq = 0
+            mixer_freq = None
             for q in self.cfg.expt.cool_qubits:
                 if self.swap_ch_types[q] == 'int4':
                     mixer_freq = mixer_freqs[q]
-                if self.swap_chs[q] not in self.gen_chs: 
+                if self.swap_chs[q] not in self.self.gen_chs: 
                     self.declare_gen(ch=self.swap_chs[q], nqz=self.cfg.hw.soc.dacs.swap.nyquist[q], mixer_freq=mixer_freq)
 
         # declare registers for phase incrementing
-        self.r_wait = 3
-        self.r_phase2 = 4
+        # self.r_wait = 3
+        # self.r_phase2 = 4
+        self.r_wait = 5
+        self.r_phase2 = 6
         if self.qubit_ch_types[qTest] == 'int4':
             self.r_phase = self.sreg(self.qubit_chs[qTest], "freq")
             self.r_phase3 = 5 # for storing the left shifted value
@@ -158,14 +194,19 @@ class RamseyProgram(RAveragerProgram):
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
 
         # add readout pulses to respective channels
-        if self.res_ch_types[qTest] == 'mux4':
-            self.set_pulse_registers(ch=self.res_chs[qTest], style="const", length=self.readout_lengths_dac[qTest], mask=mask)
-        else: self.set_pulse_registers(ch=self.res_chs[qTest], style="const", freq=self.f_res_reg[qTest], phase=0, gain=cfg.device.readout.gain[qTest], length=self.readout_lengths_dac[qTest])
+        if 'mux4' in self.res_ch_types:
+            self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
         # initialize wait registers
         self.safe_regwi(self.q_rps[qTest], self.r_wait, self.us2cycles(cfg.expt.start))
         self.safe_regwi(self.q_rps[qTest], self.r_phase2, 0) 
 
+        self.set_gen_delays()
         self.sync_all(200)
 
     def body(self):
@@ -173,13 +214,7 @@ class RamseyProgram(RAveragerProgram):
         if self.checkZZ: qZZ, qTest = self.qubits
         else: qTest = self.qubits[0]
 
-        # Phase reset all channels
-        for ch in self.gen_chs.keys():
-            if self.gen_chs[ch]['mux_freqs'] is None: # doesn't work for the mux channels
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
-        self.sync_all(10)
+        self.reset_and_sync()
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             for q in self.cfg.expt.cool_qubits:
@@ -220,14 +255,14 @@ class RamseyProgram(RAveragerProgram):
         self.pulse(ch=self.qubit_chs[qTest])
 
         if self.checkEF: # map excited back to qubit ground state for measurement
-            if self.cfg.device.readout.frequency[qTest] != self.cfg.device.readout.frequency_ef[qTest]:
+            if 'frequency_ef' not in self.cfg.device.readout or self.cfg.device.readout.frequency[qTest] != self.cfg.device.readout.frequency_ef[qTest]:
                 self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
 
         # align channels and measure
-        self.sync_all(5)
+        self.sync_all()
         self.measure(
-            pulse_ch=self.res_chs[qTest], 
-            adcs=[self.adc_chs[qTest]],
+            pulse_ch=self.measure_chs, 
+            adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[qTest],
             wait=True,
             syncdelay=self.us2cycles(cfg.device.readout.relax_delay[qTest])
@@ -276,11 +311,24 @@ class RamseyExperiment(Experiment):
                     subcfg.update({key: [value]*num_qubits_sample})
 
         ramsey = RamseyProgram(soccfg=self.soccfg, cfg=self.cfg)
+
+        self.qubits = self.cfg.expt.qubits
+        self.checkZZ = self.cfg.expt.checkZZ
+        self.checkEF = self.cfg.expt.checkEF
+        if self.checkZZ: # [qA, qB] means test qB with ZZ from qA. If one of qA, qB is 1, sort by the one that is not 1; otherwise sort by the test one.
+            assert len(self.qubits) == 2
+            qZZ, qTest = self.qubits
+            if 1 in self.qubits:
+                # define qSort: qubit by which to index for parameters on qTest
+                if qZZ == 1: qSort = qTest
+                else: qSort = qZZ
+            else: qSort = qTest 
+        else: qTest = self.qubits[0]
         
         x_pts, avgi, avgq = ramsey.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
- 
-        avgi = avgi[0][0]
-        avgq = avgq[0][0]
+
+        avgi = avgi[qTest][0]
+        avgq = avgq[qTest][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
         phases = np.angle(avgi+1j*avgq) # Calculating the phase
 
@@ -319,7 +367,7 @@ class RamseyExperiment(Experiment):
                 # print('FITPARAMS', fitparams[7])
             else:
                 fitfunc = fitter.fitdecaysin
-                fitparams=[None, self.cfg.expt.ramsey_freq, None, None, None]
+                fitparams=[None, self.cfg.expt.ramsey_freq, 0, None, None]
             p_avgi, pCov_avgi = fitfunc(data['xpts'][:-1], data["avgi"][:-1], fitparams=fitparams)
             p_avgq, pCov_avgq = fitfunc(data['xpts'][:-1], data["avgq"][:-1], fitparams=fitparams)
             p_amps, pCov_amps = fitfunc(data['xpts'][:-1], data["amps"][:-1], fitparams=fitparams)
@@ -361,6 +409,7 @@ class RamseyExperiment(Experiment):
                 if qZZ == 1: qSort = qTest
                 else: qSort = qZZ
             else: qSort = qTest 
+        else: qTest = self.qubits[0]
 
         f_pi_test = self.cfg.device.qubit.f_ge[qTest]
         if self.checkZZ:
@@ -381,7 +430,7 @@ class RamseyExperiment(Experiment):
         plt.figure(figsize=(10, 6))
         plt.subplot(111,title=f"{title} (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
                     xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
-        plt.plot(data["xpts"][:-1], data["amps"][:-1],'o-')
+        plt.plot(data["xpts"][:-1], data["amps"][:-1],'.-')
         if fit:
             p = data['fit_amps']
             if isinstance(p, (list, np.ndarray)): 
@@ -403,13 +452,13 @@ class RamseyExperiment(Experiment):
                           f'\tfit freq {p[1]}\n',
                           f'\tyscale1: {p[4]}'
                           f'\tfit freq {p[5]}\n')
-                print(f'T2 Ramsey from fit amps [us]: {p[3]}')
+                print(f'T2 Ramsey from fit amps [us]: {p[3]} +/- {np.sqrt(pCov[3][3])}')
 
         plt.figure(figsize=(10,9))
         plt.subplot(211, 
             title=f"{title} (Ramsey Freq: {self.cfg.expt.ramsey_freq} MHz)",
             ylabel="I [ADC level]")
-        plt.plot(data["xpts"][:-1], data["avgi"][:-1],'o-')
+        plt.plot(data["xpts"][:-1], data["avgi"][:-1],'.-')
         if fit:
             p = data['fit_avgi']
             if isinstance(p, (list, np.ndarray)): 
@@ -431,9 +480,9 @@ class RamseyExperiment(Experiment):
                           f'\tfit freq {p[1]}\n',
                           f'\tyscale1: {p[4]}'
                           f'\tfit freq {p[5]}\n')
-                print(f'T2 Ramsey from fit I [us]: {p[3]}')
+                print(f'T2 Ramsey from fit I [us]: {p[3]} +/- {np.sqrt(pCov[3][3])}')
         plt.subplot(212, xlabel="Wait Time [us]", ylabel="Q [ADC level]")
-        plt.plot(data["xpts"][:-1], data["avgq"][:-1],'o-')
+        plt.plot(data["xpts"][:-1], data["avgq"][:-1],'.-')
         if fit:
             p = data['fit_avgq']
             if isinstance(p, (list, np.ndarray)): 
@@ -454,7 +503,7 @@ class RamseyExperiment(Experiment):
                           f'\tfit freq {p[1]}\n',
                           f'\tyscale1: {p[4]}'
                           f'\tfit freq {p[5]}\n')
-                print(f'T2 Ramsey from fit Q [us]: {p[3]}')
+                print(f'T2 Ramsey from fit Q [us]: {p[3]} +/- {np.sqrt(pCov[3][3])}')
 
         plt.tight_layout()
         plt.show()
