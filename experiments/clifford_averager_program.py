@@ -198,9 +198,45 @@ class CliffordAveragerProgram(AveragerProgram):
             plt.legend()
             plt.show()
 
-        self.add_pulse(ch=ch, name=name, idata=maxv*iamps, qdata=maxv*qamps)        
+        self.add_pulse(ch=ch, name=name, idata=maxv*iamps, qdata=maxv*qamps)     
+        
+    def add_IQ_ILC(self, ch, name, I_mhz_vs_us, Q_mhz_vs_us, times_us, plot_IQ=True):
+        
+        gencfg = self.soccfg['gens'][ch]
+        maxv = gencfg['maxv']*gencfg['maxv_scale'] - 1
+        samps_per_clk = gencfg['samps_per_clk']
+        times_cycles = np.linspace(0, self.us2cycles(times_us[-1], gen_ch=ch), len(times_us))
+        times_samps = samps_per_clk * times_cycles
+        I_func = sp.interpolate.interp1d(times_samps, I_mhz_vs_us, kind='linear', fill_value=0)
+        Q_func = sp.interpolate.interp1d(times_samps, -Q_mhz_vs_us, kind='linear', fill_value=0)
+        t = np.arange(0, np.round(times_samps[-1]))
+        iamps = I_func(t)
+        qamps = Q_func(t)
+        
+        if plot_IQ:
+            plt.figure()
+            plt.title(f"Pulse on ch{ch}, waveform {name}")
+            # plt.plot(iamps, '.-')
+            plt.plot(times_samps, I_func(times_samps), '.-', label='I')
+            # plt.plot(qamps, '.-')
+            plt.plot(times_samps, Q_func(times_samps), '.-', label='Q')
+            plt.ylabel('Amplitude [a.u.]')
+            plt.xlabel('Sample Index')
+            plt.legend()
+            plt.show()
+            
+        # rescale with the voltage 
+        v_scale = maxv//2
+        _i = v_scale*iamps
+        _q = v_scale*qamps
+        
+        # check that the IQ values are not larger than the max 
+        assert np.all(np.abs(_i) <= maxv)
+        assert np.all(np.abs(_i) <= maxv)
 
-    def handle_IQ_pulse(self, name, waveformname=None, ch=None, I_mhz_vs_us=None, Q_mhz_vs_us=None, times_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, flag=None, phrst=0, sync_after=True, plot_IQ=True):
+        self.add_pulse(ch=ch, name=name, idata=_i, qdata=_q)     
+
+    def handle_IQ_pulse(self, name, waveformname=None, ch=None, I_mhz_vs_us=None, Q_mhz_vs_us=None, times_us=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, flag=None, phrst=0, sync_after=True, plot_IQ=True, ILC=False):
         """
         Load/play an arbitrary IQ pulse on channel ch
         """
@@ -209,7 +245,10 @@ class CliffordAveragerProgram(AveragerProgram):
             if waveformname is None: waveformname = name
             self.pulse_dict.update({name:dict(ch=ch, name=name, waveformname=waveformname, type='IQpulse', I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, freq_MHz=freq_MHz, phase_deg=phase_deg, gain=gain, flag=flag)})
             if reload or waveformname not in self.envelopes[ch].keys():
-                self.add_IQ(ch=ch, name=waveformname, I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, plot_IQ=plot_IQ)
+                if ILC:
+                    self.add_IQ_ILC(ch=ch, name=waveformname, I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, plot_IQ=plot_IQ)
+                else: 
+                    self.add_IQ(ch=ch, name=waveformname, I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, plot_IQ=plot_IQ)
         if play or set_reg:
             # if not (ch == sigma == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
@@ -230,7 +269,7 @@ class CliffordAveragerProgram(AveragerProgram):
     special: adiabatic, pulseiq
     """
     # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=False, **kwargs):
+    def X_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=False, **kwargs):
         # q: qubit number in config
         f_ge = self.cfg.device.qubit.f_ge[q]
         gain = self.cfg.device.qubit.pulses.pi_ge.gain[q]
@@ -238,6 +277,20 @@ class CliffordAveragerProgram(AveragerProgram):
         sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
         waveformname = 'pi_ge'
         type = self.cfg.device.qubit.pulses.pi_ge.type[q]
+        if ZZ_qubit is not None:
+            assert 1 in [q, ZZ_qubit], 'ZZ X_pulse only implemented when one of the qubits is Q1'
+            if q == 1:
+                f_ge = self.cfg.device.qubit.f_Q1_ZZ[ZZ_qubit]
+                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[ZZ_qubit] 
+                sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[ZZ_qubit], gen_ch=self.qubit_chs[q])
+                waveformname = f'pi_Q1_ZZ{ZZ_qubit}'
+                type = self.cfg.device.qubit.pulses.pi_Q1_ZZ.type[ZZ_qubit]
+            else:
+                f_ge = self.cfg.device.qubit.f_Q_ZZ1[q]
+                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[q] 
+                sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[q], gen_ch=self.qubit_chs[q])
+                waveformname = f'pi_Q_ZZ1'
+                type = self.cfg.device.qubit.pulses.pi_Q_ZZ1.type[q]
         if special:
             if special == 'adiabatic':
                 gain = self.cfg.device.qubit.pulses.pi_ge_adiabatic.gain[q]
@@ -259,6 +312,7 @@ class CliffordAveragerProgram(AveragerProgram):
             if divide_len:
                 sigma = sigma // 2
                 waveformname += 'half'
+                gain = self.cfg.device.qubit.pulses.pi_ge.half_gain[q]
             else: gain = gain // 2
             name += 'half'
         if neg: phase_deg -= 180
@@ -278,11 +332,11 @@ class CliffordAveragerProgram(AveragerProgram):
             self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma, flat_length=flat_length, freq_MHz=f_ge, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         else: assert False, f'Pulse type {type} not supported.'
 
-    def Y_pulse(self, q, pihalf=False, divide_len=True, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=False):
+    def Y_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=False):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, adiabatic=adiabatic, phrst=phrst, reload=reload)
+        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, ZZ_qubit=ZZ_qubit, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, adiabatic=adiabatic, phrst=phrst, reload=reload)
 
-    def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, reload=None):
+    def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, **kwargs):
         dac_type = self.qubit_ch_types[q]
         assert not dac_type == 'mux4', "Currently cannot set phase for mux4!"
         phase_adjust = 180
@@ -306,6 +360,47 @@ class CliffordAveragerProgram(AveragerProgram):
 
     def sync_all(self, t=0):
         super().sync_all(t=t, gen_t0=self.gen_delays)
+    
+    """
+    cool_idle should be the same length as cool_qubits
+    """
+    def active_cool(self, cool_qubits, cool_idle):
+        # print('cooling qubits', cool_qubits, 'with idle times', cool_idle)
+        assert len(cool_idle) == len(cool_qubits)
+
+        sorted_indices = np.argsort(cool_idle)[::-1] # sort cooling times longest first
+        cool_qubits = np.array(cool_qubits)
+        cool_idle = np.array(cool_idle)
+        sorted_cool_qubits = cool_qubits[sorted_indices]
+        sorted_cool_idle = cool_idle[sorted_indices]
+        # print('sorted cool_qubits', sorted_cool_qubits)
+        max_idle = sorted_cool_idle[0]
+        
+        last_pulse_len = 0
+        remaining_idle = max_idle
+        for q, idle in zip(sorted_cool_qubits, sorted_cool_idle):
+            remaining_idle -= last_pulse_len
+
+            last_pulse_len = 0
+            self.Xef_pulse(q=q, play=True)
+            last_pulse_len += self.cfg.device.qubit.pulses.pi_ef.sigma[q]*4
+
+            pulse_type = self.cfg.device.qubit.pulses.pi_f0g1.type[q]
+            pisigma_f0g1 = self.us2cycles(self.cfg.device.qubit.pulses.pi_f0g1.sigma[q], gen_ch=self.swap_f0g1_chs[q])
+            if pulse_type == 'flat_top':
+                sigma_ramp_cycles = 3
+                flat_length_cycles = pisigma_f0g1 - sigma_ramp_cycles*4
+                self.setup_and_pulse(ch=self.swap_f0g1_chs[q], style="flat_top", freq=self.f_f0g1_regs[q], phase=0, gain=self.cfg.device.qubit.pulses.pi_f0g1.gain[q], length=flat_length_cycles, waveform=f"pi_f0g1_{q}")
+            else: assert False, 'not implemented'
+            self.sync_all()
+            last_pulse_len += self.cfg.device.qubit.pulses.pi_f0g1.sigma[q]
+            # print(f'last pulse len q{q}', last_pulse_len)
+
+        remaining_idle -= last_pulse_len
+        last_idle = max((remaining_idle, sorted_cool_idle[-1]))
+        # print('last idle', last_idle)
+        self.sync_all(self.us2cycles(last_idle))
+        
 
 
     def initialize(self):
@@ -323,6 +418,11 @@ class CliffordAveragerProgram(AveragerProgram):
         self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.swap_f0g1_chs = self.cfg.hw.soc.dacs.swap_f0g1.ch
+            self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
+            mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
+
         self.overall_phase = [0]*self.num_qubits_sample
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_ch
@@ -333,6 +433,8 @@ class CliffordAveragerProgram(AveragerProgram):
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[1]) for f in self.cfg.device.qubit.f_Q1_ZZ]
         self.f_Q_ZZ1_regs = [self.freq2reg(f, gen_ch=self.qubit_chs[q]) for q, f in enumerate(self.cfg.device.qubit.f_Q_ZZ1)]
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.f_f0g1_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_f0g1, self.qubit_chs)]
 
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
@@ -400,6 +502,21 @@ class CliffordAveragerProgram(AveragerProgram):
             if q != 1:
                 pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
                 self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
+
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            mixer_freq = None
+            for q in self.cfg.expt.cool_qubits:
+                if self.swap_f0g1_ch_types[q] == 'int4':
+                    mixer_freq = mixer_freqs[q]
+                if self.swap_f0g1_chs[q] not in self.gen_chs: 
+                    self.declare_gen(ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq)
+
+                self.pisigma_ef = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q]) # default pi_ef value
+                self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
+                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
+                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
+                else: assert False, 'not implemented'
+
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
@@ -615,12 +732,13 @@ Multiple inheritence testing
 
 """
 Replace the X/Y/Z pulses with an effective TLS represented by the Eg-Gf pulse.
-WARNING: this means if you try to call X pulse it will play the Eg-Gf pulse, not a normal qubit X pulse!
+add_virtual_Z is a flag to determine whether is a virtual Z gate applied on the drive qubit *after* the swap.
+extra_phase is applied to the swap itself.
 """
 class CliffordEgGfAveragerProgram(QutritAveragerProgram):
     # self.overall_phase keeps track of the EgGf phase insetad of the e-g pulse phase
 
-    def XEgGf_pulse(self, qDrive, qNotDrive, pihalf=False, divide_len=True, name='X_EgGf', neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+    def XEgGf_pulse(self, qDrive, qNotDrive, pihalf=False, divide_len=True, name='X_EgGf', neg=False, extra_phase=0, add_virtual_Z=True, play=False, flag=None, phrst=0, reload=True):
         # convention is waveformname is pi_EgGf_qNotDriveqDrive
         if qDrive == 1:
             ch = self.swap_chs[qNotDrive]
@@ -630,6 +748,8 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
             sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive], gen_ch=ch)
             type = self.cfg.device.qubit.pulses.pi_EgGf.type[qNotDrive]
             waveformname = 'pi_EgGf'
+            if add_virtual_Z:
+                virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.phase[qNotDrive]
         else:
             ch = self.swap_Q_chs[qDrive]
             f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q[qDrive]
@@ -638,9 +758,17 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
             sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive], gen_ch=ch)
             type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qDrive]
             waveformname = 'pi_EgGf'
+            if add_virtual_Z:
+                virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.phase[qDrive]
         if pihalf:
             if divide_len:
-                sigma_cycles = sigma_cycles // 2
+                # sigma_cycles = sigma_cycles // 2
+                if qDrive == 1:
+                    sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.half_sigma[qNotDrive], gen_ch=ch)
+                    virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.half_phase[qNotDrive]
+                else:
+                    sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qDrive], gen_ch=ch)
+                    virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[qDrive]
                 waveformname += 'half'
             else: gain = gain // 2
             name += 'half'
@@ -654,22 +782,31 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
             flat_length_cycles = sigma_cycles - sigma_ramp_cycles*4
             self.handle_flat_top_pulse(name=f'{name}_{qNotDrive}{qDrive}', ch=ch, waveformname=f'{waveformname}_{qNotDrive}{qDrive}', sigma=sigma_ramp_cycles, flat_length=flat_length_cycles, freq_MHz=f_EgGf_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
         else: assert False, f'Pulse type {type} not supported.'
+
+        if add_virtual_Z: self.overall_phase[qDrive] += virtual_Z
         # print('ch keys', self.gen_chs.keys())
 
-    def YEgGf_pulse(self, qDrive, qNotDrive, pihalf=False, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+    def YEgGf_pulse(self, qDrive, qNotDrive, pihalf=False, neg=False, extra_phase=0, add_virtual_Z=False, play=False, flag=None, phrst=0, reload=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.XEgGf_pulse(qDrive, qNotDrive, pihalf=pihalf, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y_EgGf', flag=flag, phrst=phrst, reload=reload)
+        self.XEgGf_pulse(qDrive, qNotDrive, pihalf=pihalf, neg=not neg, extra_phase=90+extra_phase, add_virtual_Z=add_virtual_Z, play=play, name='Y_EgGf', flag=flag, phrst=phrst, reload=reload)
 
-    def ZEgGf_pulse(self, qDrive, qNotDrive, pihalf=False, neg=False, extra_phase=0, play=False, reload=None):
-        if qDrive == 1: dac_type = self.swap_ch_types[qNotDrive]
-        else: dac_type = self.swap_Q_ch_types[qDrive]
+    def ZEgGf_pulse(self, qDrive, qNotDrive, pihalf=False, divide_len=True, neg=False, extra_phase=0,  add_virtual_Z=False, play=False, reload=None):
+        if qDrive == 1:
+            sigma_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive]
+            dac_type = self.swap_ch_types[qNotDrive]
+        else:
+            sigma_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive]
+            dac_type = self.swap_Q_ch_types[qDrive]
+        if pihalf:
+            if divide_len:
+                sigma_us /= 2
         assert not dac_type == 'mux4', "Currently cannot set phase for mux4!"
         phase_adjust = 180
         if pihalf: phase_adjust = 90 # the sign of the 180 does not matter, but the sign of the pihalf does!
         if neg: phase_adjust *= -1
         if play:
-            if qDrive == 1: self.overall_phase[qNotDrive] += phase_adjust + extra_phase
-            else: self.overall_phase[qDrive] += phase_adjust + extra_phase
+            self.overall_phase[qDrive] += phase_adjust + extra_phase
+            # self.sync_all(self.us2cycles(sigma_us))
 
     def initialize(self):
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch

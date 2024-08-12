@@ -36,7 +36,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
         if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
     if plot:
-        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(8, 6))
+        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(9, 6))
         if title is not None: plt.suptitle(title)
         fig.tight_layout()
 
@@ -50,6 +50,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
 
         # axs[0,0].set_xlabel('I [ADC levels]')
         axs[0,0].set_ylabel('Q [ADC levels]')
+        axs[0,0].tick_params(axis='both', which='major', labelsize=10)
         axs[0,0].legend(loc='upper right')
         axs[0,0].set_title('Unrotated', fontsize=14)
         axs[0,0].axis('equal')
@@ -59,7 +60,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
     if plot_f: theta = -np.arctan2((yf-yg),(xf-xg))
 
     """
-    Adjust rotation angle
+    Adjust rotation angle from g, e only
     """
     best_theta = theta
     I_tot = np.concatenate((Ie, Ig))
@@ -112,9 +113,13 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
         if plot_f: print(f'If {xf} +/- {np.std(If)} \t Qf {yf} +/- {np.std(Qf)} \t Amp f {np.abs(xf+1j*yf)}')
 
 
-    if span is None:
-        span = (np.max(np.concatenate((Ie_new, Ig_new))) - np.min(np.concatenate((Ie_new, Ig_new))))/2
-    xlims = [(xg+xe)/2-span, (xg+xe)/2+span]
+    span = (np.max(np.concatenate((Ie_new, Ig_new))) - np.min(np.concatenate((Ie_new, Ig_new))))/2
+    lim_midpoint = (np.max(np.concatenate((Ie_new, Ig_new))) + np.min(np.concatenate((Ie_new, Ig_new))))/2
+    if plot_f: 
+        span = (np.max(np.concatenate((If_new, Ie_new, Ig_new))) - np.min(np.concatenate((If_new, Ie_new, Ig_new))))/2
+        lim_midpoint = (np.max(np.concatenate((If_new, Ie_new, Ig_new))) + np.min(np.concatenate((If_new, Ie_new, Ig_new))))/2
+    xlims = [lim_midpoint-span, lim_midpoint+span]
+        
 
     if plot:
         axs[0,1].scatter(Ig_new, Qg_new, label='g', color='b', marker='.', edgecolor='None', alpha=0.3)
@@ -129,6 +134,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
         axs[0,1].legend(loc='upper right')
         axs[0,1].set_title('Rotated', fontsize=14)
         axs[0,1].axis('equal')
+        axs[0,1].tick_params(axis='both', which='major', labelsize=10)
 
         """X and Y ranges for histogram"""
 
@@ -139,6 +145,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
         axs[1,0].set_ylabel('Counts', fontsize=14)
         axs[1,0].set_xlabel('I [ADC levels]', fontsize=14)
         axs[1,0].legend(loc='upper right')
+        axs[1,0].tick_params(axis='both', which='major', labelsize=10)
 
     else:        
         ng, binsg = np.histogram(Ig_new, bins=numbins, range=xlims)
@@ -188,6 +195,7 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
             axs[1,1].axvline(thresholds[2], color='0.2', linestyle='--')
         axs[1,1].legend()
         axs[1,1].set_xlabel('I [ADC levels]', fontsize=14)
+        axs[1,1].tick_params(axis='both', which='major', labelsize=10)
         
         plt.subplots_adjust(hspace=0.25, wspace=0.15)        
         plt.show()
@@ -237,12 +245,18 @@ class HistogramProgram(AveragerProgram):
         self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
         self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.swap_f0g1_chs = self.cfg.hw.soc.dacs.swap_f0g1.ch
+            self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
+            mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
         
         self.f_ge_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ge, self.qubit_chs)]
         self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.f_f0g1_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
 
         # declare all res dacs
         self.measure_chs = []
@@ -313,6 +327,20 @@ class HistogramProgram(AveragerProgram):
                 pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
                 self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            mixer_freq = None
+            for q in self.cfg.expt.cool_qubits:
+                if self.swap_f0g1_ch_types[q] == 'int4':
+                    mixer_freq = mixer_freqs[q]
+                if self.swap_f0g1_chs[q] not in self.gen_chs: 
+                    self.declare_gen(ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq)
+
+                self.pisigma_ef = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q]) # default pi_ef value
+                self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
+                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
+                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
+                else: assert False, 'not implemented'
+
         self.set_gen_delays()
         self.sync_all(200)
     
@@ -322,6 +350,42 @@ class HistogramProgram(AveragerProgram):
         qubit = self.cfg.expt.qubit
 
         self.reset_and_sync()
+
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
+            cool_qubits = self.cfg.expt.cool_qubits
+            if 'cool_idle' in self.cfg.expt and self.cfg.expt.cool_idle is not None:
+                cool_idle = self.cfg.expt.cool_idle
+            sorted_indices = np.argsort(cool_idle)[::-1] # sort cooling times longest first
+            cool_qubits = np.array(cool_qubits)
+            cool_idle = np.array(cool_idle)
+            sorted_cool_qubits = cool_qubits[sorted_indices]
+            sorted_cool_idle = cool_idle[sorted_indices]
+            max_idle = sorted_cool_idle[0]
+        
+            last_pulse_len = 0
+            remaining_idle = max_idle
+            for q, idle in zip(sorted_cool_qubits, sorted_cool_idle):
+                remaining_idle -= last_pulse_len
+
+                last_pulse_len = 0
+                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.freq2reg(self.cfg.device.qubit.f_ef[q], gen_ch=self.qubit_chs[q]), gain=cfg.device.qubit.pulses.pi_ef.gain[q], waveform=f"pi_ef_qubit{q}")
+                self.sync_all()
+                last_pulse_len += self.cfg.device.qubit.pulses.pi_ef.sigma[q]*4
+
+                pulse_type = self.cfg.device.qubit.pulses.pi_f0g1.type[q]
+                pisigma_f0g1 = self.us2cycles(self.cfg.device.qubit.pulses.pi_f0g1.sigma[q], gen_ch=self.swap_f0g1_chs[q])
+                if pulse_type == 'flat_top':
+                    sigma_ramp_cycles = 3
+                    flat_length_cycles = pisigma_f0g1 - sigma_ramp_cycles*4
+                    self.setup_and_pulse(ch=self.swap_f0g1_chs[q], style="flat_top", freq=self.f_f0g1_regs[q], phase=0, gain=self.cfg.device.qubit.pulses.pi_f0g1.gain[q], length=flat_length_cycles, waveform=f"pi_f0g1_{q}")
+                else: assert False, 'not implemented'
+                self.sync_all()
+                last_pulse_len += self.cfg.device.qubit.pulses.pi_f0g1.sigma[q]
+
+            remaining_idle -= last_pulse_len
+            last_idle = max((remaining_idle, sorted_cool_idle[-1]))
+            self.sync_all(self.us2cycles(last_idle))
 
         if 'pulse_test' in self.cfg.expt and self.cfg.expt.pulse_test:
             # qDrive = 1
@@ -409,16 +473,23 @@ class HistogramProgram(AveragerProgram):
             # self.setup_and_pulse(ch=self.qubit_chs[qDrive], style="arb", freq=self.f_ef_regs[qDrive], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qDrive], waveform=f"pi_ef_qubit{qDrive}") #, phrst=1)
 
         else:
-            if self.cfg.expt.pulse_e or self.cfg.expt.pulse_f:
+            if self.cfg.expt.pulse_e:
                 if cfg.device.qubit.pulses.pi_ge.type[qubit] == 'gauss':
                     self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], waveform=f"qubit{qubit}")
                 else: # const pulse
                     pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qubit], gen_ch=self.qubit_chs[qubit])
                     self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], length=pi_ge_sigma_cycles)
+                self.sync_all()
 
             if self.cfg.expt.pulse_f:
                 if cfg.device.qubit.pulses.pi_ef.type[qubit] == 'gauss':
                     self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], waveform=f"pi_ef_qubit{qubit}")
+
+                    # print('WARNING ADDED ANOTHER GE PULSE')
+                    # self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], waveform=f"qubit{qubit}")
+
+                    self.sync_all()
+
                 else: # const pulse
                     pi_ef_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pi_ef.sigma[qubit], gen_ch=self.qubit_chs[qubit])
                     self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], length=pi_ef_sigma_cycles)
@@ -516,6 +587,8 @@ class HistogramExperiment(Experiment):
         if self.check_f:
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.pulse_e = True 
+            cfg.expt.pulse_e = False
+            print('WARNING TURNED OFF PULSE E FOR CHECK F')
             cfg.expt.pulse_f = True
             cfg.expt.pulse_test = False
             histpro = HistogramProgram(soccfg=self.soccfg, cfg=cfg)

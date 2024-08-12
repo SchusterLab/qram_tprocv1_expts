@@ -671,7 +671,7 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
 # ====================================================== #
 
 class OptimalCtrlTomo2QProgram(AbstractStateTomo2QProgram):
-    
+   
     def state_prep_pulse(self, qubits, **kwargs):
         for q in self.cfg.expt.IQ_qubits:
             # play the I + Q component for each qubit in the IQ pulse
@@ -684,9 +684,8 @@ class OptimalCtrlTomo2QProgram(AbstractStateTomo2QProgram):
 
         # IQ pulse
         if 'plot_IQ' not in self.cfg.expt or self.cfg.expt.plot_IQ == None: self.cfg.expt.plot_IQ = False
-
         for iq, q in enumerate(self.cfg.expt.IQ_qubits):
-            self.handle_IQ_pulse(name=f'pulse_Q{q}', ch=self.qubit_chs[q], I_mhz_vs_us=self.cfg.expt.Icontrols[iq], Q_mhz_vs_us=self.cfg.expt.Qcontrols[iq], times_us=self.cfg.expt.times_us, freq_MHz=self.cfg.device.qubit.f_ge[q], phase_deg=0, gain=self.cfg.expt.IQ_gain[iq], reload=True, play=False, plot_IQ=self.cfg.expt.plot_IQ)
+            self.handle_IQ_pulse(name=f'pulse_Q{q}', ch=self.qubit_chs[q], I_mhz_vs_us=self.cfg.expt.Icontrols[iq], Q_mhz_vs_us=self.cfg.expt.Qcontrols[iq], times_us=self.cfg.expt.times_us, freq_MHz=self.cfg.device.qubit.f_ge[q], phase_deg=0, gain=self.cfg.expt.IQ_gain[iq], reload=True, play=False, plot_IQ=self.cfg.expt.plot_IQ, ILC=self.cfg.expt.ILC)
         
         self.sync_all(200)
 

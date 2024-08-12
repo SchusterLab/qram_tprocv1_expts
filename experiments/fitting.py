@@ -472,8 +472,9 @@ def fithanger(xdata, ydata, fitparams=None):
 
 # ====================================================== #
 
-def rb_func(depth, p, a, b):
-    return a*p**depth + b
+# Standard RB decay fit function
+def rb_func(depth, p, a, offset):
+    return a*p**depth + offset
 
 # Gives the average error rate over all gates in sequence
 def rb_error(p, d): # d = dim of system = 2^(number of qubits)
@@ -484,8 +485,17 @@ def error_fit_err(cov_p, d):
     return cov_p*(1/d-1)**2
 
 # Run both regular RB and interleaved RB to calculate this
-def rb_gate_fidelity(p_rb, p_irb, d):
-    return 1 - (d-1)*(1-p_irb/p_rb) / d
+# Get error from here: https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.109.080505
+def rb_gate_fidelity(p_rb, p_irb, d, p_rb_err=None, p_irb_err=None):
+    fid = 1 - (d-1)*(1-p_irb/p_rb) / d
+    if p_rb_err is not None and p_irb_err is not None:
+        # fid_err_sqrd = ((d-1)/d * (1/p_rb) * p_irb_err)**2 + ((d-1)/d * p_irb/(p_rb**2) * p_rb_err)**2
+        # fid_err = np.sqrt(fid_err_sqrd)
+
+        fid_err1 = (d-1) * (np.abs(p_rb - p_irb/p_rb) + (1-p_rb)) / d
+        fid_err2 = 2*(d**2 - 1)*(1-p_rb)/(p_rb*d**2) + 4*np.sqrt(1-p_rb)*np.sqrt(d**2-1)/p_rb
+        return fid, np.min((fid_err1, fid_err2))
+    return fid
 
 def fitrb(xdata, ydata, fitparams=None):
     if fitparams is None: fitparams = [None]*3
@@ -505,13 +515,65 @@ def fitrb(xdata, ydata, fitparams=None):
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
         pOpt, pCov = sp.optimize.curve_fit(rb_func, xdata, ydata, p0=fitparams, bounds=bounds)
-        print(pOpt)
-        print(pCov[0][0], pCov[1][1], pCov[2][2])
+        # print(pOpt)
+        # print(pCov[0][0], pCov[1][1], pCov[2][2])
         # return pOpt, pCov
     except RuntimeError: 
         print('Warning: fit failed!')
         # return 0, 0
     return pOpt, pCov
+
+
+# See Wood and Gambetta 2017 section III
+def leakage_err(p, offset):
+    """ L1 error """
+    return (1-offset)*(1-p)
+def seepage_err(p, offset):
+    """ L2 error """
+    return offset*(1-p)
+def rb_decay_l1_l2(depth, p1, a0, b0, c0, p2):
+    """
+    Fit decay of g state in subspace when accounting for leakage and seepage
+    p1 should be fixed by fitting using the regular rb decay
+    """
+    return a0 + b0*p1**depth + c0*p2**depth
+def rb_fidelity_l1_l2(d, p2, l1, p2_err=None, l1_err=None): # d = dim of subspace
+    fid = (1/d) * ((d-1)*p2 + 1 - l1)
+    if p2_err is not None and l1_err is not None:
+        fid_err_sqrd = ((1/d) * (d-1) * p2_err)**2 + ((1/d) * l1_err)**2
+        fid_err = np.sqrt(fid_err_sqrd)
+        return fid, fid_err
+    return fid
+
+# offset should be passed in from fit using regular rb decay
+def fitrb_l1_l2(xdata, ydata, p1, offset, fitparams=None):
+    if fitparams is None: fitparams = [None]*4
+    else: fitparams = np.copy(fitparams)
+    if fitparams[0] is None: fitparams[0]=0.5*offset # a0
+    if fitparams[1] is None: fitparams[1]=0.5 # b0
+    if fitparams[2] is None: fitparams[2]=0.5 # c0
+    if fitparams[3] is None: fitparams[3]=0.9 # p2
+    bounds = (
+        [0, 0, 0, 0],
+        [min((1.2*offset, 1)), 1, 1, 1]
+        )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(f'Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}')
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(lambda depth, a0, b0, c0, p2: rb_decay_l1_l2(depth, p1, a0, b0, c0, p2), xdata, ydata, p0=fitparams, bounds=bounds)
+        # print(pOpt)
+        # print(pCov[0][0], pCov[1][1], pCov[2][2])
+        # return pOpt, pCov
+    except RuntimeError: 
+        print('Warning: fit failed!')
+        # return 0, 0
+    return pOpt, pCov
+
+
 
 # ====================================================== #
 # Adiabatic pi pulse functions

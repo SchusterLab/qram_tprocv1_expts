@@ -184,7 +184,7 @@ class PulseProbeEFSpectroscopyExperiment(Experiment):
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, signs=[1,1], **kwargs):
+    def analyze(self, data=None, fit=True, signs=[1,1,1], **kwargs):
         if data is None:
             data=self.data
         if fit:

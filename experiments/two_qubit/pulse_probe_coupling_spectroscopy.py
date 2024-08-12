@@ -118,12 +118,16 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
 
         # add qubit pulses to respective channels
         if self.cfg.expt.pulse_type == 'flat_top':
-            self.add_gauss(ch=self.qubit_chs[qA], name="qubit", sigma=3, length=3*4)
+            self.add_gauss(ch=self.qubit_chs[qA], name="probe", sigma=3, length=3*4)
         elif self.cfg.expt.pulse_type == 'gauss':
             length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA])
-            self.add_gauss(ch=self.qubit_chs[qA], name="qubit", sigma=length, length=length*4)
+            self.add_gauss(ch=self.qubit_chs[qA], name="probe", sigma=length, length=length*4)
 
-        self.add_gauss(ch=self.qubit_chs[qB], name="pi_qubitB", sigma=self.pi_sigmaB, length=self.pi_sigmaB*4)
+        self.add_gauss(ch=self.qubit_chs[qB], name="pi_qB_ge", sigma=self.pi_sigmaB, length=self.pi_sigmaB*4)
+
+        if 'checkEF' in self.cfg.expt and self.cfg.expt.checkEF:
+            self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
+            self.add_gauss(ch=self.qubit_chs[qA], name="pi_qA_ge", sigma=self.pi_sigmaA, length=self.pi_sigmaA*4)
 
         # add readout pulses to respective channels
         if 'mux4' in self.res_ch_types:
@@ -145,22 +149,26 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
  
         # initialize qubit B to E
         if self.cfg.expt.pulseB:
-            self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", phase=0, freq=self.f_ge_reg[qB], gain=cfg.device.qubit.pulses.pi_ge.gain[qB], waveform="pi_qubitB")
-            self.sync_all(5)
+            self.setup_and_pulse(ch=self.qubit_chs[qB], style="arb", phase=0, freq=self.f_ge_reg[qB], gain=cfg.device.qubit.pulses.pi_ge.gain[qB], waveform="pi_qB_ge")
+            self.sync_all()
+        
+        if self.cfg.expt.checkEF:
+            self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qA_ge")
+            self.sync_all()
 
         # sweep qubit A frequency
         length = self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA])
         if self.cfg.expt.pulse_type == 'flat_top':
-            self.set_pulse_registers(ch=self.qubit_chs[qA], style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.gain, length=length, waveform="qubit") # play probe pulse
+            self.set_pulse_registers(ch=self.qubit_chs[qA], style="flat_top", phase=0, freq=self.f_start, gain=cfg.expt.gain, length=length, waveform="probe") # play probe pulse
         elif self.cfg.expt.pulse_type == 'gauss':
-            self.set_pulse_registers(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_start, gain=cfg.expt.gain, waveform="qubit") # play probe pulse
+            self.set_pulse_registers(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_start, gain=cfg.expt.gain, waveform="probe") # play probe pulse
         elif self.cfg.expt.pulse_type == 'const':
             self.set_pulse_registers(ch=self.qubit_chs[qA], style="const", freq=self.f_start, phase=0, gain=cfg.expt.gain, length=self.us2cycles(cfg.expt.length, gen_ch=self.qubit_chs[qA]))
         self.mathi(self.q_rps[qA], self.r_freq_A, self.r_freq_A_update, "+", 0)
         self.pulse(ch=self.qubit_chs[qA])
-        self.sync_all(5)
+        self.sync_all()
 
-        self.sync_all(5)
+        self.sync_all()
         self.measure(
             pulse_ch=self.measure_chs, 
             adcs=[self.adc_chs[qA]],

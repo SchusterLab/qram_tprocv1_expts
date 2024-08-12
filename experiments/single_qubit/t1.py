@@ -226,12 +226,12 @@ class T1Experiment(Experiment):
         
         plt.figure(figsize=(10, 5))
         plt.subplot(111,title="$T_1$", xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
-        plt.plot(data["xpts"][:-1], data["amps"][:-1],'.-')
+        plt.plot(data["xpts"], data["amps"],'.-')
         if fit:
             p = data['fit_amps']
             pCov = data['fit_err_amps']
             captionStr = f'$T_1$ fit [us]: {p[3]:.3} $\pm$ {np.sqrt(pCov[3][3]):.3}'
-            plt.plot(data["xpts"][:-1], fitter.expfunc(data["xpts"][:-1], *data["fit_amps"]), label=captionStr)
+            plt.plot(data["xpts"], fitter.expfunc(data["xpts"], *data["fit_amps"]), label=captionStr)
             plt.legend()
             print(f'Fit T1 amps [us]: {data["fit_amps"][3]}')
 

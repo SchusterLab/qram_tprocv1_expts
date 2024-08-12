@@ -11,7 +11,7 @@ from slab import Experiment, dsfit, AttrDict
 import experiments.fitting as fitter
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import QutritAveragerProgram
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts, infer_gef_popln
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts, infer_gef_popln_2readout
 
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
@@ -60,7 +60,6 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=self.sigma_test, length=self.sigma_test*4)
         elif self.cfg.expt.pulse_type.lower() == "flat_top" and self.cfg.expt.sigma_test > 0:
             self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=3, length=3*4)
-
 
         # add second (calibrated) swap pulse
         if 'qubits_simul_swap' in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
@@ -112,14 +111,13 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
         qNotDrive = self.qNotDrive
         qSort = self.qSort
 
-        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
-        for ch in self.gen_chs.keys():
-            if ch not in self.measure_chs: # doesn't work for the mux ADCs
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style='const', freq=100, phase=0, gain=100, length=10, phrst=1)
-            # self.sync_all()
-        self.sync_all(10)
+        self.reset_and_sync()
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
+            if 'cool_idle' in self.cfg.expt and self.cfg.expt.cool_idle is not None:
+                cool_idle = self.cfg.expt.cool_idle
+            self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
 
         # ================= #
         # Initial states
@@ -140,7 +138,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
         elif init_state == '|0>|2>':
             self.Y_pulse(q=1, play=True)
-            self.setup_and_pulse(ch=self.qubit_chs[1], freq=self.f_ef_regs[1], style='arb', phase=0, gain=self.cfg.device.qubit.pulses.pi_ef.gain[1], waveform=f'pi_ef_q1')
+            self.Yef_pulse(q=1, play=True)
             self.sync_all()
 
         elif init_state == '|1>|0>':
@@ -148,16 +146,29 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             self.sync_all()
 
         elif init_state == '|1>|0+1>':
-            self.Y_pulse(q=0, play=True)
-            self.sync_all(0)
+            if not self.cfg.expt.use_IQ_pulse:
+                self.Y_pulse(q=0, play=True)
+                self.sync_all()
 
-            pi2_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0]/2, gen_ch=self.qubit_chs[1])
-            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_ZZ0_half', sigma=pi2_Q1_ZZ_sigma_cycles, length=4*pi2_Q1_ZZ_sigma_cycles)
-            # phase = self.deg2reg(-90+260.6060606060606, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0_half')
-            # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
-            self.sync_all()
+                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+                # phase = self.deg2reg(0, gen_ch=self.qubit_chs[1])
+                freq = self.f_Q1_ZZ_regs[0]
+
+                waveform = 'qubit1_ZZ0_half'
+                sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0]/2, gen_ch=self.qubit_chs[1])
+                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
+                self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+
+                # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
+                self.sync_all()
+
+            else:
+                IQ_qubits = [0, 1]
+                for q in IQ_qubits:
+                    # play the I + Q component for each qubit in the IQ pulse
+                    self.handle_IQ_pulse(name=f'pulse_1p_Q{q}', ch=self.qubit_chs[q], sync_after=False, play=True)
+                self.sync_all()
 
         elif init_state == '|1>|1>':
             self.Y_pulse(q=0, play=True)
@@ -166,35 +177,45 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
             self.sync_all()
 
-        elif init_state == '|0+1>|0+1>':
-            assert False, f'init state {init_state} is not well calibrated!'
-            self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
-            self.sync_all()
-
-            freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-            sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
-            pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
-            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-            self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
-            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
-            self.sync_all()
+        # elif init_state == '|0+1>|0+1>':
+        #     if not self.cfg.expt.use_IQ_pulse:
+        #         assert False, 'not implemented!'
+        #     else:
+        #         IQ_qubits = [0, 1]
+        #         for q in IQ_qubits:
+        #             # play the I + Q component for each qubit in the IQ pulse
+        #             self.handle_IQ_pulse(name=f'pulse_pp_Q{q}', ch=self.qubit_chs[q], sync_after=False, play=True)
+        #         self.sync_all()
 
         elif init_state == '|0+1>|0>':
             self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
             self.sync_all()
 
-        elif init_state == '|0+1>|1>':
-            self.Y_pulse(q=1, play=True, pihalf=False) # -> 1
-            self.sync_all()
 
-            waveform = f'qubit0_ZZ1'
-            freq = self.freq2reg(self.cfg.device.qubit.f_Q_ZZ1[0], gen_ch=self.qubit_chs[0])
-            gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
-            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0], gen_ch=self.qubit_chs[0])
-            self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-            self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[0]), gain=gain, waveform=waveform)
-            self.sync_all()
+        elif init_state == '|0+1>|1>':
+            if not self.cfg.expt.use_IQ_pulse:
+                self.Y_pulse(q=1, play=True) # -> 1
+                self.sync_all()
+
+                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[0]) # +Y/2 -> 0+1
+                freq = self.f_Q_ZZ1_regs[0]
+
+                waveform = f'qubit0_ZZ1_half'
+                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0]
+                # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
+                sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0]/2, gen_ch=self.qubit_chs[0])
+                self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+                self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+                self.sync_all()
+                # print('WARNING, LONGER SYNC ON THIS PULSE') self.sync_all(self.us2cycles(0.030))
+
+            else:
+                IQ_qubits = [0, 1]
+                for q in IQ_qubits:
+                    # play the I + Q component for each qubit in the IQ pulse
+                    self.handle_IQ_pulse(name=f'pulse_p1_Q{q}', ch=self.qubit_chs[q], sync_after=False, play=True)
+                self.sync_all()
+
 
         elif init_state == '|0+i1>|0+1>':
             self.X_pulse(q=0, play=True, pihalf=True, neg=True) # -> 0+i1
@@ -209,8 +230,86 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
             self.sync_all()
         
+        elif 'Q1' in init_state: # specify other qubits to prepare. it will always be specified as QxQ1_regular_state_name, with regular state name specified as |Qx>|Q1>
+            assert init_state[2:5] == 'Q1_'
+            q_other = int(init_state[1])
+            assert q_other == 2 or q_other == 3
+            init_state_other = init_state[5:]
+
+            if init_state_other == '|0>|0>':
+                pass
+
+            elif init_state_other == '|0>|1>':
+                self.Y_pulse(q=1, play=True)
+                self.sync_all()
+
+            elif init_state_other == '|0>|2>':
+                self.Y_pulse(q=1, play=True)
+                self.Yef_pulse(q=1, play=True)
+                self.sync_all()
+
+            elif init_state_other == '|0>|0+1>':
+                self.Y_pulse(q=1, play=True, pihalf=True)
+                self.sync_all()
+
+            elif init_state_other == '|1>|0>':
+                self.Y_pulse(q=q_other, play=True, pihalf=False)
+                self.sync_all()
+
+            elif init_state_other == '|2>|0>':
+                self.Y_pulse(q=q_other, play=True, pihalf=False)
+                self.Yef_pulse(q=q_other, play=True)
+                self.sync_all()
+
+            elif init_state_other == '|1>|0+1>':
+                self.Y_pulse(q=q_other, play=True)
+                self.sync_all()
+
+                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
+                # phase = self.deg2reg(0, gen_ch=self.qubit_chs[1])
+                freq = self.f_Q1_ZZ_regs[q_other]
+
+                waveform = f'qubit1_ZZ{q_other}_half'
+                sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q_other]/2, gen_ch=self.qubit_chs[1])
+                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[q_other]
+                self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+
+                # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[q_other], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[q_other]//2, waveform=f'qubit1_ZZ{q_other}')
+                self.sync_all()
+
+            elif init_state_other == '|1>|1>':
+                self.Y_pulse(q=q_other, play=True)
+                self.sync_all(0)
+
+                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[q_other], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[q_other], waveform=f'qubit1_ZZ{q_other}')
+                self.sync_all()
+
+            elif init_state_other == '|0+1>|0>':
+                self.Y_pulse(q=q_other, play=True, pihalf=True) # -> 0+1
+                self.sync_all()
+
+            elif init_state_other == '|0+1>|1>':
+                self.Y_pulse(q=1, play=True) # -> 1
+                self.sync_all()
+
+                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[q_other]) # +Y/2 -> 0+1
+                freq = self.f_Q_ZZ1_regs[q_other]
+
+                waveform = f'qubit{q_other}_ZZ1_half'
+                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[q_other]
+                # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[q_other] // 2
+                sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[q_other]/2, gen_ch=self.qubit_chs[q_other])
+                self.add_gauss(ch=self.qubit_chs[q_other], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+                self.setup_and_pulse(ch=self.qubit_chs[q_other], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
+                self.sync_all()
+
+            else:
+                assert False, f'Init state {init_state} not valid'
+        
         else:
-            assert False, 'Init state not valid'
+            assert False, f'Init state {init_state} not valid'
+
 
         # ================= #
         # Do the pulse
@@ -243,6 +342,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     self.setup_and_pulse(ch=self.swap_chs[qSort], style="const", freq=self.f_EgGf_reg, phase=0, gain=cfg.expt.gain, length=self.sigma_test//2) #, phrst=1)
                 self.sync_all()
             else: n_pulses = 0.5
+            if 'test_pi_half' in self.cfg.expt and self.cfg.expt.test_pi_half:
+                n_pulses *= 2
 
             # loop over error amplification (if no amplification we just loop 1x)
             for i in range(int(2*n_pulses)):
@@ -292,23 +393,26 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                             #phrst=1)
                 else: # const
                     self.setup_and_pulse(ch=self.swap_chs[qSort], style="const", freq=self.f_EgGf_reg, phase=0, gain=cfg.expt.gain, length=self.sigma_test) #, phrst=1)
-                self.sync_all(5)
+                self.sync_all()
 
         setup_measure = None
         if 'setup_measure' in self.cfg.expt: setup_measure = self.cfg.expt.setup_measure
 
         # take qDrive g->e: measure the population of just the e state when e/f are not distinguishable by checking the g population
-        if setup_measure == 'qDrive_ge':
+        if setup_measure != None and 'qDrive_ge' in setup_measure:
             # print('playing ge pulse')
+            # print('doing x pulse on qDrive')
             self.X_pulse(q=qDrive, play=True)
 
-        if setup_measure == None: pass # measure the real g population only
+        if setup_measure == None or len(setup_measure) == 0: pass # measure the real g population only
 
         # take qDrive f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
-        # if setup_measure == 'qDrive_ef':
-        self.setup_and_pulse(ch=self.qubit_chs[qDrive], style="arb", freq=self.f_ef_regs[qDrive], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qDrive], waveform=f"pi_ef_qubit{qDrive}") #, phrst=1)
+        if setup_measure != None and 'qDrive_ef' in setup_measure:
+            # print('doing xef pulse on qDrive')
+            self.Xef_pulse(q=qDrive, play=True)
 
-        if setup_measure == 'qNotDrive_ge':
+        if setup_measure != None and 'qNotDrive_ge' in setup_measure:
+            # print('doing x pulse on qNotDrive')
             self.X_pulse(q=qNotDrive, play=True)
         
         
@@ -345,6 +449,15 @@ class LengthRabiEgGfExperiment(Experiment):
 
     def acquire(self, progress=False, debug=False):
         qA, qB = self.cfg.expt.qubits
+        self.measure_f = False
+        if self.cfg.expt.measure_f is not None and len(self.cfg.expt.measure_f) >= 0:
+            self.measure_f = True
+            assert len(self.cfg.expt.measure_f) == 1
+            q_measure_f = self.cfg.expt.measure_f[0]
+            q_other = qA if q_measure_f == qB else qB
+            # Need to make sure qubits are in the right order for all of the calibrations if we want to measure f! Let's just rename the cfg.expt.qubits so it's easy for the rest of this.
+            self.cfg.expt.qubits = [q_other, q_measure_f]
+        qA, qB = self.cfg.expt.qubits
 
         qSort = qA
         if qA == 1: qSort = qB
@@ -355,7 +468,10 @@ class LengthRabiEgGfExperiment(Experiment):
         if qA == qDrive: qNotDrive = qB
         else: qNotDrive = qA
 
+        print('qA', qA, 'qB', qB, 'qDrive', qDrive)
+        
         if 'measure_qubits' not in self.cfg.expt: self.cfg.expt.measure_qubits = [qA, qB]
+
 
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
@@ -379,7 +495,7 @@ class LengthRabiEgGfExperiment(Experiment):
             data['amps'].append([])
             data['phases'].append([])
         if self.cfg.expt.measure_f is not None:
-            for i in range(len(self.cfg.expt.measure_f)): # measure g of everybody, measure e of each measure_f qubit
+            for i in range(len(self.cfg.expt.measure_f)): # measure g of everybody, second measurement of each measure_f qubit using the g/f readout
                 data['counts_raw'].append([])
 
         # ================= #
@@ -389,7 +505,11 @@ class LengthRabiEgGfExperiment(Experiment):
         if 'post_process' not in self.cfg.expt.keys(): # threshold or scale
             self.cfg.expt.post_process = None
 
+
         calib_order = ['gg', 'ge', 'eg', 'ee']
+        if self.measure_f: calib_order += ['gf', 'ef']
+        data['calib_order'] = calib_order
+            
         if self.cfg.expt.post_process is not None:
             if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt and self.cfg.expt.angles is not None and self.cfg.expt.thresholds is not None and self.cfg.expt.ge_avgs is not None and self.cfg.expt.counts_calib is not None:
                 angles_q = self.cfg.expt.angles
@@ -426,7 +546,7 @@ class LengthRabiEgGfExperiment(Experiment):
                     e_prog = calib_prog_dict[calib_e_state]
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                    print(f'Qubit  ({q})')
+                    print(f'Qubit ({q}) ge')
                     fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                     thresholds_q[q] = threshold[0]
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -461,75 +581,123 @@ class LengthRabiEgGfExperiment(Experiment):
         if 'pulse_type' not in self.cfg.expt:
             if qDrive == 1: self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
             else: self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
+            
+            
+        adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
+        adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
+       
         
         if 'loops' not in self.cfg.expt: self.cfg.expt.loops = 1
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
             for length in tqdm(lengths, disable=not progress or self.cfg.expt.loops > 1):
                 self.cfg.expt.sigma_test = float(length)
                 # lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-                if self.cfg.expt.measure_f is None or len(self.cfg.expt.measure_f) == 0:
-                    if self.cfg.expt.post_process is not None and len(self.cfg.expt.measure_qubits) != 2:
-                        assert False, 'more qubits not implemented for measure f'
-                    self.cfg.expt.setup_measure = 'qDrive_ef' # measure g vs. f (e)
-                    lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-                    # print(lengthrabi)
-                    # from qick.helpers import progs2json
-                    # print(progs2json([lengthrabi.dump_prog()]))
-                    avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
+                if self.cfg.expt.post_process is not None and len(self.cfg.expt.measure_qubits) != 2:
+                    assert False, 'more qubits not implemented for measure f'
+                if not self.measure_f: self.cfg.expt.setup_measure = 'qDrive_ef'
+                lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
+                # print(lengthrabi)
+                # from qick.helpers import progs2json
+                # print(progs2json([lengthrabi.dump_prog()]))
+                avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
 
-                    for i_q, q in enumerate(self.cfg.expt.measure_qubits):
-                        adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
-                        data['avgi'][i_q].append(avgi[adc_ch])
-                        data['avgq'][i_q].append(avgq[adc_ch])
-                        data['amps'][i_q].append(np.abs(avgi[adc_ch]+1j*avgq[adc_ch]))
-                        data['phases'][i_q].append(np.angle(avgi[adc_ch]+1j*avgq[adc_ch]))
+                # in Eg (swap failed) or Gf (swap succeeded)
+                shots, _ = lengthrabi.get_shots(angle=angles_q, threshold=thresholds_q)
+                # 00, 01, 10, 11
+                counts = np.array(sort_counts(shots[adcA_ch], shots[adcB_ch]))
+                data['counts_raw'][0].append(counts)
 
-                else:
+                for i_q, q in enumerate(self.cfg.expt.measure_qubits):
+                    adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
+                    data['avgi'][i_q].append(avgi[adc_ch])
+                    data['avgq'][i_q].append(avgq[adc_ch])
+                    data['amps'][i_q].append(np.abs(avgi[adc_ch]+1j*avgq[adc_ch]))
+                    data['phases'][i_q].append(np.angle(avgi[adc_ch]+1j*avgq[adc_ch]))
+
+        # ================= #
+        # Measure the same thing with g/f distinguishing
+        # ================= #
+
+        if self.measure_f:
+            data.update({'counts_calib_f':[]})
+
+            # ================= #
+            # Get f state single shot calibration (this must be re-run if you just ran measurement with the standard readout)
+            # ================= #
+
+            thresholds_f_q = [0]*4
+            gf_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+            angles_f_q = [0]*4
+            fids_f_q = [0]*4
+
+            # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+            sscfg = AttrDict(deepcopy(self.cfg))
+            sscfg.expt.reps = sscfg.expt.singleshot_reps
+            sscfg.expt.tomo_qubits = self.cfg.expt.qubits # the order of this was set earlier in code so 2nd qubit is the measure f qubit
+            sscfg.device.readout.frequency[q_measure_f] = sscfg.device.readout.frequency_ef[q_measure_f]
+            sscfg.device.readout.readout_length[q_measure_f] = sscfg.device.readout.readout_length_ef[q_measure_f]
+
+            calib_prog_dict = dict()
+            for prep_state in tqdm(calib_order):
+                # print(prep_state)
+                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
+                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                calib_prog_dict.update({prep_state:err_tomo})
+
+            g_prog = calib_prog_dict['gg']
+            Ig, Qg = g_prog.get_shots(verbose=False)
+
+            # Get readout angle + threshold for qubits to distinguish g/f on one of the qubits
+            for qi, q in enumerate(sscfg.expt.tomo_qubits):
+                calib_f_state = 'gg'
+                calib_f_state = calib_f_state[:qi] + f'{"f" if q == q_measure_f else "e"}' + calib_f_state[qi+1:]
+                f_prog = calib_prog_dict[calib_f_state]
+                If, Qf = f_prog.get_shots(verbose=False)
+                shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=If[q], Qe=Qf[q])
+                print(f'Qubit ({q}){f" gf" if q == q_measure_f else " ge"}')
+                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                thresholds_f_q[q] = threshold[0]
+                gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(If[q]), np.average(Qf[q])]
+                angles_f_q[q] = angle
+                fids_f_q[q] = fid[0]
+                print(f'{"gf" if q == q_measure_f else "ge"} fidelity (%): {100*fid[0]}')
+
+            # Process the shots taken for the confusion matrix with the calibration angles
+            for prep_state in calib_order:
+                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_f_q, threshold=thresholds_f_q)
+                data['counts_calib_f'].append(counts)
+
+            print(f'thresholds_f={thresholds_f_q},')
+            print(f'angles_f={angles_f_q},')
+            print(f'gf_avgs={gf_avgs_q},')
+            print(f"counts_calib_f={np.array(data['counts_calib_f']).tolist()}")
+
+            data['thresholds_f'] = thresholds_f_q
+            data['angles_f'] = angles_f_q
+            data['gf_avgs'] = gf_avgs_q
+            data['counts_calib_f'] = np.array(data['counts_calib_f'])
+
+            if 'loops' not in self.cfg.expt: self.cfg.expt.loops = 1
+            for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
+                for length in tqdm(lengths, disable=not progress or self.cfg.expt.loops > 1):
+                    self.cfg.expt.sigma_test = float(length)
+
                     assert len(self.cfg.expt.measure_qubits) == 2, 'more qubits not implemented for measure f'
-                    adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
-                    adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
+                    assert self.cfg.expt.post_process is not None, 'post_process cannot be None if measuring f state'
+                    assert self.cfg.expt.post_process == 'threshold', 'can only bin for f state with confusion matrix properly using threshold'
 
-                    self.cfg.expt.setup_measure = 'qDrive_ef' # measure g vs. f (e)
-                    lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-                    popln, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
-                    counts1 = popln
+                    rabi_f_cfg = AttrDict(deepcopy(self.cfg))
+                    rabi_f_cfg.device.readout.frequency[q_measure_f] = rabi_f_cfg.device.readout.frequency_ef[q_measure_f]
+                    rabi_f_cfg.device.readout.readout_length[q_measure_f] = rabi_f_cfg.device.readout.readout_length_ef[q_measure_f]
 
-                    if self.cfg.expt.post_process == 'threshold':
-                        # in Eg (swap failed) or Gf (swap succeeded)
-                        shots, _ = lengthrabi.get_shots(angle=angles_q, threshold=thresholds_q)
-                        # 00, 01, 10, 11
-                        counts = np.array([sort_counts(shots[adcA_ch], shots[adcB_ch])])
-                        data['counts_raw'][0].append(counts)
-                        counts1 = counts
+                    lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=rabi_f_cfg)
+                    popln, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_f_q, threshold=thresholds_f_q, ge_avgs=gf_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
 
-                    for iq_f, q_f in enumerate(self.cfg.expt.measure_qubits):
-                        if q_f in self.cfg.expt.measure_f:
-                            if q_f == qDrive: 
-                                self.cfg.expt.setup_measure = 'qDrive_ge' # measure e population
-                            else: 
-                                self.cfg.expt.setup_measure = 'qNotDrive_ge' # measure e population
-
-                            lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-                            popln, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
-                            counts_q_f = popln
-                            if self.cfg.expt.post_process == 'threshold':
-                                # in Eg (swap failed) or Gf (swap succeeded)
-                                shots, _ = lengthrabi.get_shots(angle=angles_q, threshold=thresholds_q)
-                                # 00, 01, 10, 11
-                                counts = np.array([sort_counts(shots[adcA_ch], shots[adcB_ch])])
-                                data['counts_raw'][1+np.where(np.array(self.cfg.expt.measure_f) == q_f)[0][0]].append(counts)
-                                counts_q_f = counts
-                            measure_f_qubits = [q_f]
-                        else:
-                            counts_q_f = None
-                            measure_f_qubits = None
-
-                        gpop_q, epop_q, fpop_q = infer_gef_popln(qubits=self.cfg.expt.qubits, counts1=counts1, counts2=counts_q_f, calib_order=calib_order, counts_calib=data['counts_calib'], fix_neg_counts_flag=True, measure_f_qubits=measure_f_qubits, post_process=self.cfg.expt.post_process)
-
-                        data['avgi'][iq_f].append(epop_q[q_f])
-                        data['avgq'][iq_f].append(fpop_q[q_f])
-                        data['amps'][iq_f].append(0)
-                        data['phases'][iq_f].append(0)
+                    shots, _ = lengthrabi.get_shots(angle=angles_f_q, threshold=thresholds_f_q)
+                    # 00, 02, 10, 12
+                    counts = np.array(sort_counts(shots[adcA_ch], shots[adcB_ch]))
+                    data['counts_raw'][1].append(counts)
 
         data['xpts'] = lengths
 
@@ -539,6 +707,9 @@ class LengthRabiEgGfExperiment(Experiment):
             data['amps'][i_q] = np.average(np.reshape(data['amps'][i_q], (self.cfg.expt.loops, len(lengths))), axis=0)
             data['phases'][i_q] = np.average(np.reshape(data['phases'][i_q], (self.cfg.expt.loops, len(lengths))), axis=0)
 
+        for icounts in range(len(data['counts_raw'])):
+            data['counts_raw'][icounts] = np.sum(np.reshape(data['counts_raw'][icounts], (self.cfg.expt.loops, len(lengths), 4)), axis=0) # --> counts_raw shape is (num_meas_f + 1, num_lengths, 4)
+
         for k, a in data.items():
             data[k] = np.array(a)
         
@@ -547,8 +718,39 @@ class LengthRabiEgGfExperiment(Experiment):
         return data
 
     def analyze(self, data=None, fit=True):
+
         if data is None:
             data=self.data
+
+        qA, qB = self.cfg.expt.qubits
+        self.measure_f = False
+        if self.cfg.expt.measure_f is not None and len(self.cfg.expt.measure_f) >= 0:
+            self.measure_f = True
+            assert len(self.cfg.expt.measure_f) == 1
+            q_measure_f = self.cfg.expt.measure_f[0]
+            q_other = qA if q_measure_f == qB else qB
+            # Need to make sure qubits are in the right order for all of the calibrations if we want to measure f! Let's just rename the cfg.expt.qubits so it's easy for the rest of this.
+            self.cfg.expt.qubits = [q_other, q_measure_f]
+        qA, qB = self.cfg.expt.qubits
+
+        if self.measure_f:
+            data['counts_calib_total'] = np.concatenate((data['counts_calib'], data['counts_calib_f']), axis=1)
+            # print('counts calib total', np.shape(data['counts_calib_total']))
+            # print(data['counts_calib_total'])
+            # print('counts raw', np.shape(data['counts_raw']))
+            # print(data['counts_raw'])
+            data['counts_raw_total'] = np.concatenate((data['counts_raw'][0], data['counts_raw'][1]), axis=1)
+            # print('counts raw total', np.shape(data['counts_raw_total']))
+            data['gpop'] = np.zeros(shape=(len(self.cfg.expt.measure_qubits), len(data['xpts'])))
+            data['epop'] = np.zeros(shape=(len(self.cfg.expt.measure_qubits), len(data['xpts'])))
+            data['fpop'] = np.zeros(shape=(len(self.cfg.expt.measure_qubits), len(data['xpts'])))
+            for ilen, length in enumerate(data['xpts']):
+                gpop_q, epop_q, fpop_q = infer_gef_popln_2readout(qubits=self.cfg.expt.qubits, counts_raw_total=data['counts_raw_total'][ilen], calib_order=data['calib_order'], counts_calib=data['counts_calib_total'], fix_neg_counts_flag=True)
+                for iq, q in enumerate(self.cfg.expt.measure_qubits):
+                    data['gpop'][iq, ilen] = gpop_q[q]
+                    data['epop'][iq, ilen] = epop_q[q]
+                    data['fpop'][iq, ilen] = fpop_q[q]
+
         if fit:
             # fitparams=[yscale, freq, phase_deg, decay, y0]
             # Remove the first and last point from fit in case weird edge measurements
@@ -593,59 +795,73 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
         this_idx = index + 1
         plt.subplot(this_idx, title=f'Qubit A ({self.cfg.expt.measure_qubits[0]})', ylabel='Population E' if self.cfg.expt.post_process else "I [adc level]")
-        pi_len = self.plot_rabi(data=data, data_name='avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=0, q_name='A', fit=fit)
+        pi_len = self.plot_rabi(data=data, data_name='epop' if self.measure_f else 'avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=0, q_name='A', fit=fit)
         pi_lens.append(pi_len) 
         # if self.cfg.expt.post_process: plt.ylim(-0.1, 1.1)
         
         this_idx = index + cols + 1
         plt.subplot(this_idx, ylabel='Population F' if self.cfg.expt.post_process else "Q [adc level]")
-        pi_len = self.plot_rabi(data=data, data_name='avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=0, q_name='A', fit=fit)
+        pi_len = self.plot_rabi(data=data, data_name='fpop' if self.measure_f else 'avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=0, q_name='A', fit=fit)
         pi_lens.append(pi_len) 
-        plt.axhline(1.0)
-        plt.axhline(0.0)
-        if self.cfg.expt.post_process: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process:
+            plt.axhline(1.0)
+            plt.axhline(0.0)
+            plt.ylim(-0.1, 1.1)
 
         this_idx = index + 2*cols + 1
         plt.subplot(this_idx, xlabel="Length [ns]", ylabel='Population G' if self.cfg.expt.post_process else "1 - I - Q [adc level]")
-        plt.plot(1e3*data['xpts'], 1 - (data['avgi'][0] + data['avgq'][0]), '.-')
+        plt.plot(1e3*data['xpts'], data['gpop'][0] if self.measure_f else (1 - (data['avgi'][0] + data['avgq'][0])), '.-')
         plt.ylabel('Population G')
-        plt.axhline(1.0)
-        plt.axhline(0.0)
-        if self.cfg.expt.post_process: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process:
+            plt.axhline(1.0)
+            plt.axhline(0.0)
+            plt.ylim(-0.1, 1.1)
 
         this_idx = index + 2
         plt.subplot(this_idx, title=f'Qubit B ({self.cfg.expt.measure_qubits[1]})')
-        pi_len = self.plot_rabi(data=data, data_name='avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=1, q_name='B', fit=fit)
+        pi_len = self.plot_rabi(data=data, data_name='epop' if self.measure_f else 'avgi', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=1, q_name='B', fit=fit)
         pi_lens.append(pi_len) 
-        plt.axhline(1.0)
-        plt.axhline(0.0)
-        if self.cfg.expt.post_process: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process:
+            plt.axhline(1.0)
+            plt.axhline(0.0)
+            plt.ylim(-0.1, 1.1)
 
         this_idx = index + cols + 2
         plt.subplot(this_idx)
-        pi_len = self.plot_rabi(data=data, data_name='avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=1, q_name='B', fit=fit)
+        pi_len = self.plot_rabi(data=data, data_name='fpop' if self.measure_f else 'avgq', fit_xpts=data['xpts'], plot_xpts=xpts_ns, q_index=1, q_name='B', fit=fit)
         pi_lens.append(pi_len) 
-        plt.axhline(1.0)
-        plt.axhline(0.0)
-        if self.cfg.expt.post_process: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process:
+            plt.axhline(1.0)
+            plt.axhline(0.0)
+            plt.ylim(-0.1, 1.1)
 
         this_idx = index + 2*cols + 2
         plt.subplot(this_idx, xlabel="Length [ns]")
-        plt.plot(1e3*data['xpts'], 1 - (data['avgi'][1] + data['avgq'][1]), '.-')
+        plt.plot(1e3*data['xpts'],  data['gpop'][1] if self.measure_f else (1 - (data['avgi'][1] + data['avgq'][1])), '.-')
         plt.ylabel('Population G')
-        plt.axhline(1.0)
-        plt.axhline(0.0)
-        if self.cfg.expt.post_process: plt.ylim(-0.1, 1.1)
+        if self.cfg.expt.post_process:
+            plt.axhline(1.0)
+            plt.axhline(0.0)
+            plt.ylim(-0.1, 1.1)
 
         if self.cfg.expt.measure_f:
-            print('max QA f population:', np.max(data['avgq'][0]))
-            print('min QA f population:', np.min(data['avgq'][0]))
-            print('mean QA f population:', np.mean(data['avgq'][0]))
-            print('min QB e population:', np.min(data['avgi'][1]))
-            print('max QB e population:', np.max(data['avgi'][1]))
-            print('mean QB e population:', np.mean(data['avgi'][1]))
+            print('max QA f population:', np.max(data['fpop'][0]))
+            print('min QA f population:', np.min(data['fpop'][0]))
+            print('mean QA f population:', np.mean(data['fpop'][0]))
+            print('max QA g population:', np.max(data['gpop'][0]))
+            print('min QA g population:', np.min(data['gpop'][0]))
+            print('mean QA g population:', np.mean(data['gpop'][0]))
+            print('max QB e population:', np.max(data['epop'][1]))
+            print('min QB e population:', np.min(data['epop'][1]))
+            print('mean QB e population:', np.mean(data['epop'][1]))
         
+        else:
+            print('max QA amp:', np.max(data['amps'][0]))
+            print('min QA amp:', np.min(data['amps'][0]))
+            print('max QB amp:', np.max(data['amps'][1]))
+            print('min QB amp:', np.min(data['amps'][1]))
         
+       
 
         # ------------------------------ #
         if len(self.cfg.expt.measure_qubits) == 3:
@@ -831,7 +1047,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
 
         # fitparams = [yscale, freq, phase_deg, y0]
         # fitparams=[None, 2/x_sweep[-1], None, None]
-        for data_name in ['avgi', 'avgq']:
+        for data_name in ['avgi', 'avgq', 'amps']:
             data.update({f'fit{data_name}':[None]*len(self.cfg.expt.measure_qubits)})
             data.update({f'fit{data_name}_err':[None]*len(self.cfg.expt.measure_qubits)})
             data.update({f'data_fit{data_name}':[None]*len(self.cfg.expt.measure_qubits)})
@@ -877,10 +1093,10 @@ class EgGfFreqLenChevronExperiment(Experiment):
         plot_lens = []
         plot_freqs = []
 
-        rows = 2
+        rows = 1
         cols = len(self.cfg.expt.measure_qubits)
         index = rows*100 + cols*10
-        plt.figure(figsize=(7*cols,8))
+        plt.figure(figsize=(7*cols,6))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length (Gain {self.cfg.expt.gain})")
 
         # ------------------------------ #
@@ -890,20 +1106,12 @@ class EgGfFreqLenChevronExperiment(Experiment):
         plt.subplot(this_idx, title=f'Qubit A ({self.cfg.expt.measure_qubits[0]})')
         ax = plt.gca()
         ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
+        ax.set_xlabel("Length [ns]", fontsize=18)
         ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'avgi'
+        data_name = 'amps'
         plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
         # plt.axvline(296.184847, color='r', linestyle='--')
         # plt.axhline(5890.84708333 + 4.767395490444869, color='r', linestyle='--')
-
-        this_idx = index + cols + 1
-        plt.subplot(this_idx)
-        ax = plt.gca()
-        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
-        ax.set_xlabel("Length [ns]", fontsize=18)
-        ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'avgq'
-        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
 
         # ------------------------------ #
         q_index = 1
@@ -912,30 +1120,17 @@ class EgGfFreqLenChevronExperiment(Experiment):
         plt.subplot(this_idx, title=f'Qubit B ({self.cfg.expt.measure_qubits[1]})')
         ax = plt.gca()
         ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'avgi'
-        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
-
-        this_idx = index + cols + 2
-        plt.subplot(this_idx)
-        ax = plt.gca()
         ax.set_xlabel("Length [ns]", fontsize=18)
-        ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'avgq'
+        data_name = 'amps'
         plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
-
 
         # ------------------------------ #
         if len(self.cfg.expt.measure_qubits) == 3:
             q_index = 2
 
             this_idx = index + 3
-            plt.subplot(this_idx, title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})')
-            data_name = 'avgi'
-            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
-
-            this_idx = index + cols + 3
-            plt.subplot(this_idx, xlabel="Length [ns]")
-            data_name = 'avgq'
+            plt.subplot(this_idx, xlabel='Length [ns]', title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})')
+            data_name = 'amps'
             plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, plot_rabi=False, verbose=verbose)
 
         # ------------------------------ #
@@ -955,13 +1150,12 @@ class EgGfFreqLenChevronExperiment(Experiment):
         Plot fit chevron
 
         Calculate max/min
-        display signs: [QA I, QB I, QA Q, QB Q]
-        plot_freq, plot_len index: [QA I, QA Q, QB I, QB Q]
+        plot_freq, plot_len index: [QA amps, QB amps]
         """ 
         
         if not fit: return
         if saveplot: plt.style.use('dark_background')
-        plt.figure(figsize=(7*cols,8))
+        plt.figure(figsize=(7*cols,6))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length Fit (Gain {self.cfg.expt.gain})")
 
         # ------------------------------ #
@@ -972,19 +1166,9 @@ class EgGfFreqLenChevronExperiment(Experiment):
         ax = plt.gca()
         ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
         ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'data_fitavgi'
-        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[0], plot_rabi=True, verbose=verbose)
-        plot_freqs.append(plot_freq)
-        plot_lens.append(plot_len*1e-3)
-
-        this_idx = index + cols + 1
-        plt.subplot(this_idx)
-        ax = plt.gca()
-        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
         ax.set_xlabel("Length [ns]", fontsize=18)
-        ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'data_fitavgq'
-        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[1], plot_rabi=True, verbose=verbose)
+        data_name = 'data_fitamps'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=1, plot_rabi=True, verbose=verbose)
         plot_freqs.append(plot_freq)
         plot_lens.append(plot_len*1e-3)
 
@@ -995,37 +1179,20 @@ class EgGfFreqLenChevronExperiment(Experiment):
         plt.subplot(this_idx, title=f'Qubit B ({self.cfg.expt.measure_qubits[1]})')
         ax = plt.gca()
         ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'data_fitavgi'
-        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[2], plot_rabi=True, verbose=verbose)
-        plot_freqs.append(plot_freq)
-        plot_lens.append(plot_len*1e-3)
-
-        this_idx = index + cols + 2
-        plt.subplot(this_idx)
-        ax = plt.gca()
         ax.set_xlabel("Length [ns]", fontsize=18)
-        ax.tick_params(axis='both', which='major', labelsize=16)
-        data_name = 'data_fitavgq'
-        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[3], plot_rabi=True, verbose=verbose)
+        data_name = 'data_fitamps'
+        plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=-1, plot_rabi=True, verbose=verbose)
         plot_freqs.append(plot_freq)
         plot_lens.append(plot_len*1e-3)
-
 
         # ------------------------------ #
         if len(self.cfg.expt.measure_qubits) == 3:
             q_index = 2
 
             this_idx = index + 3
-            plt.subplot(this_idx, title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})')
-            data_name = 'data_fitavgi'
-            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[4], plot_rabi=True, verbose=verbose)
-            plot_freqs.append(plot_freq)
-            plot_lens.append(plot_len*1e-3)
-
-            this_idx = index + cols + 3
-            plt.subplot(this_idx, xlabel="Length [ns]")
-            data_name = 'data_fitavgq'
-            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=signs[5], plot_rabi=True, verbose=verbose)
+            plt.subplot(this_idx, xlabel='Length [ns]', title=f'Qubit C ({self.cfg.expt.measure_qubits[2]})')
+            data_name = 'data_fitamps'
+            plot_freq, plot_len = self.plot_rabi_chevron(data=data, data_name=data_name, plot_xpts=1e3*x_sweep, plot_ypts=y_sweep, q_index=q_index, sign=1, plot_rabi=True, verbose=verbose)
             plot_freqs.append(plot_freq)
             plot_lens.append(plot_len*1e-3)
 
@@ -1235,7 +1402,7 @@ class NPulseEgGfExperiment(Experiment):
                 assert not self.cfg.expt.measure_f, 'measure f not implemented currently'
                 if self.cfg.expt.post_process is not None and len(self.cfg.expt.measure_qubits) != 2:
                     assert False, 'more qubits not implemented for measure f'
-                self.cfg.expt.setup_measure = 'qDrive_ef' # measure g vs. f (e)
+                self.cfg.expt.se9tup_measure = 'qDrive_ef' # measure g vs. f (e)
                 lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = lengthrabi
                 avgi, avgq = lengthrabi.acquire_rotated(self.im[self.cfg.aliases.soc], angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process, progress=False, verbose=False)        
