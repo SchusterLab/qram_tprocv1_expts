@@ -50,11 +50,14 @@ class RamseyProgram(RAveragerProgram):
         if self.checkZZ: # [qA, qB] means test qB with ZZ from qA. If one of qA, qB is 1, sort by the one that is not 1; otherwise sort by the test one.
             assert len(self.qubits) == 2
             qZZ, qTest = self.qubits
-            if 1 in self.qubits:
-                # define qSort: qubit by which to index for parameters on qTest
-                if qZZ == 1: qSort = qTest
-                else: qSort = qZZ
-            else: qSort = qTest 
+            # define qSort: qubit by which to index for parameters on qTest
+            if qZZ == 1: qSort = qTest
+            else: qSort = qZZ
+            if 1 not in self.qubits:
+                qSort = qTest 
+                if self.checkEF: assert 0 in self.qubits and 3 in self.qubits
+                qZZ = 0
+                qSort = qTest = 3 
         else: qTest = self.qubits[0]
 
         self.adc_chs = cfg.hw.soc.adcs.readout.ch
@@ -164,6 +167,7 @@ class RamseyProgram(RAveragerProgram):
                     self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qSort] # gain of the pulse we are trying to calibrate
                     self.f_pi_test_reg = self.f_Q1_ZZ_reg[qSort] # freq we are trying to calibrate
                     if self.checkEF:
+                        self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ef_Q1_ZZ.sigma[qSort], gen_ch=self.qubit_chs[qTest])
                         self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef_Q1_ZZ.sigma[qSort]/2, gen_ch=self.qubit_chs[qTest])
                         self.f_pi_test_reg = self.freq2reg(self.cfg.device.qubit.f_ef_Q1_ZZ[qSort], gen_ch=self.qubit_chs[qTest])
                         self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q1_ZZ.gain[qSort] # gain of the pulse we are trying to calibrate
@@ -175,13 +179,21 @@ class RamseyProgram(RAveragerProgram):
                     self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qSort] # gain of the pulse we are trying to calibrate
                     self.f_pi_test_reg = self.f_Q_ZZ1_reg[qSort] # freq we are trying to calibrate
                     if self.checkEF:
+                        self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ef_Q_ZZ1.sigma[qSort], gen_ch=self.qubit_chs[qTest])
                         self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef_Q_ZZ1.sigma[qSort]/2, gen_ch=self.qubit_chs[qTest])
                         self.f_pi_test_reg = self.freq2reg(self.cfg.device.qubit.f_ef_Q_ZZ1[qSort], gen_ch=self.qubit_chs[qTest])
                         self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.gain[qSort] # gain of the pulse we are trying to calibrate
             else:
                 self.f_ge_init_reg = self.f_Qtest_ZZ_reg[qZZ] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
-                if 'f_pi_test' not in self.cfg.expt: self.f_pi_test_reg = self.f_Qtest_ZZ_reg[qZZ] # freq we are trying to calibrate
-                assert not self.checkEF, 'not implemented checkEF with ZZ with qubits not equal 1'
+                self.f_pi_test_reg = self.f_Qtest_ZZ_reg[qZZ] # freq we are trying to calibrate
+                # use the default gain for gain_ge_init
+                if self.checkEF:
+                    assert qZZ == 0 and qTest == 3
+                    self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ef_Q_ZZ0.sigma[qSort], gen_ch=self.qubit_chs[qTest])
+                    self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef_Q_ZZ0.sigma[qSort]/2, gen_ch=self.qubit_chs[qTest])
+                    self.f_pi_test_reg = self.freq2reg(self.cfg.device.qubit.f_ef_Q_ZZ0[qTest], gen_ch=self.qubit_chs[qTest]) # freq we are trying to calibrate
+                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ0.gain[qTest] # gain of the pulse we are trying to calibrate
+
                 # all other gains, sigmas use the default ones since we don't calibrate them otherwise
         if not self.checkZZ and self.checkEF:
             self.pi2sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[qTest]/2, gen_ch=self.qubit_chs[qTest])
@@ -270,10 +282,10 @@ class RamseyProgram(RAveragerProgram):
         # initializations as necessary
         if self.checkZZ:
             self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.f_ge_reg[qZZ], gain=cfg.device.qubit.pulses.pi_ge.gain[qZZ], waveform="pi_qubitZZ")
-            self.sync_all(5)
+            self.sync_all()
         if self.checkEF:
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
-            self.sync_all(5)
+            self.sync_all()
 
         # play pi/2 pulse with the freq that we want to calibrate
         self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.gain_pi_test, waveform="pi2_test")
@@ -450,11 +462,17 @@ class RamseyExperiment(Experiment):
         f_pi_test = self.cfg.device.qubit.f_ge[qTest]
         if self.checkZZ:
             if 1 in self.qubits:
-                if qTest == 1: f_pi_test = self.cfg.device.qubit.f_Q1_ZZ[qSort]
-                else: f_pi_test = self.cfg.device.qubit.f_Q_ZZ1[qSort]
+                if qTest == 1:
+                    f_pi_test = self.cfg.device.qubit.f_Q1_ZZ[qSort]
+                    if self.checkEF: f_pi_test = self.cfg.device.qubit.f_ef_Q1_ZZ[qSort]
+                else:
+                    f_pi_test = self.cfg.device.qubit.f_Q_ZZ1[qSort]
+                    if self.checkEF: f_pi_test = self.cfg.device.qubit.f_ef_Q_ZZ1[qSort]
             else:
                 ZZs = np.reshape(np.array(self.cfg.device.qubit.ZZs), (4,4)) # MHz
                 f_pi_test = self.cfg.device.qubit.f_ge[qTest] + ZZs[qTest, qZZ]
+                if self.checkEF:
+                    f_pi_test = self.cfg.device.qubit.f_ef_Q_ZZ0[qTest]
         if self.checkEF: f_pi_test = self.cfg.device.qubit.f_ef[qTest]
 
         title = ('EF' if self.checkEF else '') + f'Ramsey on Q{qTest}' + (f' with Q{qZZ} in e' if self.checkZZ else '') 

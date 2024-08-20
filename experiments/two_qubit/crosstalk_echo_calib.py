@@ -7,12 +7,12 @@ from qick.helpers import gauss
 from slab import Experiment, dsfit, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
-from experiments.clifford_averager_program import CliffordAveragerProgram
+from experiments.clifford_averager_program import QutritAveragerProgram
 from experiments.single_qubit.single_shot import hist
 from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts
 import experiments.fitting as fitter
 
-class CrosstalkEchoProgram(CliffordAveragerProgram):
+class CrosstalkEchoProgram(QutritAveragerProgram):
     def initialize(self):
         super().initialize()
 

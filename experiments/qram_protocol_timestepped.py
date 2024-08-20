@@ -516,6 +516,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 if prev_pulse == 1 or prev_pulse == 2: self.sync_all()
                 count_us = self.q2_ef(count_us, pihalf=False, sync_after=True)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
+                # self.sync_all(5)
 
             # 4. apply ef pulse on Q3 (at this point guaranteed no excitation in Q1) [path 2]
             # This one should be run before 3 because the ZZ from q2 on q3 EF is very large, while the ZZ from q3 on q2 EF is quite small
@@ -523,6 +524,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 if prev_pulse == 1 or prev_pulse == 2: self.sync_all()
                 count_us = self.q3_ef(count_us, pihalf=False, sync_after=True)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
+                # self.sync_all(5)
             
             prev_pulse = pulse_num
             
@@ -951,7 +953,8 @@ def multihist(data, check_qubit, qubits, check_states, play_pulses_list, g_state
 
             n, bins, p = axs[1,0].hist(I_new, bins=numbins, range=xlims, color=default_colors[check_i], label=label, histtype='step', linestyle=linestyle)
 
-            axs[1,1].plot(bins[:-1], np.cumsum(n)/n.sum(), label=label, color=default_colors[check_i], linestyle=linestyle)
+            # axs[1,1].plot(bins[:-1], np.cumsum(n)/n.sum(), label=label, color=default_colors[check_i], linestyle=linestyle)
+            axs[1,1].plot(bins[:-1], np.cumsum(n)/n.sum(), color=default_colors[check_i], linestyle=linestyle)
 
         else: # just getting the n, bins for data processing
             n, bins = np.histogram(I_new, bins=numbins, range=xlims)
@@ -973,6 +976,7 @@ def multihist(data, check_qubit, qubits, check_states, play_pulses_list, g_state
         axs[1,0].axvline(thresholds[0], color='0.2', linestyle='--')
         axs[1,0].set_title(f'Fidelity g-e: {100*fids[0]:.3}%')
 
+        axs[1,1].set_title('Cumulative Sum')
         axs[1,1].plot(bins[:-1], np.cumsum(n_tot_g)/n_tot_g.sum(), 'b', label='g')
         axs[1,1].plot(bins[:-1], np.cumsum(n_tot_e)/n_tot_e.sum(), 'r', label='e')
         axs[1,1].axvline(thresholds[0], color='0.2', linestyle='--')
@@ -1248,7 +1252,7 @@ class QramProtocol1QTomoExperiment(Experiment):
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
-        q = self.cfg.expt.qubit
+        self.qubit = self.cfg.expt.qubit
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
@@ -1303,11 +1307,11 @@ class QramProtocol1QTomoExperiment(Experiment):
             # Get readout angle + threshold for qubit
             e_prog = calib_prog_dict['e']
             Ie, Qe = e_prog.get_shots(verbose=False)
-            shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+            shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=Ie[self.qubit], Qe=Qe[self.qubit])
             fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
-            thresholds_q[q] = threshold[0]
-            angles_q[q] = angle
-            ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+            thresholds_q[self.qubit] = threshold[0]
+            angles_q[self.qubit] = angle
+            ge_avgs_q[self.qubit] = [np.average(Ig[self.qubit]), np.average(Qg[self.qubit]), np.average(Ie[self.qubit]), np.average(Qe[self.qubit])]
 
             if progress:
                 print(f'thresholds={thresholds_q},')

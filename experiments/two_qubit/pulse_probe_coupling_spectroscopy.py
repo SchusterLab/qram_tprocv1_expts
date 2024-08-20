@@ -49,7 +49,7 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
         
         self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
         self.qubits = self.cfg.expt.qubits
-        qA, qB = self.qubits
+        qA, qB = self.qubits # qA: test, qB: ZZ
         
         # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
         self.adc_chs = cfg.hw.soc.adcs.readout.ch
@@ -60,6 +60,12 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
+        if 1 in [qA, qB]:
+            if qA == 1: self.f_Q_ZZ_reg = self.freq2reg(cfg.device.qubit.f_Q1_ZZ[qB], gen_ch=self.qubit_chs[qA])
+            else: self.f_Q_ZZ_reg = self.freq2reg(cfg.device.qubit.f_Q_ZZ1[qA], gen_ch=self.qubit_chs[qA])
+        else:
+            self.ZZs = np.reshape(np.array(self.cfg.device.qubit.ZZs), (4,4)) # MHz
+            self.f_Q_ZZ_reg = self.freq2reg(cfg.device.qubit.f_ge[qA] + self.ZZs[qA, qB], gen_ch=self.qubit_chs[qA])
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [1+self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
@@ -128,6 +134,17 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
         if 'checkEF' in self.cfg.expt and self.cfg.expt.checkEF:
             self.pi_sigmaA = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qA], gen_ch=self.qubit_chs[qA])
             self.add_gauss(ch=self.qubit_chs[qA], name="pi_qA_ge", sigma=self.pi_sigmaA, length=self.pi_sigmaA*4)
+            if 1 in [qA, qB]:
+                if qA == 1:
+                    self.pi_sigmaA_ZZ = self.us2cycles(cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qB], gen_ch=self.qubit_chs[qA])
+                    self.pi_gain_ZZ = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qB]
+                else:
+                    self.pi_sigmaA_ZZ = self.us2cycles(cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qA], gen_ch=self.qubit_chs[qA])
+                    self.pi_gain_ZZ = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qA]
+            else:
+                self.pi_sigmaA_ZZ = self.pi_sigmaA # use default
+                self.pi_gain_ZZ = self.cfg.device.qubit.pulses.pi_ge.gain[qA] # use default
+            self.add_gauss(ch=self.qubit_chs[qA], name="pi_qA_ge_ZZ", sigma=self.pi_sigmaA_ZZ, length=self.pi_sigmaA_ZZ*4)
 
         # add readout pulses to respective channels
         if 'mux4' in self.res_ch_types:
@@ -153,7 +170,10 @@ class PulseProbeCouplingSpectroscopyProgram(RAveragerProgram):
             self.sync_all()
         
         if self.cfg.expt.checkEF:
-            self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qA_ge")
+            if not self.cfg.expt.pulseB:
+                self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_ge_reg[qA], gain=cfg.device.qubit.pulses.pi_ge.gain[qA], waveform="pi_qA_ge")
+            else:
+                self.setup_and_pulse(ch=self.qubit_chs[qA], style="arb", phase=0, freq=self.f_Q_ZZ_reg, gain=self.pi_gain_ZZ, waveform="pi_qA_ge_ZZ")
             self.sync_all()
 
         # sweep qubit A frequency

@@ -12,11 +12,11 @@ from slab import Experiment, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
 from experiments.single_qubit.single_shot import hist
-from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram
+from experiments.clifford_averager_program import QutritAveragerProgram, CliffordEgGfAveragerProgram
 
 # ===================================================================== #
 
-class MiscPulsesProgram(CliffordAveragerProgram):
+class MiscPulsesProgram(QutritAveragerProgram):
 
     def initialize(self):
         super().initialize()

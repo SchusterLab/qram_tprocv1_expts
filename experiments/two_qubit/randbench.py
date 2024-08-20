@@ -13,7 +13,7 @@ from slab import Experiment, NpEncoder, AttrDict
 from tqdm import tqdm_notebook as tqdm
 
 from experiments.single_qubit.single_shot import hist
-from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram
+from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram, QutritAveragerProgram
 from experiments.two_qubit.length_rabi_EgGf import LengthRabiEgGfProgram
 from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, sort_counts_1q, correct_readout_err, fix_neg_counts, infer_gef_popln_2readout
 
@@ -171,7 +171,7 @@ if __name__ == '__main__':
 
 # ===================================================================== #
 
-class SimultaneousRBProgram(CliffordAveragerProgram):
+class SimultaneousRBProgram(QutritAveragerProgram):
     """
     RB program for single qubit gates
     """
@@ -199,7 +199,8 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
 
             neg = '-' in gate
             if inverted: neg = not neg
-            pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
+            # pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
+            pulse_func(qubit, pihalf='/2' in gate, neg=neg, divide_len=False, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
             # print(self.overall_phase[qubit])
 
     def __init__(self, soccfg, cfg, gate_list, qubit_list):
@@ -213,6 +214,15 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
         # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
         self.reset_and_sync()
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
+            if 'cool_idle' in self.cfg.expt and self.cfg.expt.cool_idle is not None:
+                cool_idle = self.cfg.expt.cool_idle
+            self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
+
+        num_rb_qubits = len(set(self.qubit_list))
+        assert num_rb_qubits == 1, 'only support 1 qubit in rb right now'
+
         # Do all the gates given in the initialize except for the total gate, measure
         cfg=AttrDict(self.cfg)
         for i in range(len(self.gate_list) - 1):
@@ -220,7 +230,7 @@ class SimultaneousRBProgram(CliffordAveragerProgram):
             self.sync_all()
 
         # Do the inverse by applying the total gate with pi phase
-        # This is actually wrong!!! need to apply an inverse total gate for each qubit!!
+        # This is actually wrong if there is more than 1 qubit!!! need to apply an inverse total gate for each qubit!!
         self.clifford(qubit=self.qubit_list[-1], pulse_name=self.gate_list[-1], inverted=True, play=True)
         self.sync_all() # align channels and wait 10ns
 
@@ -258,6 +268,8 @@ class SimultaneousRBExperiment(Experiment):
 
     def acquire(self, progress=False, debug=False):
         qubits = self.cfg.expt.qubits
+        assert len(qubits) == 1, 'only 1 qubit supported for now in RB'
+        self.qubit = qubits[0]
 
         # expand entries in config that are length 1 to fill all qubits
         num_qubits_sample = len(self.cfg.device.qubit.f_ge)
@@ -272,19 +284,8 @@ class SimultaneousRBExperiment(Experiment):
                     subcfg.update({key: [value]*num_qubits_sample})
 
 
-        if self.cfg.expt.use_EgGf_subspace:
+        if 'use_EgGf_subspace' in self.cfg.expt and self.cfg.expt.use_EgGf_subspace:
             assert False, 'use the RbEgGfExperiment!'
-            qA, qB = qubits
-            qSort = qA
-            if qA == 1: qSort = qB
-            qDrive = 1
-            if 'qDrive' in self.cfg.expt and self.cfg.expt.qDrive is not None:
-                qDrive = self.cfg.expt.qDrive
-            qNotDrive = -1
-            if qA == qDrive: qNotDrive = qB
-            else: qNotDrive = qA
-            self.qDrive = qDrive
-            self.qNotDrive = qNotDrive
 
         # ================= #
         # Get single shot calibration for all qubits
@@ -295,66 +296,59 @@ class SimultaneousRBExperiment(Experiment):
         if 'post_process' not in self.cfg.expt.keys(): # threshold or scale
             self.cfg.expt.post_process = None
 
-        self.calib_order = ['gg', 'ge', 'eg', 'ee']
-        if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt:
+        self.calib_order = ['g', 'e'] # should match with order of counts for each tomography measurement 
+        if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt and None not in (self.cfg.expt.angles, self.cfg.expt.thresholds, self.cfg.expt.ge_avgs, self.cfg.expt.counts_calib):
             angles_q = self.cfg.expt.angles
             thresholds_q = self.cfg.expt.thresholds
-            ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
+            ge_avgs_q = self.cfg.expt.ge_avgs
+            for q in range(num_qubits_sample):
+                if ge_avgs_q[q] is None:
+                    ge_avgs_q[q] = np.zeros_like(ge_avgs_q[self.cfg.expt.qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
+            ge_avgs_q = np.array(ge_avgs_q)
             data['counts_calib'] = self.cfg.expt.counts_calib
-            print('Re-using provided angles, thresholds, ge_avgs')
-        else:
-            thresholds_q = [0]*4
-            ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
-            angles_q = [0]*4
-            fids_q = [0]*4
+            print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
 
-            # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+        else:
+            # Error mitigation measurements: prep in g, e to recalibrate measurement angle and measure confusion matrix
             sscfg = AttrDict(deepcopy(self.cfg))
-            sscfg.expt.reps = sscfg.expt.singleshot_reps
-            sscfg.expt.tomo_qubits = self.cfg.expt.qubits
-            sscfg.expt.tomo_qubits = [sscfg.expt.tomo_qubits[0], (sscfg.expt.tomo_qubits[0] + 1) % 4] # super hacky way to just add another qubit so can use the error tomo program to do single shot calib
-            qA, qB = sscfg.expt.tomo_qubits
+            sscfg.expt.qubit = self.qubit
+            sscfg.expt.reps = self.cfg.expt.singleshot_reps
 
             calib_prog_dict = dict()
             for prep_state in tqdm(self.calib_order):
                 # print(prep_state)
-                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
-                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                 calib_prog_dict.update({prep_state:err_tomo})
 
-            g_prog = calib_prog_dict['gg']
+            g_prog = calib_prog_dict['g']
             Ig, Qg = g_prog.get_shots(verbose=False)
+            thresholds_q = [0]*num_qubits_sample
+            angles_q = [0]*num_qubits_sample
+            ge_avgs_q = [[0]*4]*num_qubits_sample
 
-            # Get readout angle + threshold for qubits
-            for qi, q in enumerate(sscfg.expt.tomo_qubits):
-                calib_e_state = 'gg'
-                calib_e_state = calib_e_state[:qi] + 'e' + calib_e_state[qi+1:]
-                e_prog = calib_prog_dict[calib_e_state]
-                Ie, Qe = e_prog.get_shots(verbose=False)
-                shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                print(f'Qubit  ({q})')
-                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
-                thresholds_q[q] = threshold[0]
-                ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
-                angles_q[q] = angle
-                fids_q[q] = fid[0]
-                print(f'ge fidelity (%): {100*fid[0]}')
-            
+            # Get readout angle + threshold for qubit
+            e_prog = calib_prog_dict['e']
+            Ie, Qe = e_prog.get_shots(verbose=False)
+            shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=Ie[self.qubit], Qe=Qe[self.qubit])
+            fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+            thresholds_q[self.qubit] = threshold[0]
+            angles_q[self.qubit] = angle
+            ge_avgs_q[self.qubit] = [np.average(Ig[self.qubit]), np.average(Qg[self.qubit]), np.average(Ie[self.qubit]), np.average(Qe[self.qubit])]
+
+            if progress:
+                print(f'thresholds={thresholds_q},')
+                print(f'angles={angles_q},')
+                print(f'ge_avgs={ge_avgs_q}',',')
+
             # Process the shots taken for the confusion matrix with the calibration angles
             for prep_state in self.calib_order:
                 counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
                 data['counts_calib'].append(counts)
+            if progress: print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
-            print(f'thresholds={thresholds_q},')
-            print(f'angles={angles_q},')
-            print(f'ge_avgs={ge_avgs_q},')
-            print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
-
-            data['thresholds'] = thresholds_q
-            data['angles'] = angles_q
-            data['ge_avgs'] = ge_avgs_q
-            data['counts_calib'] = np.array(data['counts_calib'])
+        data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
 
         # ================= #
         # Begin RB
@@ -390,63 +384,42 @@ class SimultaneousRBExperiment(Experiment):
                 # elif depth % 4 == 1: gate_list.append('X/2')
                 # elif depth % 4 == 2: gate_list.append('X')
                 # elif depth % 4 == 3: gate_list.append('-X/2')
+                # gate_list = ['X/2']*depth
+                # if depth % 4 == 0: gate_list.append('I')
+                # elif depth % 4 == 1: gate_list.append('X/2')
+                # elif depth % 4 == 2: gate_list.append('X')
+                # elif depth % 4 == 3: gate_list.append('-X/2')
+
 
                 # print('variation', var)
                 qubit_list = np.random.choice(self.cfg.expt.qubits, size=len(gate_list)-1)
 
                 randbench = SimultaneousRBProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubit_list=qubit_list)
                 # print(randbench)
-                # from qick.helpers import progs2json
-                # print(progs2json([randbench.dump_prog()]))
+                # # from qick.helpers import progs2json
+                # # print(progs2json([randbench.dump_prog()]))
 
-                # print('angles', angles_q)
-                # print('ge avgs', ge_avgs_q)
-                # angles_q = thresholds_q = ge_avgs_q = None
 
-                # print(gate_list)
                 assert self.cfg.expt.post_process is not None, 'need post processing for RB to make sense!'
                 popln, popln_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process)
 
-                adcDrive_ch = self.cfg.hw.soc.adcs.readout.ch[qubits[0]]
-                adcNotDrive_ch = self.cfg.hw.soc.adcs.readout.ch[(qubits[0] + 1)%4]
+                adc_ch = self.cfg.hw.soc.adcs.readout.ch[qubits[0]]
 
                 if self.cfg.expt.post_process == 'threshold':
                     shots, _ = randbench.get_shots(angle=angles_q, threshold=thresholds_q)
-                    # 00, 01, 10, 11
-                    counts = np.array([sort_counts(shots[adcDrive_ch], shots[adcNotDrive_ch])])
+                    # 0, 1
+                    counts = np.array([sort_counts_1q(shots[adc_ch])])
                     data['counts_raw'].append(counts)
                     counts = fix_neg_counts(correct_readout_err(counts, data['counts_calib']))
                     counts = counts[0] # go back to just 1d array
-                    data["popln"][-1].append((counts[2] + counts[3])/sum(counts))
-                    # print('gate list', gate_list, 'popln', data["popln"][-1][-1])
+                    data["popln"][-1].append(counts[1]/sum(counts))
+                    # print('variation', var, 'gate list', gate_list, 'counts', counts)
                 else:
-                    data["popln"][-1].append(popln[adcDrive_ch])
+                    data["popln"][-1].append(popln[adc_ch])
                     # print(depth, var, iq, avgi)
-                    data["popln_err"][-1].append(popln_err[adcDrive_ch])
+                    data["popln_err"][-1].append(popln_err[adc_ch])
                 data['xpts'][-1].append(depth)
 
-                # try:
-                #     avgi, avgi_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=post_process)
-                #     for iq, q in enumerate(qubits):
-                #         avgi = avgi[adc_chs[q]]
-                #         data["avgi"][iq][-1].append(avgi)
-                #         # print(depth, var, iq, avgi)
-                #         data["avgi_err"][iq][-1].append(avgi_err[adc_chs[q]])
-                #     data['xpts'][-1].append(depth)
-                # except Exception as e:
-                #     print(e)
-                #     print('Varation', var, 'failed in depth', depth)
-                #     continue
-
-
-                # print(1-data['avgi'][0][-1], gate_list)
-            # data['xpts'].append(depth)
-
-        # for k, arr in data.items():
-        #     if isinstance(arr, tuple):
-        #         data[k]=(np.array(a) for a in arr)
-        #     else: data[k] = np.array(arr)
-        # print(data['avgi'])
         for k, a in data.items():
             data[k] = np.array(a)
         # print(np.shape(data['avgi'][iq]))
@@ -542,9 +515,673 @@ class SimultaneousRBExperiment(Experiment):
 
         plt.grid(linewidth=0.3)
         # if self.cfg.expt.post_process is not None: plt.ylim(-0.1, 1.1)
-        plt.ylim(-0.1, 1.1)
+        plt.ylim(-0.05, 1.05)
         plt.show()
     
+    def save_data(self, data=None):
+        print(f'Saving {self.fname}')
+        super().save_data(data=data)
+        with self.datafile() as f:
+            f.attrs['calib_order'] = json.dumps(self.calib_order, cls=NpEncoder)
+        return self.fname
+
+# ===================================================================== #
+
+class SimultaneousRBEFProgram(QutritAveragerProgram):
+    """
+    RB program for single qubit gates on the ef subspace
+    """
+
+    def clifford(self, qubit, pulse_name:str, extra_phase=0, inverted=False, play=False):
+        """
+        Convert a clifford pulse name into the function that performs the pulse.
+        If inverted, play the inverse of this gate (the extra phase is added on top of the inversion)
+        """
+        pulse_name = pulse_name.upper()
+        assert pulse_name in clifford_1q_names
+        gates = pulse_name.split(',')
+
+        # Normally gates are applied right to left, but if inverted apply them left to right
+        gate_order = reversed(gates)
+        if inverted:
+            gate_order = gates
+        for gate in gate_order:
+            pulse_func = None
+            if gate == 'I': continue
+            if 'X' in gate: pulse_func = self.Xef_pulse
+            elif 'Y' in gate: pulse_func = self.Yef_pulse
+            elif 'Z' in gate: pulse_func = self.Zef_pulse
+            # if 'X' in gate: pulse_func = self.X_pulse
+            # elif 'Y' in gate: pulse_func = self.Y_pulse
+            # elif 'Z' in gate: pulse_func = self.Z_pulse
+            else: assert False, 'Invalid gate'
+
+            neg = '-' in gate
+            if inverted: neg = not neg
+
+
+            # print('WARNING NOT PLAYING PULSE')
+            # pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
+            pulse_func(qubit, pihalf='/2' in gate, neg=neg, divide_len=False, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
+            self.sync_all(5) # THIS IS NECESSARY IN RB WHEN THERE ARE MORE THAN O(30) PULSES SINCE THE TPROC CAN'T KEEP UP FOR SHORT PULSES
+
+    def __init__(self, soccfg, cfg, gate_list, qubit_list):
+        # gate_list should include the total gate!
+        # qubit_list should specify the qubit on which each random gate will be applied
+        self.gate_list = gate_list
+        self.qubit_list = qubit_list
+        super().__init__(soccfg, cfg)
+
+    def body(self):
+        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
+        self.reset_and_sync()
+
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
+            if 'cool_idle' in self.cfg.expt and self.cfg.expt.cool_idle is not None:
+                cool_idle = self.cfg.expt.cool_idle
+            self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
+        
+        num_rb_qubits = len(set(self.qubit_list))
+        assert num_rb_qubits == 1, 'only support 1 qubit in rb right now'
+
+        qTest = self.qubit_list[0]
+        if 'ZZ_qubit' in self.cfg.expt and self.cfg.expt.ZZ_qubit is not None:
+            qZZ = self.cfg.expt.ZZ_qubit
+            assert qZZ != qTest
+            self.X_pulse(q=qZZ, play=True)
+
+            ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
+            freq = self.freq2reg(self.cfg.device.qubit.f_ge[qTest] + ZZs[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+            waveform = f'qubit{qTest}_ZZ{qZZ}'
+            if waveform not in self.envelopes:
+                sigma_cycles = self.us2cycles(self.pi_sigmas_us[qTest], gen_ch=self.qubit_chs[qTest])
+                self.add_gauss(ch=self.qubit_chs[qTest], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
+                gain = self.cfg.device.qubit.pulses.pi_ge.gain[qTest]
+            elif qTest == 1:
+                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qZZ]
+            elif qZZ == 1:
+                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qTest]
+            else: assert False, "There's probably a bug in your conditional statements"
+            self.setup_and_pulse(ch=self.qubit_chs[qTest], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
+            self.sync_all()
+        
+        else:
+            self.X_pulse(q=qTest, play=True)
+
+
+        # Do all the gates given in the initialize except for the total gate, measure
+        for i in range(len(self.gate_list) - 1):
+            self.clifford(qubit=self.qubit_list[i], pulse_name=self.gate_list[i], play=True)
+            self.sync_all()
+
+        # Do the inverse by applying the total gate with pi phase
+        # This is actually wrong if there is more than 1 qubit!!! need to apply an inverse total gate for each qubit!!
+        self.clifford(qubit=self.qubit_list[-1], pulse_name=self.gate_list[-1], inverted=True, play=True)
+        self.sync_all() # align channels and wait 10ns
+
+        # Measure the population of just the e state when e/f are not distinguishable - check the g population
+        setup_measure = None
+        if 'setup_measure' in self.cfg.expt: setup_measure = self.cfg.expt.setup_measure
+        if setup_measure != None and 'qDrive_ge' in setup_measure:
+            self.X_pulse(q=self.qDrive, play=True) # not sure whether needs some phase adjustment
+        # Bring Gf to Ge, or stays in same state.
+        if setup_measure != None and 'qDrive_ef' in setup_measure:
+            self.Xef_pulse(self.qDrive, play=True) # not sure whether needs some phase adjustment
+
+        self.measure(
+            pulse_ch=self.measure_chs, 
+            adcs=self.adc_chs,
+            adc_trig_offset=self.cfg.device.readout.trig_offset[0],
+            wait=True,
+            syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in self.qubits])))
+
+# ===================================================================== #
+
+class SimultaneousRBEFExperiment(Experiment):
+    """
+    Simultaneous Randomized Benchmarking Experiment
+    Experimental Config:
+    expt = dict(
+        start: rb depth start - for interleaved RB, depth specifies the number of random gates
+        step: step rb depth
+        expts: number steps
+        reps: number averages per unique sequence
+        reps_f: use a different number of averages per sequence when measuring with the f readout
+        variations: number different sequences per depth
+        gate_char: a single qubit clifford gate (str) to characterize. If not None, runs interleaved RB instead of regular RB.
+        qubits: the qubits to perform simultaneous RB on. If using EgGf subspace, specify just qA (where qA, qB represents the Eg->Gf qubits)
+        singleshot_reps: reps per state for singleshot calibration
+        post_process: 'threshold' (uses single shot binning), 'scale' (scale by ge_avgs), or None
+        ZZ_qubit: if not None, initializes this qubit in e in addition to the qubit we are doing the EF RB on
+        measure_f: qubit: if not None, calibrates the single qubit f state measurement on this qubit and also runs the measurement twice to distinguish e and f states
+        thresholds: (optional) don't rerun singleshot and instead use this
+        ge_avgs: (optional) don't rerun singleshot and instead use this
+        angles: (optional) don't rerun singleshot and instead use this
+    )
+    """
+
+    def __init__(self, soccfg=None, path='', prefix='SimultaneousRBEgGf', config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=False, debug=False):
+        # expand entries in config that are length 1 to fill all qubits
+        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        assert len(self.cfg.expt.qubits) == 1, 'only 1 qubit supported for now in RB'
+        self.qubit = self.cfg.expt.qubits[0]
+
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items() :
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        for key3, value3 in value2.items():
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
+
+        self.measure_f = False
+        q_measure_f = None
+        if self.cfg.expt.measure_f is not None and len(self.cfg.expt.measure_f) >= 0:
+            self.measure_f = True
+            q_measure_f = self.cfg.expt.measure_f[0]
+        
+        assert self.measure_f, 'you really should be running this experiment with a measure_f'
+
+        thresholds_q = ge_avgs_q = angles_q = fids_q = None
+        if 'post_process' not in self.cfg.expt.keys(): # threshold or scale
+            self.cfg.expt.post_process = None
+
+        if 'meas_order' not in self.cfg.expt or self.cfg.expt.meas_order is None:
+            self.meas_order = ['Z', 'X', 'Y']
+        else: self.meas_order = self.cfg.expt.meas_order
+        self.calib_order = ['g', 'e'] # should match with order of counts for each tomography measurement 
+        if self.measure_f: self.calib_order += ['f'] # assumes the 2nd qubit is the measure_f
+
+        data={'counts_raw':[[]]}
+        if self.cfg.expt.measure_f is not None:
+            for i in range(len(self.cfg.expt.measure_f)): # measure g of everybody, second measurement of each measure_f qubit using the g/f readout
+                data['counts_raw'].append([])
+        if 'reps_f' not in self.cfg.expt: self.cfg.expt.reps_f = self.cfg.expt.reps
+
+        data['thresholds_loops'] = []
+        data['angles_loops'] = []
+        data['ge_avgs_loops'] = []
+        data['counts_calib_loops'] = []
+
+        if self.measure_f:
+            data['thresholds_f_loops'] = []
+            data['angles_f_loops'] = []
+            data['gf_avgs_loops'] = []
+            data['counts_calib_f_loops'] = []
+        data['xpts'] = []
+        depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+        gate_list_variations = [None]*len(depths)
+
+        if 'loops' not in self.cfg.expt: self.cfg.expt.loops = 1
+        print('running', self.cfg.expt.loops, 'loops')
+        
+        # print('WARNING doing ge instead of ef pulses! CHECK IN THE CLIFFORD DEFINITION TO FIX THIS')
+        for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
+
+            # ================= #
+            # Get single shot calibration for all qubits
+            # ================= #
+
+            if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt and None not in (self.cfg.expt.angles, self.cfg.expt.thresholds, self.cfg.expt.ge_avgs, self.cfg.expt.counts_calib):
+                angles_q = self.cfg.expt.angles
+                thresholds_q = self.cfg.expt.thresholds
+                ge_avgs_q = self.cfg.expt.ge_avgs
+                for q in range(num_qubits_sample):
+                    if ge_avgs_q[q] is None:
+                        ge_avgs_q[q] = np.zeros_like(ge_avgs_q[self.cfg.expt.qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
+                ge_avgs_q = np.array(ge_avgs_q)
+                counts_calib = self.cfg.expt.counts_calib
+                print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
+
+            else:
+                thresholds_q = [0]*4
+                ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+                angles_q = [0]*4
+                fids_q = [0]*4
+                counts_calib = []
+
+                # Error mitigation measurements: prep in g, e to recalibrate measurement angle and measure confusion matrix
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.qubit = self.qubit
+                sscfg.expt.reps = self.cfg.expt.singleshot_reps
+
+                calib_prog_dict = dict()
+                for prep_state in tqdm(self.calib_order):
+                    # print(prep_state)
+                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                    err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                    err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                    calib_prog_dict.update({prep_state:err_tomo})
+
+                g_prog = calib_prog_dict['g']
+                Ig, Qg = g_prog.get_shots(verbose=False)
+                thresholds_q = [0]*num_qubits_sample
+                angles_q = [0]*num_qubits_sample
+                ge_avgs_q = [[0]*4]*num_qubits_sample
+
+                # Get readout angle + threshold for qubit
+                e_prog = calib_prog_dict['e']
+                Ie, Qe = e_prog.get_shots(verbose=False)
+                shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=Ie[self.qubit], Qe=Qe[self.qubit])
+                fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                thresholds_q[self.qubit] = threshold[0]
+                angles_q[self.qubit] = angle
+                ge_avgs_q[self.qubit] = [np.average(Ig[self.qubit]), np.average(Qg[self.qubit]), np.average(Ie[self.qubit]), np.average(Qe[self.qubit])]
+
+                if progress:
+                    print(f'thresholds={thresholds_q},')
+                    print(f'angles={angles_q},')
+                    print(f'ge_avgs={ge_avgs_q}',',')
+
+                # Process the shots taken for the confusion matrix with the calibration angles
+                for prep_state in self.calib_order:
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts_calib.append(counts)
+
+                if progress:
+                    print(f'thresholds={thresholds_q},')
+                    print(f'angles={angles_q},')
+                    print(f'ge_avgs={ge_avgs_q},')
+                    print(f"counts_calib={np.array(counts_calib).tolist()}")
+
+                data['thresholds_loops'].append(thresholds_q)
+                data['angles_loops'].append(angles_q)
+                data['ge_avgs_loops'].append(ge_avgs_q)
+                data['counts_calib_loops'].append(np.array(counts_calib))
+
+            # ================= #
+            # Begin RB
+            # ================= #
+
+            if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
+
+            for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
+                # print(f'depth {depth} gate list (last gate is the total gate)')
+                if loop == 0:
+                    data['xpts'].append([])
+                    gate_list_variations[i_depth] = []
+                for var in range(self.cfg.expt.variations):
+                    if loop == 0:
+                        if 'gate_char' in self.cfg.expt and self.cfg.expt.gate_char is not None:
+                            gate_list, total_gate = interleaved_gate_sequence(depth, gate_char=self.cfg.expt.gate_char)
+                        else: gate_list, total_gate = gate_sequence(depth)
+                        gate_list.append(total_gate) # make sure to do the inverse gate
+
+                        # gate_list = ['X', '-X/2,Z', 'Y/2', '-X/2,-Z/2', '-Y/2,Z', '-Z/2', 'X', 'Y']
+                        # gate_list = ['X', 'X', 'I']
+                        # print('variation', var)
+                        # print(gate_list)
+                        # gate_list = ['X/2', 'Z/2', '-Y/2', 'I']
+
+                        # gate_list = ['X']*depth
+                        # if depth % 2 == 0: gate_list.append('I')
+                        # elif depth % 2 == 1: gate_list.append('X')
+
+                        # gate_list = ['X/2']*depth
+                        # if depth % 4 == 0: gate_list.append('I')
+                        # elif depth % 4 == 1: gate_list.append('X/2')
+                        # elif depth % 4 == 2: gate_list.append('X')
+                        # elif depth % 4 == 3: gate_list.append('-X/2')
+
+                        gate_list_variations[i_depth].append(gate_list)
+                    else: gate_list = gate_list_variations[i_depth][var]
+
+                    qubit_list = [self.qubit]*len(gate_list)
+
+                    randbench = SimultaneousRBEFProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubit_list=qubit_list)
+                    # print('\n\n ge measurement program')
+                    # print(randbench)
+                    # # from qick.helpers import progs2json
+                    # # print(progs2json([randbench.dump_prog()]))
+                    # print('\n\n')
+
+                    assert self.cfg.expt.post_process is not None, 'need post processing for RB to make sense!'
+                    popln, popln_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process)
+                    assert self.cfg.expt.post_process == 'threshold', 'Can only bin EF RB properly using threshold'
+
+                    adc_ch = self.cfg.hw.soc.adcs.readout.ch[self.qubit]
+
+                    if self.cfg.expt.post_process == 'threshold':
+                        shots, _ = randbench.get_shots(angle=angles_q, threshold=thresholds_q)
+                        # 0, 1/2
+                        counts = np.array([sort_counts_1q(shots[adc_ch])])
+                        data['counts_raw'][0].append(counts)
+                        # print('variation', var, 'gate list', gate_list, 'counts', counts)
+
+                    if loop == 0: data['xpts'][-1].append(depth)
+
+            # ================= #
+            # Measure the same thing with g/f distinguishing
+            # ================= #
+
+            if self.measure_f:
+                counts_calib_f = []
+
+                # ================= #
+                # Get f state single shot calibration (this must be re-run if you just ran measurement with the standard readout)
+                # ================= #
+
+                thresholds_f_q = [0]*4
+                gf_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+                angles_f_q = [0]*4
+                fids_f_q = [0]*4
+
+                # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.qubit = self.qubit
+                sscfg.expt.reps = sscfg.expt.singleshot_reps
+                sscfg.device.readout.frequency[q_measure_f] = sscfg.device.readout.frequency_ef[q_measure_f]
+                sscfg.device.readout.readout_length[q_measure_f] = sscfg.device.readout.readout_length_ef[q_measure_f]
+
+                calib_prog_dict = dict()
+                for prep_state in tqdm(self.calib_order):
+                    # print(prep_state)
+                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
+                    err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                    calib_prog_dict.update({prep_state:err_tomo})
+
+                g_prog = calib_prog_dict['g']
+                Ig, Qg = g_prog.get_shots(verbose=False)
+
+                # Get readout angle + threshold for qubits to distinguish g/f on one of the qubits
+                f_prog = calib_prog_dict['f']
+                If, Qf = f_prog.get_shots(verbose=False)
+                shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=If[self.qubit], Qe=Qf[self.qubit])
+                print(f'Qubit ({self.qubit}) f')
+                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                thresholds_f_q[self.qubit] = threshold[0]
+                gf_avgs_q[self.qubit] = [np.average(Ig[self.qubit]), np.average(Qg[self.qubit]), np.average(If[self.qubit]), np.average(Qf[self.qubit])]
+                angles_f_q[self.qubit] = angle
+                fids_f_q[self.qubit] = fid[0]
+                print(f'gf fidelity (%): {100*fid[0]}')
+
+                # Process the shots taken for the confusion matrix with the calibration angles
+                for prep_state in self.calib_order:
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_f_q, threshold=thresholds_f_q)
+                    counts_calib_f.append(counts)
+
+                print(f'thresholds_f={thresholds_f_q},')
+                print(f'angles_f={angles_f_q},')
+                print(f'gf_avgs={gf_avgs_q},')
+                print(f"counts_calib_f={np.array(counts_calib_f).tolist()}")
+
+                data['thresholds_f_loops'].append(thresholds_f_q)
+                data['angles_f_loops'].append(angles_f_q)
+                data['gf_avgs_loops'].append(gf_avgs_q)
+                data['counts_calib_f_loops'].append(np.array(counts_calib_f))
+
+                # ================= #
+                # Begin RB for measure f, using same gate list as measure with g/e
+                # ================= #
+
+                assert q_measure_f == self.qubit, 'this code assumes we will be processing to distinguish gf from ge'
+                for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
+                    for var in range(self.cfg.expt.variations):
+                        gate_list = gate_list_variations[i_depth][var]
+
+                        rbcfg = deepcopy(self.cfg)
+                        rbcfg.expt.reps = rbcfg.expt.reps_f
+                        rbcfg.device.readout.frequency[q_measure_f] = rbcfg.device.readout.frequency_ef[q_measure_f]
+                        rbcfg.device.readout.readout_length[q_measure_f] = rbcfg.device.readout.readout_length_ef[q_measure_f]
+
+                        qubit_list = [self.qubit]*len(gate_list)
+                        randbench = SimultaneousRBEFProgram(soccfg=self.soccfg, cfg=rbcfg, gate_list=gate_list, qubit_list=qubit_list)
+
+                        # print('\n\n gf measurement program')
+                        # print(randbench)
+                        # # from qick.helpers import progs2json
+                        # # print(progs2json([randbench.dump_prog()]))
+                        # print('\n\n')
+
+                        assert self.cfg.expt.post_process is not None, 'need post processing for RB to make sense!'
+                        popln, popln_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_f_q, threshold=thresholds_f_q, ge_avgs=gf_avgs_q, post_process=self.cfg.expt.post_process)
+                        assert self.cfg.expt.post_process == 'threshold', 'Can only bin EF RB properly using threshold'
+
+                        if self.cfg.expt.post_process == 'threshold':
+                            shots, _ = randbench.get_shots(angle=angles_f_q, threshold=thresholds_f_q)
+                            # 0/1, 2
+                            counts = np.array([sort_counts_1q(shots[adc_ch])])
+                            data['counts_raw'][1].append(counts)
+                            # print('variation', var, 'gate list', gate_list, 'counts', counts)
+
+        # print('shape', np.shape(data['counts_raw']))
+        for icounts in range(len(data['counts_raw'])):
+            data['counts_raw'][icounts] = np.reshape(data['counts_raw'][icounts], (self.cfg.expt.loops, len(depths), self.cfg.expt.variations, 2))
+
+        for k, a in data.items():
+            # print(k)
+            # print(a)
+            # print(np.shape(a))
+            data[k] = np.array(a)
+
+        self.data=data
+        return data
+
+    def analyze(self, data=None, fit=True, separate_correction=True, **kwargs):
+        if data is None:
+            data=self.data
+
+        self.qubit = self.cfg.expt.qubits[0]
+
+        data['xpts'] = np.asarray(data['xpts'])
+        unique_depths = np.average(data['xpts'], axis=1)
+
+        assert self.measure_f
+
+        data['counts_calib_total'] = np.concatenate((data['counts_calib_loops'], data['counts_calib_f_loops']), axis=2)
+        data['counts_raw_total'] = np.concatenate((data['counts_raw'][0], data['counts_raw'][1]*self.cfg.expt.reps/self.cfg.expt.reps_f), axis=3)
+        print('counts calib total shape', np.shape(data['counts_calib_total']))
+        # print(data['counts_calib_total'])
+        print('counts raw shape', np.shape(data['counts_raw_total']), '(loops, depths, variations, 4)')
+        print(data['counts_raw_total'][0, 0, 0, :])
+        # print('counts raw total', np.shape(data['counts_raw_total']))
+
+        # g, e, f
+        data['poplns_2q_loops'] = np.zeros(shape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations, 3))
+
+
+        if separate_correction:
+            g_count_plot = []
+            e_count_plot = []
+            f_count_plot = []
+            g_pop_plot = []
+            e_pop_plot = []
+            f_pop_plot = []
+        
+        for loop in range(self.cfg.expt.loops):
+            for idepth, depth in enumerate(unique_depths):
+                for ivar in range(self.cfg.expt.variations):
+                    # after correcting readout error, counts corrected should correspond to counts in [g, e, f] (the calib_order)
+                    # instead of [gA, eA, gB, fB] (the raw counts)
+
+                    if separate_correction:
+                        counts_raw_total_this = data['counts_raw_total'][loop, idepth, ivar]
+                        counts_calib_this = data['counts_calib_total'][loop]
+
+                        # print('ge counts calib', counts_calib_this[:,:2])
+                        counts_ge_corrected = correct_readout_err([counts_raw_total_this[:2]], counts_calib_this[:,:2])
+                        # print('ge corrected', counts_ge_corrected)
+                        counts_ge_corrected = fix_neg_counts(counts_ge_corrected)[0]
+                        # print('neg ge corrected', counts_ge_corrected)
+
+                        # print('gf counts calib', counts_calib_this[:,2:])
+                        # print('gf raw', counts_raw_total_this[2:])
+                        counts_gf_corrected = correct_readout_err([counts_raw_total_this[2:]], counts_calib_this[:,2:])
+                        # print('gf corrected', counts_gf_corrected)
+                        counts_gf_corrected = fix_neg_counts(counts_gf_corrected)[0]
+                        # print('neg gf corrected', counts_gf_corrected)
+
+                        g = counts_ge_corrected[0] / np.sum(counts_ge_corrected)
+                        f = counts_gf_corrected[2] / np.sum(counts_gf_corrected)
+                        e = 1 - g - f
+                        counts_corrected = [[g, e, f]]
+                        # print('counts_corrected', counts_corrected)
+                        counts_corrected = fix_neg_counts(counts_corrected)
+                        # print('neg corrected', counts_corrected)
+
+                        g_count_plot.append(counts_raw_total_this[0])
+                        f_count_plot.append(counts_raw_total_this[3])
+                        g_pop_plot.append(g*np.sum(counts_ge_corrected))
+                        f_pop_plot.append(f*np.sum(counts_gf_corrected))
+                    
+                    else:
+                        counts_corrected = correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
+                        counts_corrected = fix_neg_counts(counts_corrected)
+
+                    data['poplns_2q_loops'][loop, idepth, ivar, :] = counts_corrected/np.sum(counts_corrected)
+        
+        if separate_correction:
+            plt.figure()
+            plt.plot(unique_depths, np.average(np.average(np.reshape(g_count_plot, newshape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations)), axis=0), axis=1), '.-', label='g_counts')
+            plt.plot(unique_depths, np.average(np.average(np.reshape(f_count_plot, newshape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations)), axis=0), axis=1), '.-', label='f_counts')
+            plt.plot(unique_depths, np.average(np.average(np.reshape(g_pop_plot, newshape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations)), axis=0), axis=1), '.--', label='g pop corrected')
+            plt.plot(unique_depths, np.average(np.average(np.reshape(f_pop_plot, newshape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations)), axis=0), axis=1), '.--', label='f pop corrected')
+        
+            plt.xlabel('Sequence Depths')
+            plt.legend()
+            plt.show()
+
+        # Average over loops
+        data['poplns_2q'] = np.average(data['poplns_2q_loops'], axis=0)
+
+        # print('poplns_2q_loops shape', np.shape(data['poplns_2q_loops']))
+        # print('poplns_2q shape', np.shape(data['poplns_2q']))
+
+        # [g, e, f]
+        probs_g = data['poplns_2q'][:, :, 0]
+        probs_e = data['poplns_2q'][:, :, 1]
+        probs_f = data['poplns_2q'][:, :, 2]
+
+        data['popln_e_std'] = np.std(probs_e, axis=1)
+        data['popln_e_avg'] = np.average(probs_e, axis=1)
+        # print('WARNING using probs_g for probs_e subspace')
+        # data['popln_e_std'] = np.std(probs_g, axis=1)
+        # data['popln_e_avg'] = np.average(probs_g, axis=1)
+
+        sum_prob_subspace = probs_e + probs_f
+        # print('WARNING using the ge subspace')
+        # sum_prob_subspace = probs_e + probs_g
+        data['popln_subspace'] = sum_prob_subspace
+        data['popln_subspace_std'] = np.std(sum_prob_subspace, axis=1)
+        data['popln_subspace_avg'] = np.average(sum_prob_subspace, axis=1)
+        data['popln_e_subspace'] = probs_e/sum_prob_subspace
+        data['popln_e_subspace_std'] = np.std(probs_e/sum_prob_subspace, axis=1)
+        data['popln_e_subspace_avg'] = np.average(probs_e/sum_prob_subspace, axis=1)
+        # print('WARNING using probs_g for probs_e')
+        # data['popln_e_subspace'] = probs_g/sum_prob_subspace
+        # data['popln_e_subspace_std'] = np.std(probs_g/sum_prob_subspace, axis=1)
+        # data['popln_e_subspace_avg'] = np.average(probs_g/sum_prob_subspace, axis=1)
+
+        # print('shape sum prob_e + prob_f', np.shape(sum_prob_subspace))
+        # print('shape average sum over each depth', np.shape(data['popln_subspace_avg']), 'should equal', np.shape(unique_depths))
+
+        if not fit: return data
+
+        depths = data['xpts']
+        flat_depths = np.concatenate(depths)
+        # popt1, pcov1 = fitter.fitrb(unique_depths, data['popln_subspace_avg'])
+        popt1, pcov1 = fitter.fitrb(flat_depths, np.concatenate(sum_prob_subspace))
+        print('fit1 p1, a, offset', popt1)
+        data['fit1'] = popt1
+        data['fit1_err'] = pcov1
+        p1, a, offset = popt1
+        data['l1'] = fitter.leakage_err(p1, offset)
+        data['l2'] = fitter.seepage_err(p1, offset)
+
+        # popt2, pcov2 = fitter.fitrb_l1_l2(unique_depths, data['popln_e_avg'], p1=p1, offset=offset)
+        popt2, pcov2 = fitter.fitrb_l1_l2(flat_depths, np.concatenate(probs_e), p1=p1, offset=offset)
+        print('fit2 a0, b0, c0, p2', popt2)
+        data['fit2'] = popt2
+        data['fit2_err'] = pcov2
+        a0, b0, c0, p2 = popt2
+        
+        data['fidelity'], data['fidelity_err'] = fitter.rb_fidelity_l1_l2(d=2, p2=p2, l1=data['l1'], p2_err=pcov2[3][3], l1_err=pcov1[0][0])
+
+        # popt3, pcov3 = fitter.fitrb(unique_depths, data['popln_e_subspace_avg'])
+        popt3, pcov3 = fitter.fitrb(flat_depths, np.concatenate(probs_e/sum_prob_subspace))
+        data['fit3'] = popt3
+        data['fit3_err'] = pcov3
+
+        return data
+
+
+    def display(self, data=None, fit=True, show_all_vars=False):
+        if data is None:
+            data=self.data 
+
+        plt.figure(figsize=(8,6))
+        irb = 'gate_char' in self.cfg.expt and self.cfg.expt.gate_char is not None
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EF RB on Q{self.cfg.expt.qubits[0]}'
+
+        plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
+        depths = data['xpts']
+        unique_depths = np.average(depths, axis=1)
+        flat_depths = np.concatenate(depths)
+        # g, e, f
+        flat_probs_e = np.concatenate(data['poplns_2q'][:, :, 1])
+        # print('WARNING using probs_ge for probs_e')
+        # flat_probs_e = np.concatenate(data['poplns_2q'][:, :, 0])
+        flat_probs_subspace = np.concatenate(data['popln_subspace'])
+        if show_all_vars:
+            plt.plot(flat_depths, flat_probs_e, 'x', color='tab:grey')
+            plt.plot(flat_depths, flat_probs_subspace, 'v', color='tab:grey')
+
+        probs_e_avg = data['popln_e_avg']
+        probs_e_std = data['popln_e_std']
+        probs_subspace_avg = data['popln_subspace_avg']
+        probs_subspace_std = data['popln_subspace_std']
+        probs_e_subspace_avg = data['popln_e_subspace_avg']
+        probs_e_subspace_std = data['popln_e_subspace_std']
+
+        # print('prob_e_avg', probs_e_avg, '+/-', probs_e_std)
+        # print('prob_subspace_avg', probs_subspace_avg, '+/-', probs_subspace_std)
+        # print('prob_e_subspace_avg', probs_e_subspace_avg, '+/-', probs_e_subspace_std)
+        # plt.errorbar(working_depths, avg_probs, fmt='o', yerr=2*std_dev_probs, color='k', elinewidth=0.75)
+        plt.errorbar(unique_depths, probs_e_avg, fmt='x', yerr=probs_e_std, color=default_colors[0], elinewidth=0.75, label='e probability')
+        plt.errorbar(unique_depths, probs_subspace_avg, fmt='v', yerr=probs_subspace_std, color=default_colors[1], elinewidth=0.75, label='subspace probability')
+        plt.errorbar(unique_depths, probs_e_subspace_avg, fmt='o', yerr=probs_e_subspace_std, color=default_colors[2], elinewidth=0.75, label='e/subspace probability')
+
+        if fit:
+            pcov1 = data['fit1_err']
+            # plt.plot(depths, avg_probs, 'o-', color='tab:blue')
+            plt.plot(unique_depths, fitter.rb_func(unique_depths, *data['fit1']), color=default_colors[1])
+            print(f'Running {"interleaved " + self.cfg.expt.gate_char + " gate" if irb else "regular"} RB on EF subspace')
+            p1 = data['fit1'][0]
+            print(f'Depolarizing parameter p1 from fit: {p1} +/- {np.sqrt(pcov1[0][0])}')
+            # print(f'Average RB gate error: {data["error"]} +/- {np.sqrt(fitter.error_fit_err(pcov1, 2**(len(self.cfg.expt.qubits))))}')
+            # print(f'\tFidelity=1-error: {1-data["error"]} +/- {np.sqrt(fitter.error_fit_err(pcov1, 2**(len(self.cfg.expt.qubits))))}')
+
+            pcov2 = data['fit2_err']
+            # plt.plot(depths, avg_probs, 'o-', color='tab:blue')
+            plt.plot(unique_depths, fitter.rb_decay_l1_l2(unique_depths, p1, *data['fit2']), color=default_colors[0])
+            print(f'Running {"interleaved " + self.cfg.expt.gate_char + " gate" if irb else "regular"} RB on EF subspace')
+            print(f'Depolarizing parameter p2 from fit: {data["fit2"][3]} +/- {np.sqrt(pcov2[3][3])}')
+            print(f'Fidelity: {data["fidelity"]} +/- {data["fidelity_err"]}')
+            print(f'Leakage L1: {data["l1"]}')
+            print(f'Seepage L2: {data["l2"]}')
+
+
+            pcov3 = data['fit3_err'][0][0]
+            # plt.plot(depths, avg_probs, 'o-', color='tab:blue')
+            plt.plot(unique_depths, fitter.rb_func(unique_depths, *data['fit3']), color=default_colors[2])
+            p = data['fit3'][0]
+            print(f'Depolarizing parameter p from e/subspace fit: {p} +/- {np.sqrt(pcov3)}')
+            err = fitter.rb_error(p, d=2)
+            print(f'Average RB gate error on e/subspace: {err} +/- {np.sqrt(fitter.error_fit_err(pcov3, 2))}')
+            print(f'\tFidelity of e/subspace=1-error: {1-err} +/- {np.sqrt(fitter.error_fit_err(pcov3, 2))}')
+
+        plt.grid(linewidth=0.3)
+        plt.ylim(-0.05, 1.05)
+        plt.legend()
+        plt.show()
+
     def save_data(self, data=None):
         print(f'Saving {self.fname}')
         super().save_data(data=data)
@@ -607,6 +1244,7 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
             if inverted: neg = not neg
             pulse_func(qDrive=qDrive, qNotDrive=qNotDrive, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, add_virtual_Z=add_virtual_Z, play=play, reload=False)
             # print(self.overall_phase[qubit])
+            self.sync_all(5) # THIS IS NECESSARY IN RB WHEN THERE ARE MORE THAN O(30) PULSES SINCE THE TPROC CAN'T KEEP UP FOR SHORT PULSES
 
     def body(self):
         cfg=AttrDict(self.cfg)
@@ -673,7 +1311,6 @@ class SimultaneousRBEgGfExperiment(Experiment):
         reps: number averages per unique sequence
         variations: number different sequences per depth
         gate_char: a single qubit clifford gate (str) to characterize. If not None, runs interleaved RB instead of regular RB.
-        use_EgGf_subspace: specifies whether to run RB treating EgGf as the TLS subspace
         qubits: the qubits to perform simultaneous RB on. If using EgGf subspace, specify just qA (where qA, qB represents the Eg->Gf qubits)
         singleshot_reps: reps per state for singleshot calibration
         post_process: 'threshold' (uses single shot binning), 'scale' (scale by ge_avgs), or None
@@ -713,6 +1350,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
             self.cfg.expt.qubits = [q_other, q_measure_f]
         qA, qB = self.cfg.expt.qubits
 
+        assert self.measure_f, 'you really should be running this experiment with a measure_f'
+
         qA, qB = qubits
         qSort = qA
         if qA == 1: qSort = qB
@@ -725,10 +1364,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
         self.qDrive = qDrive
         self.qNotDrive = qNotDrive
         
-        # ================= #
-        # Get single shot calibration for all qubits
-        # ================= #
-        data={'counts_calib':[], 'counts_raw':[[]]}
+        data={'counts_raw':[[]]}
         if self.cfg.expt.measure_f is not None:
             for i in range(len(self.cfg.expt.measure_f)): # measure g of everybody, second measurement of each measure_f qubit using the g/f readout
                 data['counts_raw'].append([])
@@ -740,79 +1376,96 @@ class SimultaneousRBEgGfExperiment(Experiment):
         self.calib_order = ['gg', 'ge', 'eg', 'ee']
         if self.measure_f: self.calib_order += ['gf', 'ef'] # assumes the 2nd qubit is the measure_f
 
-        if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt:
-            angles_q = self.cfg.expt.angles
-            thresholds_q = self.cfg.expt.thresholds
-            ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
-            data['counts_calib'] = self.cfg.expt.counts_calib
-            print('Re-using provided angles, thresholds, ge_avgs')
-        else:
-            thresholds_q = [0]*4
-            ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
-            angles_q = [0]*4
-            fids_q = [0]*4
+        data['thresholds_loops'] = []
+        data['angles_loops'] = []
+        data['ge_avgs_loops'] = []
+        data['counts_calib_loops'] = []
 
-            # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
-            sscfg = AttrDict(deepcopy(self.cfg))
-            sscfg.expt.reps = sscfg.expt.singleshot_reps
-            sscfg.expt.tomo_qubits = self.cfg.expt.qubits
-            qA, qB = sscfg.expt.tomo_qubits
-
-            calib_prog_dict = dict()
-            for prep_state in tqdm(self.calib_order):
-                # print(prep_state)
-                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
-                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
-                calib_prog_dict.update({prep_state:err_tomo})
-
-            g_prog = calib_prog_dict['gg']
-            Ig, Qg = g_prog.get_shots(verbose=False)
-
-            # Get readout angle + threshold for qubits
-            for qi, q in enumerate(sscfg.expt.tomo_qubits):
-                calib_e_state = 'gg'
-                calib_e_state = calib_e_state[:qi] + 'e' + calib_e_state[qi+1:]
-                e_prog = calib_prog_dict[calib_e_state]
-                Ie, Qe = e_prog.get_shots(verbose=False)
-                shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                print(f'Qubit ({q}) ge')
-                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
-                thresholds_q[q] = threshold[0]
-                ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
-                angles_q[q] = angle
-                fids_q[q] = fid[0]
-                print(f'ge fidelity (%): {100*fid[0]}')
-
-            # Process the shots taken for the confusion matrix with the calibration angles
-            for prep_state in self.calib_order:
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
-                data['counts_calib'].append(counts)
-
-            print(f'thresholds={thresholds_q},')
-            print(f'angles={angles_q},')
-            print(f'ge_avgs={ge_avgs_q},')
-            print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
-
-            data['thresholds'] = thresholds_q
-            data['angles'] = angles_q
-            data['ge_avgs'] = ge_avgs_q
-            data['counts_calib'] = np.array(data['counts_calib'])
-
-            
-        # ================= #
-        # Begin RB
-        # ================= #
-
-        if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
-        data.update({"xpts":[]})
-
+        if self.measure_f:
+            data['thresholds_f_loops'] = []
+            data['angles_f_loops'] = []
+            data['gf_avgs_loops'] = []
+            data['counts_calib_f_loops'] = []
+        data['xpts'] = []
         depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
         gate_list_variations = [None]*len(depths)
+
         if 'loops' not in self.cfg.expt: self.cfg.expt.loops = 1
         print('running', self.cfg.expt.loops, 'loops')
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
-            for i_depth, depth in enumerate(tqdm(depths, disable=not progress or self.cfg.expt.loops > 1)):
+
+            # ================= #
+            # Get single shot calibration for all qubits
+            # ================= #
+
+            if 'angles' in self.cfg.expt and 'thresholds' in self.cfg.expt and 'ge_avgs' in self.cfg.expt and 'counts_calib' in self.cfg.expt:
+                angles_q = self.cfg.expt.angles
+                thresholds_q = self.cfg.expt.thresholds
+                ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
+                counts_calib = self.cfg.expt.counts_calib
+                print('Re-using provided angles, thresholds, ge_avgs')
+            else:
+                thresholds_q = [0]*4
+                ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+                angles_q = [0]*4
+                fids_q = [0]*4
+                counts_calib = []
+
+                # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = sscfg.expt.singleshot_reps
+                sscfg.expt.tomo_qubits = self.cfg.expt.qubits
+                qA, qB = sscfg.expt.tomo_qubits
+
+                calib_prog_dict = dict()
+                for prep_state in tqdm(self.calib_order):
+                    # print(prep_state)
+                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
+                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                    calib_prog_dict.update({prep_state:err_tomo})
+
+                g_prog = calib_prog_dict['gg']
+                Ig, Qg = g_prog.get_shots(verbose=False)
+
+                # Get readout angle + threshold for qubits
+                for qi, q in enumerate(sscfg.expt.tomo_qubits):
+                    calib_e_state = 'gg'
+                    calib_e_state = calib_e_state[:qi] + 'e' + calib_e_state[qi+1:]
+                    e_prog = calib_prog_dict[calib_e_state]
+                    Ie, Qe = e_prog.get_shots(verbose=False)
+                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                    print(f'Qubit ({q}) ge')
+                    fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                    thresholds_q[q] = threshold[0]
+                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    angles_q[q] = angle
+                    fids_q[q] = fid[0]
+                    print(f'ge fidelity (%): {100*fid[0]}')
+
+                # Process the shots taken for the confusion matrix with the calibration angles
+                for prep_state in self.calib_order:
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts_calib.append(counts)
+
+                print(f'thresholds={thresholds_q},')
+                print(f'angles={angles_q},')
+                print(f'ge_avgs={ge_avgs_q},')
+                print(f"counts_calib={np.array(counts_calib).tolist()}")
+
+                data['thresholds_loops'].append(thresholds_q)
+                data['angles_loops'].append(angles_q)
+                data['ge_avgs_loops'].append(ge_avgs_q)
+                data['counts_calib_loops'].append(np.array(counts_calib))
+
+
+            # ================= #
+            # Begin RB
+            # ================= #
+
+            if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
+
+            for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
                 # print(f'depth {depth} gate list (last gate is the total gate)')
                 if loop == 0:
                     data['xpts'].append([])
@@ -835,8 +1488,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                     randbench = RBEgGfProgram(soccfg=self.soccfg, cfg=self.cfg, gate_list=gate_list, qubits=self.cfg.expt.qubits, qDrive=self.cfg.expt.qDrive)
                     # print(randbench)
-                    # from qick.helpers import progs2json
-                    # print(progs2json([randbench.dump_prog()]))
+                    # # from qick.helpers import progs2json
+                    # # print(progs2json([randbench.dump_prog()]))
 
                     assert self.cfg.expt.post_process is not None, 'need post processing for RB to make sense!'
                     popln, popln_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_q, threshold=thresholds_q, ge_avgs=ge_avgs_q, post_process=self.cfg.expt.post_process)
@@ -854,77 +1507,76 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                     if loop == 0: data['xpts'][-1].append(depth)
 
-        # ================= #
-        # Measure the same thing with g/f distinguishing
-        # ================= #
-
-        if self.measure_f:
-            data.update({'counts_calib_f':[]})
-
             # ================= #
-            # Get f state single shot calibration (this must be re-run if you just ran measurement with the standard readout)
+            # Measure the same thing with g/f distinguishing
             # ================= #
 
-            thresholds_f_q = [0]*4
-            gf_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
-            angles_f_q = [0]*4
-            fids_f_q = [0]*4
+            if self.measure_f:
+                counts_calib_f = []
 
-            # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
-            sscfg = AttrDict(deepcopy(self.cfg))
-            sscfg.expt.reps = sscfg.expt.singleshot_reps
-            sscfg.expt.tomo_qubits = self.cfg.expt.qubits # the order of this was set earlier in code so 2nd qubit is the measure f qubit
-            sscfg.device.readout.frequency[q_measure_f] = sscfg.device.readout.frequency_ef[q_measure_f]
-            sscfg.device.readout.readout_length[q_measure_f] = sscfg.device.readout.readout_length_ef[q_measure_f]
+                # ================= #
+                # Get f state single shot calibration (this must be re-run if you just ran measurement with the standard readout)
+                # ================= #
 
-            calib_prog_dict = dict()
-            for prep_state in tqdm(self.calib_order):
-                # print(prep_state)
-                sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
-                err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
-                calib_prog_dict.update({prep_state:err_tomo})
+                thresholds_f_q = [0]*4
+                gf_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+                angles_f_q = [0]*4
+                fids_f_q = [0]*4
 
-            g_prog = calib_prog_dict['gg']
-            Ig, Qg = g_prog.get_shots(verbose=False)
+                # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = sscfg.expt.singleshot_reps
+                sscfg.expt.tomo_qubits = self.cfg.expt.qubits # the order of this was set earlier in code so 2nd qubit is the measure f qubit
+                sscfg.device.readout.frequency[q_measure_f] = sscfg.device.readout.frequency_ef[q_measure_f]
+                sscfg.device.readout.readout_length[q_measure_f] = sscfg.device.readout.readout_length_ef[q_measure_f]
 
-            # Get readout angle + threshold for qubits to distinguish g/f on one of the qubits
-            for qi, q in enumerate(sscfg.expt.tomo_qubits):
-                calib_f_state = 'gg'
-                calib_f_state = calib_f_state[:qi] + f'{"f" if q == q_measure_f else "e"}' + calib_f_state[qi+1:]
-                f_prog = calib_prog_dict[calib_f_state]
-                If, Qf = f_prog.get_shots(verbose=False)
-                shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=If[q], Qe=Qf[q])
-                print(f'Qubit ({q}){f" gf" if q == q_measure_f else " ge"}')
-                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
-                thresholds_f_q[q] = threshold[0]
-                gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(If[q]), np.average(Qf[q])]
-                angles_f_q[q] = angle
-                fids_f_q[q] = fid[0]
-                print(f'{"gf" if q == q_measure_f else "ge"} fidelity (%): {100*fid[0]}')
+                calib_prog_dict = dict()
+                for prep_state in tqdm(self.calib_order):
+                    # print(prep_state)
+                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
+                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                    calib_prog_dict.update({prep_state:err_tomo})
 
-            # Process the shots taken for the confusion matrix with the calibration angles
-            for prep_state in self.calib_order:
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_f_q, threshold=thresholds_f_q)
-                data['counts_calib_f'].append(counts)
+                g_prog = calib_prog_dict['gg']
+                Ig, Qg = g_prog.get_shots(verbose=False)
 
-            print(f'thresholds_f={thresholds_f_q},')
-            print(f'angles_f={angles_f_q},')
-            print(f'gf_avgs={gf_avgs_q},')
-            print(f"counts_calib_f={np.array(data['counts_calib_f']).tolist()}")
+                # Get readout angle + threshold for qubits to distinguish g/f on one of the qubits
+                for qi, q in enumerate(sscfg.expt.tomo_qubits):
+                    calib_f_state = 'gg'
+                    calib_f_state = calib_f_state[:qi] + f'{"f" if q == q_measure_f else "e"}' + calib_f_state[qi+1:]
+                    f_prog = calib_prog_dict[calib_f_state]
+                    If, Qf = f_prog.get_shots(verbose=False)
+                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=If[q], Qe=Qf[q])
+                    print(f'Qubit ({q}){f" gf" if q == q_measure_f else " ge"}')
+                    fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                    thresholds_f_q[q] = threshold[0]
+                    gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(If[q]), np.average(Qf[q])]
+                    angles_f_q[q] = angle
+                    fids_f_q[q] = fid[0]
+                    print(f'{"gf" if q == q_measure_f else "ge"} fidelity (%): {100*fid[0]}')
 
-            data['thresholds_f'] = thresholds_f_q
-            data['angles_f'] = angles_f_q
-            data['gf_avgs'] = gf_avgs_q
-            data['counts_calib_f'] = np.array(data['counts_calib_f'])
+                # Process the shots taken for the confusion matrix with the calibration angles
+                for prep_state in self.calib_order:
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_f_q, threshold=thresholds_f_q)
+                    counts_calib_f.append(counts)
 
-            # ================= #
-            # Begin RB for measure f, using same gate list as measure with g/e
-            # ================= #
+                print(f'thresholds_f={thresholds_f_q},')
+                print(f'angles_f={angles_f_q},')
+                print(f'gf_avgs={gf_avgs_q},')
+                print(f"counts_calib_f={np.array(counts_calib_f).tolist()}")
 
-            assert q_measure_f == qDrive, 'this code assumes we will be processing to distinguish gf from ge'
-            for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
-                for i_depth, depth in enumerate(tqdm(depths, disable=not progress or self.cfg.expt.loops > 1)):
+                data['thresholds_f_loops'].append(thresholds_f_q)
+                data['angles_f_loops'].append(angles_f_q)
+                data['gf_avgs_loops'].append(gf_avgs_q)
+                data['counts_calib_f_loops'].append(np.array(counts_calib_f))
+
+                # ================= #
+                # Begin RB for measure f, using same gate list as measure with g/e
+                # ================= #
+
+                assert q_measure_f == qDrive, 'this code assumes we will be processing to distinguish gf from ge'
+                for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
                     for var in range(self.cfg.expt.variations):
                         gate_list = gate_list_variations[i_depth][var]
 
@@ -934,8 +1586,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                         randbench = RBEgGfProgram(soccfg=self.soccfg, cfg=rbcfg, gate_list=gate_list, qubits=self.cfg.expt.qubits, qDrive=self.cfg.expt.qDrive)
                         # print(randbench)
-                        # from qick.helpers import progs2json
-                        # print(progs2json([randbench.dump_prog()]))
+                        # # from qick.helpers import progs2json
+                        # # print(progs2json([randbench.dump_prog()]))
 
                         assert self.cfg.expt.post_process is not None, 'need post processing for RB to make sense!'
                         popln, popln_err = randbench.acquire_rotated(soc=self.im[self.cfg.aliases.soc], progress=False, angle=angles_f_q, threshold=thresholds_f_q, ge_avgs=gf_avgs_q, post_process=self.cfg.expt.post_process)
@@ -950,7 +1602,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         # print('shape', np.shape(data['counts_raw']))
         for icounts in range(len(data['counts_raw'])):
-            data['counts_raw'][icounts] = np.average(np.reshape(data['counts_raw'][icounts], (self.cfg.expt.loops, len(depths), self.cfg.expt.variations, 4)), axis=0)
+            data['counts_raw'][icounts] = np.reshape(data['counts_raw'][icounts], (self.cfg.expt.loops, len(depths), self.cfg.expt.variations, 4))
 
         for k, a in data.items():
             # print(k)
@@ -981,26 +1633,31 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         assert self.measure_f
 
-        data['counts_calib_total'] = np.concatenate((data['counts_calib'], data['counts_calib_f']), axis=1)
-        data['counts_raw_total'] = np.concatenate((data['counts_raw'][0], data['counts_raw'][1]), axis=2)
-        print('counts calib total', np.shape(data['counts_calib_total']))
+        data['counts_calib_total'] = np.concatenate((data['counts_calib_loops'], data['counts_calib_f_loops']), axis=2)
+        data['counts_raw_total'] = np.concatenate((data['counts_raw'][0], data['counts_raw'][1]), axis=3)
+        # print('counts calib total shape', np.shape(data['counts_calib_total']))
         # print(data['counts_calib_total'])
-        print('counts raw', np.shape(data['counts_raw_total']))
+        # print('counts raw shape', np.shape(data['counts_raw_total']))
         # print(data['counts_raw'])
         # print('counts raw total', np.shape(data['counts_raw_total']))
 
         # gg, ge, eg, ee, gf, ef
-        data['poplns_2q'] = np.zeros(shape=(len(unique_depths), self.cfg.expt.variations, 6))
+        data['poplns_2q_loops'] = np.zeros(shape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations, 6))
 
-        for idepth, depth in enumerate(unique_depths):
-            for ivar in range(self.cfg.expt.variations):
-                # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
-                # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
-                counts_corrected = correct_readout_err([data['counts_raw_total'][idepth, ivar]], data['counts_calib_total'])
-                counts_corrected = fix_neg_counts(counts_corrected)
-                data['poplns_2q'][idepth, ivar, :] = counts_corrected/np.sum(counts_corrected)
+        for loop in range(self.cfg.expt.loops):
+            for idepth, depth in enumerate(unique_depths):
+                for ivar in range(self.cfg.expt.variations):
+                    # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
+                    # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
+                    counts_corrected = correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
+                    counts_corrected = fix_neg_counts(counts_corrected)
+                    data['poplns_2q_loops'][loop, idepth, ivar, :] = counts_corrected/np.sum(counts_corrected)
 
-        print('poplns_2q', np.shape(data['poplns_2q']))
+        data['poplns_2q'] = np.average(data['poplns_2q_loops'], axis=0)
+
+        print('poplns_2q_loops shape', np.shape(data['poplns_2q_loops']))
+        print('poplns_2q shape', np.shape(data['poplns_2q']))
+
         # [gg, ge, eg, ee, gf, ef]
         probs_eg = data['poplns_2q'][:, :, 2]
         probs_gf = data['poplns_2q'][:, :, 4]
@@ -1049,7 +1706,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         plt.figure(figsize=(8,6))
         irb = 'gate_char' in self.cfg.expt and self.cfg.expt.gate_char is not None
-        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf RB on {self.cfg.expt.qubits[0]}, {self.cfg.expt.qubits[1]}'
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf RB on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}'
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
         depths = data['xpts']
@@ -1107,7 +1764,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             print(f'\tFidelity of eg/subspace=1-error: {1-err} +/- {np.sqrt(fitter.error_fit_err(pcov3, 2))}')
 
         plt.grid(linewidth=0.3)
-        plt.ylim(-0.1, 1.1)
+        plt.ylim(-0.05, 1.05)
         plt.legend()
         plt.show()
 

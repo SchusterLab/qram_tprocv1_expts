@@ -11,11 +11,12 @@ device:
         readout_length_ef: [8.0, 7.0, 4.0, 4.0] # [us]
         relax_delay: [450, 450, 450, 450] # [us]
     qubit:
-        f_ge: [4110.408716402964, 3448.210751982461, 4762.198724436428, 4381.684458961562]
-        f_ef: [3884.3737933985267, 3347.761789059698, 4572.377970306574, 4210.013643268519] # [MHz]
+        f_ge: [4110.428247950795, 3448.2234633901926, 4762.201572322125, 4381.680438663265]
+        f_ef: [3884.3737933985267, 3347.761789059698, 4572.387578885567, 4209.9856996522185] # [MHz]
         f_Q1_ZZ: [3442.837979505655, 0, 3447.102664818869, 3446.9016438865956] # [MHz] frequency of Q1 when other qubits are in e
         f_Q_ZZ1: [4105.061776980227, 0, 4761.0850337068905, 4380.355943299591] # [MHz] frequency of Qx when Q1 is in e
         f_ef_Q_ZZ1: [0, 0, 4570.466450039196, 4207.199191279] # [MHz] frequency of Qx ef when Q1 is in e
+        f_ef_Q_ZZ0: [0, 0, 0, 4207.199191279] # [MHz] frequency of Qx ef when Q0 is in e
         f_EgGf: [2686.53594683, 0, 2017.3, 2414.92850999] # [MHz] expect to be ge_1 + ef_1 - ge_0; drive on Q1 to perform a swap with Qx
         # f_EgGf_Q: [0, 0, 5885.4, 5138.925]
         f_EgGf_Q: [0, 0, 5883.96, 5147.14]
@@ -28,15 +29,26 @@ device:
 
         pulses:
             pi_ge:
-                gain: [1854, 2631, 14389, 1140]
-                sigma: [0.020, 0.025, 0.015, 0.020] # [us]
-                half_gain: [1834, 2319, 14457, 1137] # calibrate by using half of the sigma in us, then recalibrate the gain
+                gain: [1854, 2631, 14389, 965]
+                sigma: [0.020, 0.025, 0.015, 0.025] # [us]
+                half_gain: [1834, 2319, 14457, 846] # calibrate by using half of the sigma in us, then recalibrate the gain
+                half_gain_pi_sigma: [-1, -1, 7212, -1] # calibrate using same sigma, recalibrate the gain
+                # gain: [1854, 2631, 14389, 1140]
+                # sigma: [0.020, 0.025, 0.015, 0.020] # [us]
+                # half_gain: [1834, 2319, 14457, 1134] # calibrate by using half of the sigma in us, then recalibrate the gain
                 # gain: [1857, 2634, 29015, 7092]
                 # sigma: [0.020, 0.025, 0.008, 0.005] # [us]
                 type: 'gauss'
             pi_ef:
-                gain: [1346, 1951, 10000, 1471]
-                sigma: [0.020, 0.025, 0.015, 0.010] # [us]
+                gain: [1346, 1951, 10074, 717]
+                sigma: [0.020, 0.025, 0.015, 0.020] # [us]
+                half_gain: [1346, 1951, 9979, 711] # calibrate by using half of the sigma in us, then recalibrate the gain
+                half_gain_pi_sigma: [-1, -1, 5049, 336] # calibrate by using half of the sigma in us, then recalibrate the gain
+                # gain: [1346, 1951, 9979, 1471]
+                # sigma: [0.020, 0.025, 0.015, 0.010] # [us]
+                # gain: [1346, 1951, 9979, 601]
+                # sigma: [0.020, 0.025, 0.015, 0.025] # [us]
+                # half_gain: [1346, 1951, 9979, 534] # calibrate by using half of the sigma in us, then recalibrate the gain
                 type: 'gauss'
             pi_Q1_ZZ: # pi pulse length for Q1 when other qubits are in e
                 gain: [2839, 0, 3310, 3132]
@@ -67,6 +79,11 @@ device:
             pi_ef_Q_ZZ1: # pi ef pulse length for Qx when Q1 in e
                 gain: [0, 0, 9586, 1639]
                 sigma: [0.02, 0, 0.015, 0.010]
+                half_gain: [None, None, None, None] # calibrate by using half of the sigma in us, then recalibrate the gain
+                type: 'gauss'
+            pi_ef_Q_ZZ0: # pi ef pulse length for Qx when Q1 in e
+                gain: [0, 0, 0, 800]
+                sigma: [0.0, 0, 0.0, 0.020]
                 half_gain: [None, None, None, None] # calibrate by using half of the sigma in us, then recalibrate the gain
                 type: 'gauss'
             
@@ -141,7 +158,8 @@ hw:
                 nyquist: 2
             delay_chs:
                 ch: [0, 1, 2, 3, 4, 5, 6]
-                delay_ns: [8.7, 8.5, 0, 7.6, 24, 20, 74]
+                # delay_ns: [8.7, 8.5, 0, 7.6, 24, 20, 74.5]
+                delay_ns: [8.7, 8.5, 0, 7.6, 24, 20, 104.5]
         adcs:
             readout:
                 ch: [0, 1, 2, 3]

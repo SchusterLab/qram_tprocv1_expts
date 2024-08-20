@@ -44,6 +44,8 @@ def correct_readout_err(n, n_conf):
     if np.shape(conf_mat)[0] == np.shape(conf_mat)[1]: # square matrix
         conf_mat_inv = np.linalg.inv(conf_mat)
     else: conf_mat_inv = np.linalg.pinv(conf_mat)
+    # print('conf mat transpose', conf_mat) 
+    # print('inv conf mat transpose', conf_mat_inv)
     # C_id = invM . C_noisy
     n = np.array(n, dtype=float)
     out_n = np.zeros(shape=(np.shape(n)[0], n_out_states))
@@ -646,10 +648,7 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
         # get the shots for the qubits we care about
         shots = np.array(shots[self.adc_chs[self.qubit]])
 
-        # data is returned as n00, n01, n10, n11 measured for the two qubits
-        n0 = np.sum(np.logical_not(shots))
-        n1 = np.sum(shots)
-        return np.array([n0, n1])
+        return sort_counts_1q(shots)
 
 # ===================================================================== #
 
