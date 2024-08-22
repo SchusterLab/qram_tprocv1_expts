@@ -312,9 +312,7 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
 
         elif prep_state == 'ge':
             self.X_pulse(q=qubits[1], play=True)
-            if apply_q1_pi2:
-                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[qubits[1]], phase=self.deg2reg(-90, gen_ch=self.qubit_chs[1]), gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[1]] // 2, waveform=f'qubit1_ZZ{qubits[1]}')
-                self.sync_all()
+            if apply_q1_pi2: self.X_pulse(q=1, pihalf=True, ZZ_qubit=qubits[1], play=True)
 
         elif prep_state == 'gf':
             self.X_pulse(q=qubits[1], play=True)
@@ -322,9 +320,7 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
 
         elif prep_state == 'eg':
             self.X_pulse(q=qubits[0], play=True)
-            if apply_q1_pi2:
-                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[qubits[0]], phase=self.deg2reg(-90, gen_ch=self.qubit_chs[1]), gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[0]] // 2, waveform=f'qubit1_ZZ{qubits[0]}')
-                self.sync_all()
+            if apply_q1_pi2: self.X_pulse(q=1, pihalf=True, ZZ_qubit=qubits[0], play=True)
 
         elif prep_state == 'fg':
             self.X_pulse(q=qubits[0], play=True)
@@ -332,53 +328,24 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
 
         elif prep_state == 'ee' or prep_state == 'ef' or prep_state == 'fe':
             self.X_pulse(q=qubits[0], play=True)
-
-            ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-            freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[1]] + ZZs[qubits[1], qubits[0]], gen_ch=self.qubit_chs[qubits[1]])
-            waveform = f'qubit{qubits[1]}_ZZ{qubits[0]}'
-            if waveform not in self.envelopes:
-                sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[1]], gen_ch=self.qubit_chs[qubits[1]])
-                self.add_gauss(ch=self.qubit_chs[qubits[1]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[1]]
-            elif qubits[1] == 1:
-                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[0]]
-            elif qubits[0] == 1:
-                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qubits[1]]
-            else: assert False, "There's probably a bug in your conditional statements"
-            self.setup_and_pulse(ch=self.qubit_chs[qubits[1]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-            self.sync_all()
+            self.X_pulse(q=qubits[1], ZZ_qubit=qubits[0], play=True)
 
             if apply_q1_pi2:
-                freq = (self.cfg.device.qubit.f_Q1_ZZ[qubits[0]] + self.cfg.device.qubit.f_Q1_ZZ[qubits[1]]) / 2
+                assert 1 not in qubits
+                freq = (self.f_ge[1, qubits[0]] + self.f_ge[1, qubits[1]]) / 2
                 freq = self.freq2reg(freq, gen_ch=self.qubit_chs[1])
-                waveform = f'qubit1_ZZ{qubits[0]}_ZZ{qubits[1]}'
+                waveform = f'pi_ge_ZZ{qubits[0]}_ZZ{qubits[1]}_q1'
                 sigma_cycles = self.us2cycles(self.pi_sigmas_us[1], gen_ch=self.qubit_chs[1])
                 self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                gain = self.cfg.device.qubit.pulses.pi_ge.gain[1] // 2
+                gain = self.pi_ge_gains[1, 1] // 2
                 self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=self.deg2reg(-90, gen_ch=self.qubit_chs[1]), gain=gain, waveform=waveform)
                 self.sync_all()
 
             if prep_state == 'ef':
-                assert qubits[0] == 1 and qubits[1] in [2, 3], 'Only implemented this state prep for Q1=e, Q2/Q3=f'
-                waveform = f'qubit{qubits[1]}_ef_ZZ{qubits[0]}'
-                gain = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.gain[qubits[1]]
-                freq = self.freq2reg(self.cfg.device.qubit.f_ef_Q_ZZ1[qubits[1]], gen_ch=self.qubit_chs[qubits[1]])
-                if waveform not in self.envelopes:
-                    sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.sigma[qubits[1]], gen_ch=self.qubit_chs[qubits[1]])
-                    self.add_gauss(ch=self.qubit_chs[qubits[1]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                self.setup_and_pulse(ch=self.qubit_chs[qubits[1]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-                self.sync_all()
+                self.Xef_pulse(q=qubits[1], ZZ_qubit=qubits[0])
 
             elif prep_state == 'fe':
-                assert qubits[0] in [2, 3] and qubits[1] == 1, 'Only implemented this state prep for Q1=e, Q2/Q3=f'
-                waveform = f'qubit{qubits[0]}_ef_ZZ{qubits[1]}'
-                gain = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.gain[qubits[0]]
-                freq = self.freq2reg(self.cfg.device.qubit.f_ef_Q_ZZ1[qubits[0]], gen_ch=self.qubit_chs[qubits[0]])
-                if waveform not in self.envelopes:
-                    sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.sigma[qubits[0]], gen_ch=self.qubit_chs[qubits[0]])
-                    self.add_gauss(ch=self.qubit_chs[qubits[0]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                self.setup_and_pulse(ch=self.qubit_chs[qubits[0]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-                self.sync_all()
+                self.Xef_pulse(q=qubits[0], ZZ_qubit=qubits[1])
         
         else: assert False, f'Invalid prep state {prep_state}'
 
@@ -461,7 +428,7 @@ class EgGfStateTomographyExperiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         qA, qB = self.cfg.expt.tomo_qubits
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -771,7 +738,7 @@ class StateTomography1QExperiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         q = self.cfg.expt.qubit
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):

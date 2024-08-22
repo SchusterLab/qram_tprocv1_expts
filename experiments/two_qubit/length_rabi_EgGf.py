@@ -130,39 +130,21 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
         elif init_state == '|0>|1>':
             self.Y_pulse(q=1, play=True)
-            self.sync_all()
 
         elif init_state == '|0>|0+1>':
             self.Y_pulse(q=1, play=True, pihalf=True)
-            self.sync_all()
 
         elif init_state == '|0>|2>':
             self.Y_pulse(q=1, play=True)
             self.Yef_pulse(q=1, play=True)
-            self.sync_all()
 
         elif init_state == '|1>|0>':
             self.Y_pulse(q=0, play=True, pihalf=False)
-            self.sync_all()
 
         elif init_state == '|1>|0+1>':
             if not self.cfg.expt.use_IQ_pulse:
                 self.Y_pulse(q=0, play=True)
-                self.sync_all()
-
-                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-                # phase = self.deg2reg(0, gen_ch=self.qubit_chs[1])
-                freq = self.f_Q1_ZZ_regs[0]
-
-                waveform = 'qubit1_ZZ0_half'
-                sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[0]/2, gen_ch=self.qubit_chs[1])
-                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]
-                self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-
-                # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0]//2, waveform='qubit1_ZZ0')
-                self.sync_all()
-
+                self.Y_pulse(q=1, pihalf=True, ZZ_qubit=0, play=True)
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
@@ -172,10 +154,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
         elif init_state == '|1>|1>':
             self.Y_pulse(q=0, play=True)
-            self.sync_all(0)
-
-            self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[0], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], waveform='qubit1_ZZ0')
-            self.sync_all()
+            self.Y_pulse(q=1, ZZ_qubit=0, play=True)
 
         # elif init_state == '|0+1>|0+1>':
         #     if not self.cfg.expt.use_IQ_pulse:
@@ -191,24 +170,10 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             self.Y_pulse(q=0, play=True, pihalf=True) # -> 0+1
             self.sync_all()
 
-
         elif init_state == '|0+1>|1>':
             if not self.cfg.expt.use_IQ_pulse:
                 self.Y_pulse(q=1, play=True) # -> 1
-                self.sync_all()
-
-                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[0]) # +Y/2 -> 0+1
-                freq = self.f_Q_ZZ1_regs[0]
-
-                waveform = f'qubit0_ZZ1_half'
-                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0]
-                # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[0] // 2
-                sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[0]/2, gen_ch=self.qubit_chs[0])
-                self.add_gauss(ch=self.qubit_chs[0], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                self.setup_and_pulse(ch=self.qubit_chs[0], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-                self.sync_all()
-                # print('WARNING, LONGER SYNC ON THIS PULSE') self.sync_all(self.us2cycles(0.030))
-
+                self.Y_pulse(q=0, ZZ_qubit=1, pihalf=True, play=True)
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
@@ -218,18 +183,22 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
 
         elif init_state == '|0+i1>|0+1>':
+            if not self.cfg.expt.use_IQ_pulse:
+                assert False, 'not implemented!'
+            else: assert False, 'no i+ state prep implemented!'
+
             self.X_pulse(q=0, play=True, pihalf=True, neg=True) # -> 0+i1
             self.sync_all()
 
-            freq_reg = int(np.average([self.f_Q1_ZZ_regs[0], self.f_ge_regs[1]]))
-            gain = int(np.average([self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[0], self.cfg.device.qubit.pulses.pi_ge.gain[1]]))
-            sigma_us = np.average([self.pi_Q1_ZZ_sigmas_us[0]/2, self.pi_sigmas_us[1]/2])
+            freq_reg = self.freq2reg(np.average([self.f_ges[1, 1], self.f_ges[1, 0]]))
+            gain = int(np.average([self.pi_ge_gains[1, 1], self.pi_ge_gains[1, 0]]))
+            sigma_us = np.average([self.pi_ge_sigmas[1, 1]/2, self.pi_ge_sigmas[1, 0]/2])
             pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
             phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
             self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
             self.sync_all()
-        
+
         elif 'Q1' in init_state: # specify other qubits to prepare. it will always be specified as QxQ1_regular_state_name, with regular state name specified as |Qx>|Q1>
             assert init_state[2:5] == 'Q1_'
             q_other = int(init_state[1])
@@ -241,68 +210,35 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
             elif init_state_other == '|0>|1>':
                 self.Y_pulse(q=1, play=True)
-                self.sync_all()
 
             elif init_state_other == '|0>|2>':
                 self.Y_pulse(q=1, play=True)
                 self.Yef_pulse(q=1, play=True)
-                self.sync_all()
 
             elif init_state_other == '|0>|0+1>':
                 self.Y_pulse(q=1, play=True, pihalf=True)
-                self.sync_all()
 
             elif init_state_other == '|1>|0>':
                 self.Y_pulse(q=q_other, play=True, pihalf=False)
-                self.sync_all()
 
             elif init_state_other == '|2>|0>':
                 self.Y_pulse(q=q_other, play=True, pihalf=False)
                 self.Yef_pulse(q=q_other, play=True)
-                self.sync_all()
 
             elif init_state_other == '|1>|0+1>':
                 self.Y_pulse(q=q_other, play=True)
-                self.sync_all()
-
-                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-                # phase = self.deg2reg(0, gen_ch=self.qubit_chs[1])
-                freq = self.f_Q1_ZZ_regs[q_other]
-
-                waveform = f'qubit1_ZZ{q_other}_half'
-                sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q_other]/2, gen_ch=self.qubit_chs[1])
-                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[q_other]
-                self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-
-                # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[q_other], phase=phase, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[q_other]//2, waveform=f'qubit1_ZZ{q_other}')
-                self.sync_all()
+                self.Y_pulse(q=1, ZZ_qubit=q_other, pihalf=True, play=True)
 
             elif init_state_other == '|1>|1>':
                 self.Y_pulse(q=q_other, play=True)
-                self.sync_all(0)
-
-                self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[q_other], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[q_other], waveform=f'qubit1_ZZ{q_other}')
-                self.sync_all()
+                self.Y_pulse(q=1, ZZ_qubit=q_other, play=True)
 
             elif init_state_other == '|0+1>|0>':
                 self.Y_pulse(q=q_other, play=True, pihalf=True) # -> 0+1
-                self.sync_all()
 
             elif init_state_other == '|0+1>|1>':
                 self.Y_pulse(q=1, play=True) # -> 1
-                self.sync_all()
-
-                phase = self.deg2reg(-90, gen_ch=self.qubit_chs[q_other]) # +Y/2 -> 0+1
-                freq = self.f_Q_ZZ1_regs[q_other]
-
-                waveform = f'qubit{q_other}_ZZ1_half'
-                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[q_other]
-                # gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[q_other] // 2
-                sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[q_other]/2, gen_ch=self.qubit_chs[q_other])
-                self.add_gauss(ch=self.qubit_chs[q_other], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                self.setup_and_pulse(ch=self.qubit_chs[q_other], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-                self.sync_all()
+                self.Y_pulse(q=q_other, ZZ_qubit=1, pihalf=True, play=True)
 
             else:
                 assert False, f'Init state {init_state} not valid'

@@ -272,7 +272,7 @@ class SimultaneousRBExperiment(Experiment):
         self.qubit = qubits[0]
 
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -587,27 +587,9 @@ class SimultaneousRBEFProgram(QutritAveragerProgram):
 
         qTest = self.qubit_list[0]
         if 'ZZ_qubit' in self.cfg.expt and self.cfg.expt.ZZ_qubit is not None:
-            qZZ = self.cfg.expt.ZZ_qubit
-            assert qZZ != qTest
-            self.X_pulse(q=qZZ, play=True)
-
-            ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-            freq = self.freq2reg(self.cfg.device.qubit.f_ge[qTest] + ZZs[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
-            waveform = f'qubit{qTest}_ZZ{qZZ}'
-            if waveform not in self.envelopes:
-                sigma_cycles = self.us2cycles(self.pi_sigmas_us[qTest], gen_ch=self.qubit_chs[qTest])
-                self.add_gauss(ch=self.qubit_chs[qTest], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                gain = self.cfg.device.qubit.pulses.pi_ge.gain[qTest]
-            elif qTest == 1:
-                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qZZ]
-            elif qZZ == 1:
-                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qTest]
-            else: assert False, "There's probably a bug in your conditional statements"
-            self.setup_and_pulse(ch=self.qubit_chs[qTest], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-            self.sync_all()
-        
-        else:
-            self.X_pulse(q=qTest, play=True)
+            ZZ_qubit = self.cfg.expt.ZZ_qubit
+            if ZZ_qubit != qTest: self.X_pulse(q=ZZ_qubit, play=True)
+        self.X_pulse(q=qTest, ZZ_qubit=ZZ_qubit, play=True)
 
 
         # Do all the gates given in the initialize except for the total gate, measure
@@ -666,7 +648,7 @@ class SimultaneousRBEFExperiment(Experiment):
 
     def acquire(self, progress=False, debug=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         assert len(self.cfg.expt.qubits) == 1, 'only 1 qubit supported for now in RB'
         self.qubit = self.cfg.expt.qubits[0]
 
@@ -1328,7 +1310,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
         qubits = self.cfg.expt.qubits
 
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):

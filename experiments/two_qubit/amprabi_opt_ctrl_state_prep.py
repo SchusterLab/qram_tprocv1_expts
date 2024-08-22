@@ -80,7 +80,7 @@ class AmplitudeRabiOptimalCtrlProgram(RAveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
 
-        self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
 
         assert 'Icontrols' in self.cfg.expt and 'Qcontrols' in self.cfg.expt and 'times_us' in self.cfg.expt
         assert 'IQ_qubits' in self.cfg.expt
@@ -97,14 +97,22 @@ class AmplitudeRabiOptimalCtrlProgram(RAveragerProgram):
         self.qubit_ch_types = cfg.hw.soc.dacs.qubit.type
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
-        self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
-        self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
+
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4,4))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4,4))
+        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4,4))
+        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4,4))
+        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4,4))
+        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4,4))
+        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4,4))
+        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4,4))
+        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4,4))
+        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4,4))
+
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
 
-
-        gen_chs = []
         
         # declare all res dacs
         self.measure_chs = []
@@ -146,9 +154,8 @@ class AmplitudeRabiOptimalCtrlProgram(RAveragerProgram):
             mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            if self.qubit_chs[q] not in gen_chs:
+            if self.qubit_chs[q] not in self.gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
-                gen_chs.append(self.qubit_chs[q])
 
         # add qubit and readout pulses to respective channels
         if 'plot_IQ' not in self.cfg.expt or self.cfg.expt.plot_IQ == None: self.cfg.expt.plot_IQ = False
@@ -185,7 +192,7 @@ class AmplitudeRabiOptimalCtrlProgram(RAveragerProgram):
             self.set_pulse_registers(
                 ch=self.qubit_chs[q],
                 style="arb",
-                freq=self.f_ge_reg[q],
+                freq=self.freq2reg(self.f_ges[q,q], gen_ch=self.qubit_chs[q]),
                 phase=0,
                 gain=gain, # gain set by update for 0th Q in IQ_qubits only
                 waveform=f"pulse_Q{q}")
@@ -312,7 +319,7 @@ class AmplitudeRabiOptimalCtrlExperiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -472,7 +479,7 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
 
     def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -684,8 +691,9 @@ class OptimalCtrlTomo2QProgram(AbstractStateTomo2QProgram):
 
         # IQ pulse
         if 'plot_IQ' not in self.cfg.expt or self.cfg.expt.plot_IQ == None: self.cfg.expt.plot_IQ = False
+        if 'ILC' not in self.cfg.expt: self.cfg.expt.ILC = False
         for iq, q in enumerate(self.cfg.expt.IQ_qubits):
-            self.handle_IQ_pulse(name=f'pulse_Q{q}', ch=self.qubit_chs[q], I_mhz_vs_us=self.cfg.expt.Icontrols[iq], Q_mhz_vs_us=self.cfg.expt.Qcontrols[iq], times_us=self.cfg.expt.times_us, freq_MHz=self.cfg.device.qubit.f_ge[q], phase_deg=0, gain=self.cfg.expt.IQ_gain[iq], reload=True, play=False, plot_IQ=self.cfg.expt.plot_IQ, ILC=self.cfg.expt.ILC)
+            self.handle_IQ_pulse(name=f'pulse_Q{q}', ch=self.qubit_chs[q], I_mhz_vs_us=self.cfg.expt.Icontrols[iq], Q_mhz_vs_us=self.cfg.expt.Qcontrols[iq], times_us=self.cfg.expt.times_us, freq_MHz=self.f_ges[q, q], phase_deg=0, gain=self.cfg.expt.IQ_gain[iq], reload=True, play=False, plot_IQ=self.cfg.expt.plot_IQ, ILC=self.cfg.expt.ILC)
         
         self.sync_all(200)
 
@@ -717,7 +725,7 @@ class OptimalCtrlTomo2QExperiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         qA, qB = self.cfg.expt.tomo_qubits
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):

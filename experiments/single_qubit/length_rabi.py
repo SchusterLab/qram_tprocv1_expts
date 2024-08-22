@@ -46,29 +46,18 @@ class LengthRabiProgram(AveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
-        self.checkZZ = self.cfg.expt.checkZZ
+
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        self.checkZZ = False
+        if qZZ is not None: self.checkZZ = True
+        else: qZZ = qTest
         self.checkEF = self.cfg.expt.checkEF
         if self.checkEF:
             if 'pulse_ge' not in self.cfg.expt: self.pulse_ge = True
             else: self.pulse_ge = self.cfg.expt.pulse_ge
 
-        self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
-        self.qubits = self.cfg.expt.qubits
-        
-        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
-            assert len(self.qubits) == 2
-            # assert 1 in self.qubits
-            qZZ, qTest = self.qubits
-            qSort = qZZ # qubit by which to index for parameters on qTest
-            if qZZ == 1: qSort = qTest
-            if 1 not in self.qubits:
-                assert 0 in self.qubits and 3 in self.qubits
-                assert self.cfg.expt.checkEF
-                qZZ = 0
-                qSort = qTest = 3 
-        else:
-            qTest = self.qubits[0]
-            qSort = qTest
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
 
         self.adc_chs = cfg.hw.soc.adcs.readout.ch
         self.res_chs = cfg.hw.soc.dacs.readout.ch
@@ -81,11 +70,18 @@ class LengthRabiProgram(AveragerProgram):
             mixer_freqs = self.cfg.hw.soc.dacs.swap.mixer_freq
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
-        self.f_ge_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ge, self.qubit_chs)]
-        if self.checkZZ:
-            if qTest == 1: self.f_Q1_ZZ_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q1_ZZ]
-            else: self.f_Q_ZZ1_reg = [self.freq2reg(f, gen_ch=self.qubit_chs[qTest]) for f in cfg.device.qubit.f_Q_ZZ1]
-        self.f_ef_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_ef, self.qubit_chs)]
+
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4,4))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4,4))
+        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4,4))
+        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4,4))
+        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4,4))
+        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4,4))
+        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4,4))
+        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4,4))
+        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4,4))
+        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4,4))
+
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             self.f_f0g1_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
@@ -127,7 +123,7 @@ class LengthRabiProgram(AveragerProgram):
                 self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # declare qubit dacs
-        for q in self.qubits:
+        for q in range(self.num_qubits_sample):
             mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
                 mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
@@ -142,112 +138,51 @@ class LengthRabiProgram(AveragerProgram):
                 if self.swap_chs[q] not in self.gen_chs: 
                     self.declare_gen(ch=self.swap_chs[q], nqz=self.cfg.hw.soc.dacs.swap.nyquist[q], mixer_freq=mixer_freq)
 
-        # define pi_test_sigma as the pulse that we are calibrating, update in outer loop over averager program
-        self.pi_test_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest])
+        # define pisigma_ge as the ge pulse for the qubit that we are calibrating the pulse on (mostly for use for preparation if we need to calibrate ef)
+        self.pisigma_ge = self.us2cycles(self.pi_ge_sigmas[qTest, qZZ], gen_ch=self.qubit_chs[qTest]) # default pi_ge value
+        self.f_ge_init_reg = self.freq2reg(self.f_ges[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+        self.gain_ge_init = self.pi_ge_gains[qTest, qZZ] if self.pi_ge_gains[qTest, qZZ] > 0 else self.pi_ge_gains[qTest, qTest] # this contingency is possible if the ge pulse is not calibrated but we want to calibrate the EF pulse for a specific ZZ configuration
+        if self.checkZZ: self.pisigma_ge_qZZ = self.us2cycles(self.pi_ge_sigmas[qZZ, qZZ], gen_ch=self.qubit_chs[qZZ])
+
+        # parameters for test pulse that we are trying to calibrate
+        self.sigma_test = self.cfg.expt.sigma_test
+        if 'gain' not in self.cfg.expt or self.cfg.expt.gain is None:
+            self.gain_pi_test = self.pi_ge_gains[qTest, qZZ] if self.pi_ge_gains[qTest, qZZ] > 0 else self.pi_ge_gains[qTest, qTest]
+            if self.checkEF: self.gain_pi_test = self.pi_ef_gains[qTest, qZZ] if self.pi_ef_gains[qTest, qZZ] > 0 else self.pi_ef_gains[qTest, qTest]
+        else: self.gain_pi_test = self.cfg.expt.gain
+        self.f_pi_test_reg = self.freq2reg(self.f_ges[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+        if self.checkEF: self.f_pi_test_reg = self.freq2reg(self.f_efs[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+        self.test_pi_half = False # calibrate the pi/2 pulse instead of the pi pulse by taking half the sigma and calibrating the gain
         divide_len = True
-        test_pi_half = False
+        if 'divide_len' in self.cfg.expt: divide_len = self.cfg.expt.divide_len
         if 'test_pi_half' in self.cfg.expt and self.cfg.expt.test_pi_half:
-            if 'divide_len' in self.cfg.expt: divide_len = self.cfg.expt.divide_len
-            if divide_len: self.pi_test_sigma = self.pi_test_sigma // 2
-            test_pi_half = True
-        self.f_pi_test_reg = self.f_ge_reg[qTest] # freq we are trying to calibrate
-        if 'gain' in self.cfg.expt: self.gain_pi_test = self.cfg.expt.gain 
-        else:
-            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.gain[qTest] # gain of the pulse we are trying to calibrate
-            if test_pi_half:
-                if divide_len:
-                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.half_gain[qTest] # gain of the pulse we are trying to calibrate
-                else:
-                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma[qTest] # gain of the pulse we are trying to calibrate
-        # define pisigma_ge as the ge pulse for the qubit that we are calibrating the pulse on
-        self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qTest], gen_ch=self.qubit_chs[qTest]) # default pi_ge value
-        self.f_ge_init_reg = self.f_ge_reg[qTest]
-        self.gain_ge_init = self.cfg.device.qubit.pulses.pi_ge.gain[qTest]
-        if self.checkZZ:
-            self.pisigma_ge_qZZ = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma[qZZ], gen_ch=self.qubit_chs[qZZ])
-            if 1 in [qZZ, qTest]:
-                if qTest == 1:
-                    self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qSort], gen_ch=self.qubit_chs[qTest])
-                    self.f_ge_init_reg = self.f_Q1_ZZ_reg[qSort] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
-                    self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qSort] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
-                    if 'f_pi_test' not in self.cfg.expt:
-                        self.f_pi_test_reg = self.f_Q1_ZZ_reg[qSort] # freq we are trying to calibrate
-                        if self.checkEF:
-                            self.f_pi_test_reg = self.freq2reg(self.cfg.device.qubit.f_ef_Q1_ZZ[qSort], gen_ch=self.qubit_chs[qTest])
-                    if 'gain' not in self.cfg.expt:
-                        self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qSort] # gain of the pulse we are trying to calibrate
-                        if test_pi_half:
-                            if divide_len:
-                                self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.half_gain[qSort] # gain of the pulse we are trying to calibrate
-                            else:
-                                self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q1_ZZ.half_gain_pi_sigma[qSort] # gain of the pulse we are trying to calibrate
-                        if self.checkEF:
-                            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q1_ZZ.gain[qSort] # gain of the pulse we are trying to calibrate
-                            if test_pi_half:
-                                if divide_len:
-                                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q1_ZZ.half_gain[qSort] # gain of the pulse we are trying to calibrate
-                                else:
-                                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q1_ZZ.half_gain_pi_sigma[qSort] # gain of the pulse we are trying to calibrate
-                else:
-                    self.pisigma_ge = self.us2cycles(cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qSort], gen_ch=self.qubit_chs[qTest])
-                    self.f_ge_init_reg = self.f_Q_ZZ1_reg[qSort] # freq to use if wanting to doing ge for the purpose of doing an ef pulse
-                    self.gain_ge_init = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qSort] # gain to use if wanting to doing ge for the purpose of doing an ef pulse
-                    if 'f_pi_test' not in self.cfg.expt:
-                        self.f_pi_test_reg = self.f_Q_ZZ1_reg[qSort] # freq we are trying to calibrate
-                        if self.checkEF:
-                            self.f_pi_test_reg = self.freq2reg(self.cfg.device.qubit.f_ef_Q_ZZ1[qSort], gen_ch=self.qubit_chs[qTest])
-                    if 'gain' not in self.cfg.expt:
-                        self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qSort] # gain of the pulse we are trying to calibrate
-                        if test_pi_half:
-                            if divide_len:
-                                self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q_ZZ1.half_gain[qSort] # gain of the pulse we are trying to calibrate
-                            else:
-                                self.gain_pi_test = self.cfg.device.qubit.pulses.pi_Q_ZZ1.half_gain_pi_sigma[qSort] # gain of the pulse we are trying to calibrate
-                        if self.checkEF:
-                            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.gain[qSort] # gain of the pulse we are trying to calibrate
-                            if test_pi_half:
-                                if divide_len:
-                                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.half_gain[qSort] # gain of the pulse we are trying to calibrate
-                                else:
-                                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ1.half_gain_pi_sigma[qSort] # gain of the pulse we are trying to calibrate
+            self.test_pi_half = self.cfg.expt.test_pi_half
+            if divide_len:
+                # print(f'Calibrating half pi gain (divide length) when pi len is {self.cfg.expt.sigma_test}')
+                self.sigma_test = self.cfg.expt.sigma_test / 2
+                if 'gain' not in self.cfg.expt or self.cfg.expt.gain is None:
+                    self.gain_pi_test = self.pi_ge_half_gains[qTest, qZZ]
+                    if self.checkEF: self.gain_pi_test = self.pi_ef_half_gains[qTest, qZZ]
             else:
-                assert qZZ == 0 and qTest == 3
-                assert self.checkEF
-                ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-                self.f_ge_init_reg = self.freq2reg(self.cfg.device.qubit.f_ge[qTest] + ZZs[qTest, qZZ], gen_ch=self.qubit_chs[qTest]) # freq to use if wanting to doing ge for the purpose of doing an ef pulse
-
-                if 'f_pi_test' not in self.cfg.expt:
-                    self.f_pi_test_reg = self.freq2reg(self.cfg.device.qubit.f_ef_Q_ZZ0[qTest], gen_ch=self.qubit_chs[qTest]) # freq we are trying to calibrate
-                if 'gain' not in self.cfg.expt:
-                    self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ0.gain[qSort] # gain of the pulse we are trying to calibrate
-                    if test_pi_half:
-                        if divide_len:
-                            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ0.half_gain[qSort] # gain of the pulse we are trying to calibrate
-                        else:
-                            self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef_Q_ZZ0.half_gain_pi_sigma[qSort] # gain of the pulse we are trying to calibrate
-
-        if not self.checkZZ and self.checkEF:
-            self.f_pi_test_reg = self.f_ef_reg[qTest] # freq we are trying to calibrate
-            if 'gain' not in self.cfg.expt:
-                self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.gain[qTest] # gain of the pulse we are trying to calibrate
-                if test_pi_half:
-                    if divide_len:
-                        self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.half_gain[qTest] # gain of the pulse we are trying to calibrate
-                    else:
-                        self.gain_pi_test = self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma[qTest] # gain of the pulse we are trying to calibrate
-
+                # print(f'Calibrating half pi gain (divide gain) when pi len is {self.cfg.expt.sigma_test}')
+                if 'gain' not in self.cfg.expt or self.cfg.expt.gain is None:
+                    self.gain_pi_test = self.pi_ge_half_gain_pi_sigmas[qTest, qZZ]
+                    if self.checkEF: self.gain_pi_test = self.pi_ef_half_gain_pi_sigmas[qTest, qZZ]
+        self.pi_test_sigma = self.us2cycles(self.sigma_test, gen_ch=self.qubit_chs[qTest])
+        assert self.f_pi_test_reg > 0
+        assert self.gain_pi_test > 0
 
         # add qubit pulses to respective channels
         if cfg.expt.pulse_type.lower() == "gauss" and self.pi_test_sigma > 0:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test", sigma=self.pi_test_sigma, length=self.pi_test_sigma*4)
         if self.checkZZ:
-            self.add_gauss(ch=self.qubit_chs[qZZ], name="pi_qubitA", sigma=self.pisigma_ge_qZZ, length=self.pisigma_ge_qZZ*4)
+            self.add_gauss(ch=self.qubit_chs[qZZ], name="pi_qubitZZ", sigma=self.pisigma_ge_qZZ, length=self.pisigma_ge_qZZ*4)
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             for q in self.cfg.expt.cool_qubits:
-                self.pisigma_ef = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q]) # default pi_ef value
+                self.pisigma_ef = self.us2cycles(self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]) # default pi_ef value
                 self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
                 if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
                     self.add_gauss(ch=self.swap_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
@@ -256,12 +191,12 @@ class LengthRabiProgram(AveragerProgram):
         if 'error_amp' in self.cfg.expt and self.cfg.expt.error_amp: # add pihalf initialization pulse for error amplification
             if divide_len:
                 self.pi_test_half_gain = self.gain_pi_test # the proper way would be to find the exactly calibrated pulse but we just need to get somewhere close for this
-                self.pi_test_half_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest]) // 2
+                self.pi_test_half_sigma = self.us2cycles(cfg.expt.sigma_test/2, gen_ch=self.qubit_chs[qTest])
             else:
-                self.pi_test_half_gain =  self.gain_pi_test // 2 # the proper way would be to find the exactly calibrated pulse but we just need to get somewhere close for this
-                if test_pi_half:
-                    self.pi_test_half_gain = self.gain_pi_test # the "pi_test" we are testing is already the pi_half
-                self.pi_test_half_sigma = self.us2cycles(cfg.expt.length_placeholder, gen_ch=self.qubit_chs[qTest])
+                if self.test_pi_half: self.pi_test_half_gain = self.gain_pi_test # the "pi_test" we are testing is already the pi_half
+                else: self.pi_test_half_gain = self.gain_pi_test // 2 # the proper way would be to find the exactly calibrated pulse but we just need to get somewhere close for this
+                self.pi_test_half_sigma = self.us2cycles(cfg.expt.sigma_test, gen_ch=self.qubit_chs[qTest])
+            assert self.pi_test_half_sigma > 0
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_test_half", sigma=self.pi_test_half_sigma, length=self.pi_test_half_sigma*4)
 
         # add readout pulses to respective channels
@@ -278,8 +213,9 @@ class LengthRabiProgram(AveragerProgram):
     
     def body(self):
         cfg=AttrDict(self.cfg)
-        if self.checkZZ: qZZ, qTest = self.qubits
-        else: qTest = self.qubits[0]
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        if qZZ is None: qZZ = qTest
 
         self.reset_and_sync()
 
@@ -301,9 +237,9 @@ class LengthRabiProgram(AveragerProgram):
                 remaining_idle -= last_pulse_len
 
                 last_pulse_len = 0
-                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.freq2reg(self.cfg.device.qubit.f_ef[q], gen_ch=self.qubit_chs[q]), gain=cfg.device.qubit.pulses.pi_ef.gain[q], waveform=f"pi_ef_qubit{q}")
+                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.freq2reg(self.f_efs[q, q], gen_ch=self.qubit_chs[q]), gain=self.pi_ef_gains[q, q], waveform=f"pi_ef_qubit{q}")
                 self.sync_all()
-                last_pulse_len += self.cfg.device.qubit.pulses.pi_ef.sigma[q]*4
+                last_pulse_len += self.pi_ef_sigmas[q, q]*4
 
                 pulse_type = self.cfg.device.qubit.pulses.pi_f0g1.type[q]
                 pisigma_f0g1 = self.us2cycles(self.cfg.device.qubit.pulses.pi_f0g1.sigma[q], gen_ch=self.swap_f0g1_chs[q])
@@ -321,10 +257,13 @@ class LengthRabiProgram(AveragerProgram):
 
         # initializations as necessary
         if self.checkZZ:
-            self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.f_ge_reg[qZZ], gain=cfg.device.qubit.pulses.pi_ge.gain[qZZ], waveform="pi_qubitA")
+            assert self.pi_ge_gains[qZZ, qZZ] > 0
+            self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.freq2reg(self.f_ges[qZZ, qZZ], gen_ch=self.qubit_chs[qZZ]), gain=self.pi_ge_gains[qZZ, qZZ], waveform="pi_qubitZZ")
             self.sync_all()
             # print('check zz qubit', qZZ)
         if self.checkEF and self.pulse_ge:
+            assert self.gain_ge_init > 0
+            assert self.f_ge_init_reg > 0
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_ge_init_reg, phase=0, gain=self.gain_ge_init, waveform="pi_qubit_ge")
             self.sync_all()
             # print('init pulse on q', qTest, 'freq', self.reg2freq(self.f_ge_init_reg, gen_ch=self.qubit_chs[qTest]), 'gain', self.gain_ge_init)
@@ -334,7 +273,8 @@ class LengthRabiProgram(AveragerProgram):
             if 'error_amp' in self.cfg.expt:
                 assert 'n_pulses' in self.cfg.expt and self.cfg.expt.n_pulses is not None
                 n_pulses = self.cfg.expt.n_pulses
-                self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=self.pi_test_half_gain, waveform="pi_test_half")
+                # print('init pi/2 freq', self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]), 'gain', self.pi_test_half_gain)
+                self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.f_pi_test_reg, phase=0, gain=int(self.pi_test_half_gain), waveform="pi_test_half")
                 self.sync_all()
 
                 for i in range(int(2*n_pulses)):
@@ -374,7 +314,8 @@ class LengthRabiProgram(AveragerProgram):
     def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, return_err=False):
         buf_len = len(self.di_buf[0])
 
-        if angle is None: angle = [0]*len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        if angle is None: angle = [0]*num_qubits_sample
         bufi = np.array([
             self.di_buf[i]*np.cos(np.pi/180*angle[i]) - self.dq_buf[i]*np.sin(np.pi/180*angle[i])
             for i, ch in enumerate(self.ro_chs)])
@@ -460,9 +401,9 @@ class LengthRabiExperiment(Experiment):
         reps: number of reps,
         gain: gain to use for the qubit pulse
         pulse_type: 'gauss' or 'const'
-        checkZZ: True/False for putting another qubit in e (specify as qZZ)
         checkEF: does ramsey on the EF transition instead of ge
-        qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
+        qTest: qubit on which to do the test pulse
+        qZZ: None if not checkZZ, else specify other qubit to pi pulse
     )
     """
 
@@ -471,7 +412,7 @@ class LengthRabiExperiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -482,28 +423,21 @@ class LengthRabiExperiment(Experiment):
                 elif not(isinstance(value, list)):
                     subcfg.update({key: [value]*num_qubits_sample})
 
-        self.checkZZ = self.cfg.expt.checkZZ
-        self.qubits = self.cfg.expt.qubits
-        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
-            assert len(self.qubits) == 2
-            # assert 1 in self.qubits
-            qZZ, qTest = self.qubits
-            qSort = qZZ # qubit by which to index for parameters on qTest
-            if qZZ == 1: qSort = qTest
-            if 1 not in self.qubits:
-                assert 0 in self.qubits and 3 in self.qubits
-                assert self.cfg.expt.checkEF
-                qZZ = 0
-                qSort = qTest = 3 
-        else: qTest = self.qubits[0]
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        self.checkZZ = False
+        if qZZ is not None: self.checkZZ = True
+        else: qZZ = qTest
+        self.checkEF = self.cfg.expt.checkEF
 
+        print(f'Running length rabi {"EF " if self.cfg.expt.checkEF else ""}on Q{qTest} {"with ZZ Q" + str(qZZ) if self.checkZZ else ""}')
 
         lengths = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
 
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[]}
 
         for length in tqdm(lengths, disable=not progress):
-            self.cfg.expt.length_placeholder = float(length)
+            self.cfg.expt.sigma_test = float(length)
             lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
             self.prog = lengthrabi
             self.cfg.expt.gain = self.prog.gain_pi_test
@@ -559,26 +493,17 @@ class LengthRabiExperiment(Experiment):
         if data is None:
             data=self.data 
 
-        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
-            assert len(self.qubits) == 2
-            # assert 1 in self.qubits
-            qZZ, qTest = self.qubits
-            qSort = qZZ # qubit by which to index for parameters on qTest
-            if qZZ == 1: qSort = qTest
-            if 1 not in self.qubits:
-                assert 0 in self.qubits and 3 in self.qubits
-                assert self.cfg.expt.checkEF
-                qZZ = 0
-                qSort = qTest = 3 
-        else: qTest = self.qubits[0]
-
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        self.checkZZ = False
+        if qZZ is not None: self.checkZZ = True
+        else: qZZ = qTest
 
         xpts_ns = data['xpts']*1e3
         if fit_func == 'decaysin': fit_func = fitter.decaysin
         elif fit_func == 'sin': fit_func = fitter.sinfunc
 
-        if 'gain' in self.cfg.expt: gain = self.cfg.expt.gain
-        else: gain = self.cfg.device.qubit.pulses.pi_ge.gain[self.cfg.expt.qubits[-1]] # gain of the pulse we are trying to calibrate
+        gain = self.cfg.expt.gain
         title = f"Length Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Gain {gain}){(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}"
 
         plt.figure(figsize=(10, 5))
@@ -654,7 +579,7 @@ class NPulseExperiment(Experiment):
 
     def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -669,19 +594,10 @@ class NPulseExperiment(Experiment):
 
         data={"xpts":[], "avgi":[], "avgq":[], "amps":[], "phases":[], 'counts_calib':[]}
 
-        self.checkZZ = self.cfg.expt.checkZZ
         self.checkEF = self.cfg.expt.checkEF
-        self.qubits = self.cfg.expt.qubits
-        
-        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
-            assert len(self.qubits) == 2
-            assert 1 in self.qubits
-            qZZ, qTest = self.qubits
-            qSort = qZZ # qubit by which to index for parameters on qTest
-            if qZZ == 1: qSort = qTest
-            self.qZZ = qZZ
-        else: qTest = self.qubits[0]
-        self.qTest = qTest
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        if qZZ is None: qZZ = qTest
 
         # ================= #
         # Get single shot calibration for 1 qubit
@@ -754,14 +670,10 @@ class NPulseExperiment(Experiment):
         # Begin actual experiment
         # ================= #
         # define as the length for the pi pulse ** this is still the specification even when calibrating the pi/2 pulse
-        length = self.cfg.device.qubit.pulses.pi_ge.sigma[qTest] # length of pulse whose error we are trying to find
-        if self.checkZZ:
-            if qTest == 1: length = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[qSort]
-            else: length = self.cfg.device.qubit.pulses.pi_Q_ZZ1.sigma[qSort]
-        if self.checkEF:
-            length = self.cfg.device.qubit.pulses.pi_ef.sigma[qTest]
+        length = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4,4))[qTest, qZZ] # length of pulse whose error we are trying to find
+        if self.checkEF: length = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4,4))[qTest, qZZ]
 
-        self.cfg.expt.length_placeholder = float(length)
+        self.cfg.expt.sigma_test = float(length)
 
         if 'loops' not in self.cfg.expt: self.cfg.expt.loops = 1
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
@@ -797,19 +709,10 @@ class NPulseExperiment(Experiment):
     def analyze(self, data=None, fit=True, scale=None):
         # scale should be [Ig, Qg, Ie, Qe] single shot experiment
 
-        self.checkZZ = self.cfg.expt.checkZZ
         self.checkEF = self.cfg.expt.checkEF
-        self.qubits = self.cfg.expt.qubits
-        
-        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
-            assert len(self.qubits) == 2
-            assert 1 in self.qubits
-            qZZ, qTest = self.qubits
-            qSort = qZZ # qubit by which to index for parameters on qTest
-            if qZZ == 1: qSort = qTest
-            self.qZZ = qZZ
-        else: qTest = self.qubits[0]
-        self.qTest = qTest
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        if qZZ is None: qZZ = qTest
 
         if data is None:
             data=self.data
@@ -837,21 +740,18 @@ class NPulseExperiment(Experiment):
         if data is None:
             data=self.data 
 
-        if self.checkZZ: # [x, 1] means test Q1 with ZZ from Qx; [1, x] means test Qx with ZZ from Q1, sort by Qx in both cases
-            assert len(self.qubits) == 2
-            assert 1 in self.qubits
-            qZZ, qTest = self.qubits
-            qSort = qZZ # qubit by which to index for parameters on qTest
-            if qZZ == 1: qSort = qTest
-            self.qZZ = qZZ
-        else: qTest = self.qubits[0]
-        self.qTest = qTest
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        self.checkZZ = False
+        if qZZ is not None: self.checkZZ = True
+        else: qZZ = qTest
+        self.checkEF = self.cfg.expt.checkEF
 
         xdata = data['xpts']
         if self.cfg.expt.test_pi_half: fit_func = fitter.probg_Xhalf
         else: fit_func = fitter.probg_X
 
-        title = f"Angle Error Q{self.qTest}" + (f' ZZ Q{self.qZZ}' if self.checkZZ else '') + (' EF' if self.checkEF else '') + (' $\pi/2$' if self.cfg.expt.test_pi_half else ' $\pi$')
+        title = f"Angle Error Q{qTest}" + (f' ZZ Q{qZZ}' if self.checkZZ else '') + (' EF' if self.checkEF else '') + (' $\pi/2$' if self.cfg.expt.test_pi_half else ' $\pi$')
 
         if scale is not None:
             Ig, Qg, Ie, Qe = scale[self.qTest]
@@ -874,14 +774,12 @@ class NPulseExperiment(Experiment):
             captionStr = f'$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}'
             plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
             plt.legend()
-            if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
+            if self.cfg.expt.test_pi_half: amp_ratio = (90 - p[1])/90
             else: amp_ratio = (180 - p[1])/180
             print(f'From amps: adjust amplitude to {current_gain} / {amp_ratio} = {current_gain/amp_ratio}')
         plt.show()
 
         plt.figure(figsize=(10,8))
-        if 'gain' in self.cfg.expt: gain = self.cfg.expt.gain
-        else: gain = self.cfg.device.qubit.pulses.pi_ge.gain[self.cfg.expt.qubits[-1]] # gain of the pulse we are trying to calibrate
         plt.subplot(211, title=title, ylabel="I (scaled)")
         plot_data = data['avgi']
         if scale is not None:
@@ -894,7 +792,7 @@ class NPulseExperiment(Experiment):
             captionStr = f'$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}'
             plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
             plt.legend()
-            if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
+            if self.cfg.expt.test_pi_half: amp_ratio = (90 - p[1])/90
             else: amp_ratio = (180 - p[1])/180
             print(f'From avgi: adjust amplitude to {current_gain} / {amp_ratio} = {current_gain/amp_ratio}')
         print()

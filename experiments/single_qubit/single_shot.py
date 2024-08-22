@@ -237,8 +237,14 @@ class HistogramProgram(AveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
 
-        qubit = self.cfg.expt.qubit
-        self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        qTest = self.cfg.expt.qTest
+        if 'qZZ' not in self.cfg.expt: self.cfg.expt.qZZ = None
+        qZZ = self.cfg.expt.qZZ
+        self.checkZZ = False
+        if qZZ is not None: self.checkZZ = True
+        else: qZZ = qTest
+
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         
         self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
         self.res_chs = self.cfg.hw.soc.dacs.readout.ch
@@ -250,8 +256,13 @@ class HistogramProgram(AveragerProgram):
             self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
             mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
         
-        self.f_ge_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ge, self.qubit_chs)]
-        self.f_ef_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_ef, self.qubit_chs)]
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4,4))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4,4))
+        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4,4))
+        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4,4))
+        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4,4))
+        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4,4))
+
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
@@ -302,30 +313,28 @@ class HistogramProgram(AveragerProgram):
                     gain = int(cfg.device.readout.gain[q] * 2**15)
                 self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
 
-        # get aliases for the sigmas we need in clock cycles
-        self.pi_sigmas_us = self.cfg.device.qubit.pulses.pi_ge.sigma
-        self.pi_ef_sigmas_us = self.cfg.device.qubit.pulses.pi_ef.sigma
-        self.pi_Q1_ZZ_sigmas_us = self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma
-        self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
-        self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
-        self.pi_Q1_ZZ_types = self.cfg.device.qubit.pulses.pi_Q1_ZZ.type
-        
-        # declare qubit dacs, add qubit pi_ge pulses
-        for q in range(len(self.pi_ge_types)):
+        # declare qubit dacs
+        for q in range(self.num_qubits_sample):
             mixer_freq = None
             if self.qubit_ch_types[q] == 'int4':
-                mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
+                mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
             if self.qubit_chs[q] not in self.gen_chs:
-                self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
-            pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[q], gen_ch=self.qubit_chs[q])
-            self.add_gauss(ch=self.qubit_chs[q], name=f"qubit{q}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
+                self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
 
-            # assume ef pulses are gauss
-            pi_ef_sigma_cycles = self.us2cycles(self.pi_ef_sigmas_us[q], gen_ch=self.qubit_chs[q])
-            self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=pi_ef_sigma_cycles, length=pi_ef_sigma_cycles*4)
-            if q != 1:
-                pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.pi_Q1_ZZ_sigmas_us[q], gen_ch=self.qubit_chs[1])
-                self.add_gauss(ch=self.qubit_chs[1], name=f"qubit1_ZZ{q}", sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
+        # add qubit pulses to respective channels
+        if self.checkZZ:
+            self.pisigma_ge_qZZ = self.us2cycles(self.pi_ge_sigmas[qZZ, qZZ], gen_ch=self.qubit_chs[qZZ])
+            self.add_gauss(ch=self.qubit_chs[qZZ], name='pi_qZZ', sigma=self.pisigma_ge_qZZ, length=self.pisigma_ge_qZZ*4)
+
+        if self.cfg.expt.pulse_e:
+            self.pi_ge_sigma_cycles = self.us2cycles(self.pi_ge_sigmas[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+            self.add_gauss(ch=self.qubit_chs[qTest], name="pi_ge", sigma=self.pi_ge_sigma_cycles, length=self.pi_ge_sigma_cycles*4)
+
+        if self.cfg.expt.pulse_f:
+            self.pisigma_ef = self.us2cycles(self.pi_ef_sigmas[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+            self.gain_ef = self.pi_ef_gains[qTest, qZZ]
+            self.f_ef_reg = self.freq2reg(self.f_efs[qTest, qZZ], gen_ch=self.qubit_chs[qTest])
+            self.add_gauss(ch=self.qubit_chs[qTest], name='pi_ef', sigma=self.pisigma_ef, length=self.pisigma_ef*4)
 
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
             mixer_freq = None
@@ -335,8 +344,8 @@ class HistogramProgram(AveragerProgram):
                 if self.swap_f0g1_chs[q] not in self.gen_chs: 
                     self.declare_gen(ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq)
 
-                self.pisigma_ef = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma[q], gen_ch=self.qubit_chs[q]) # default pi_ef value
-                self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
+                pisigma_ef_q = self.us2cycles(self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]) # default pi_ef value
+                self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=pisigma_ef_q, length=pisigma_ef_q*4)
                 if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
                     self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
                 else: assert False, 'not implemented'
@@ -347,7 +356,9 @@ class HistogramProgram(AveragerProgram):
     def body(self):
         cfg=AttrDict(self.cfg)
 
-        qubit = self.cfg.expt.qubit
+        qTest = self.cfg.expt.qTest
+        qZZ = self.cfg.expt.qZZ
+        if qZZ is None: qZZ = qTest
 
         self.reset_and_sync()
 
@@ -369,9 +380,9 @@ class HistogramProgram(AveragerProgram):
                 remaining_idle -= last_pulse_len
 
                 last_pulse_len = 0
-                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.freq2reg(self.cfg.device.qubit.f_ef[q], gen_ch=self.qubit_chs[q]), gain=cfg.device.qubit.pulses.pi_ef.gain[q], waveform=f"pi_ef_qubit{q}")
+                self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.freq2reg(self.f_efs[q, q], gen_ch=self.qubit_chs[q]), gain=self.pi_ef_gains[q, q], waveform=f"pi_ef_qubit{q}")
                 self.sync_all()
-                last_pulse_len += self.cfg.device.qubit.pulses.pi_ef.sigma[q]*4
+                last_pulse_len += self.pi_ef_sigmas[q, q]*4
 
                 pulse_type = self.cfg.device.qubit.pulses.pi_f0g1.type[q]
                 pisigma_f0g1 = self.us2cycles(self.cfg.device.qubit.pulses.pi_f0g1.sigma[q], gen_ch=self.swap_f0g1_chs[q])
@@ -387,112 +398,18 @@ class HistogramProgram(AveragerProgram):
             last_idle = max((remaining_idle, sorted_cool_idle[-1]))
             self.sync_all(self.us2cycles(last_idle))
 
-        if 'pulse_test' in self.cfg.expt and self.cfg.expt.pulse_test:
-            # qDrive = 1
-            # qNotDrive = 2
-            # qSort = 2
-            # setup_ZZ = None
+        # initializations as necessary
+        if self.checkZZ:
+            self.setup_and_pulse(ch=self.qubit_chs[qZZ], style="arb", phase=0, freq=self.freq2reg(self.f_ges[qZZ, qZZ], gen_ch=self.qubit_chs[qZZ]), gain=self.pi_ge_gains[qZZ, qZZ], waveform="pi_qZZ")
+            self.sync_all()
+            # print('check zz qubit', qZZ)
 
-            qDrive = 2
-            qNotDrive = 1
-            qSort = 2
-            setup_ZZ = None
+        if self.cfg.expt.pulse_e:
+            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.freq2reg(self.f_ges[qTest, qZZ], gen_ch=self.qubit_chs[qTest]), phase=0, gain=self.pi_ge_gains[qTest, qZZ], waveform=f"pi_ge")
+            self.sync_all()
 
-            # qDrive = 3
-            # qNotDrive = 1
-            # qSort = 3
-            # setup_ZZ = 0
-
-            self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
-            self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-            self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
-            self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
-
-            if qDrive == 1:
-                swap_ch = self.swap_chs[qSort]
-                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
-                self.cfg.expt.sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort], gen_ch=swap_ch)
-                self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf[qSort], gen_ch=swap_ch)
-            else:
-                swap_ch = self.swap_Q_chs[qSort] 
-                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
-                self.cfg.expt.sigma = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort], gen_ch=swap_ch)
-                self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=swap_ch)
-            sigma_ramp_cycles = 3
-            self.add_gauss(ch=swap_ch, name=f"pi_EgGf_swap{qSort}_ramp", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles*4)
-
-            if setup_ZZ is None: setup_ZZ = 1
-            if setup_ZZ != 1:
-                assert qNotDrive == 1, 'qNotDrive != 1 and setup_ZZ != 1 not setup yet'
-                pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[setup_ZZ], gen_ch=self.qubit_chs[setup_ZZ])
-                self.f_Q1_ZZ_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_Q1_ZZ, self.qubit_chs)]
-                self.add_gauss(ch=self.qubit_chs[setup_ZZ], name=f"qubit{setup_ZZ}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
-                self.setup_and_pulse(ch=self.qubit_chs[setup_ZZ], style='arb', freq=self.f_ge_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[setup_ZZ], waveform=f'qubit{setup_ZZ}')
-                self.sync_all()
-
-                pi_Q1_ZZ_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q1_ZZ.sigma[setup_ZZ], gen_ch=self.qubit_chs[qNotDrive])
-                self.add_gauss(ch=self.qubit_chs[qNotDrive], name=f'qubit{qNotDrive}_ZZ{setup_ZZ}', sigma=pi_Q1_ZZ_sigma_cycles, length=pi_Q1_ZZ_sigma_cycles*4)
-                self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_Q1_ZZ_regs[setup_ZZ], phase=0, gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[setup_ZZ], waveform=f'qubit{qNotDrive}_ZZ{setup_ZZ}')
-                self.sync_all()
-            else:
-                # initialize qubit A to E: expect to end in Eg
-                # self.setup_and_pulse(ch=self.qubit_chs[qSort], style="arb", phase=0, freq=self.f_ge_regs[qSort], gain=cfg.device.qubit.pulses.pi_ge.gain[qSort], waveform=f"qubit{qSort}") #, phrst=1)
-                pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qNotDrive], gen_ch=self.qubit_chs[qNotDrive])
-                self.add_gauss(ch=self.qubit_chs[qNotDrive], name=f"qubit{qNotDrive}", sigma=pi_ge_sigma_cycles, length=pi_ge_sigma_cycles*4)
-                self.setup_and_pulse(ch=self.qubit_chs[qNotDrive], style='arb', freq=self.f_ge_regs[qNotDrive], phase=0, gain=self.cfg.device.qubit.pulses.pi_ge.gain[qNotDrive], waveform=f'qubit{qNotDrive}')
-                self.sync_all()
-
-            # apply Eg -> Gf pulse on qDrive: expect to end in Gf
-            flat_length = self.cfg.expt.sigma - 3*4
-            if flat_length >= 3:
-                # print(self.cfg.expt.gain, flat_length, self.f_EgGf_reg)
-                self.setup_and_pulse(
-                    ch=swap_ch,
-                    style="flat_top",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=self.cfg.expt.gain,
-                    length=flat_length,
-                    waveform=f"pi_EgGf_swap{qSort}_ramp",
-                )
-            self.sync_all(5)
-
-            # setup_measure = None
-            # if 'setup_measure' in self.cfg.expt: setup_measure = self.cfg.expt.setup_measure
-
-            # # take qDrive g->e: measure the population of just the e state when e/f are not distinguishable by checking the g population
-            # if setup_measure == 'qDrive_ge':
-            #     # print('playing ge pulse')
-            #     self.X_pulse(q=qDrive, play=True)
-            #     self.sync_all(5)
-        
-            # if setup_measure == None: pass # measure the real g population only
-
-            # # take qDrive f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
-            # # if setup_measure == 'qDrive_ef':
-            # self.setup_and_pulse(ch=self.qubit_chs[qDrive], style="arb", freq=self.f_ef_regs[qDrive], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qDrive], waveform=f"pi_ef_qubit{qDrive}") #, phrst=1)
-
-        else:
-            if self.cfg.expt.pulse_e:
-                if cfg.device.qubit.pulses.pi_ge.type[qubit] == 'gauss':
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], waveform=f"qubit{qubit}")
-                else: # const pulse
-                    pi_ge_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.sigma[qubit], gen_ch=self.qubit_chs[qubit])
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], length=pi_ge_sigma_cycles)
-                self.sync_all()
-
-            if self.cfg.expt.pulse_f:
-                if cfg.device.qubit.pulses.pi_ef.type[qubit] == 'gauss':
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], waveform=f"pi_ef_qubit{qubit}")
-
-                    # print('WARNING ADDED ANOTHER GE PULSE')
-                    # self.setup_and_pulse(ch=self.qubit_chs[qubit], style="arb", freq=self.f_ge_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain[qubit], waveform=f"qubit{qubit}")
-
-                    self.sync_all()
-
-                else: # const pulse
-                    pi_ef_sigma_cycles = self.us2cycles(self.cfg.device.qubit.pi_ef.sigma[qubit], gen_ch=self.qubit_chs[qubit])
-                    self.setup_and_pulse(ch=self.qubit_chs[qubit], style="const", freq=self.f_ef_regs[qubit], phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain[qubit], length=pi_ef_sigma_cycles)
+        if self.cfg.expt.pulse_f:
+            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=self.freq2reg(self.f_efs[qTest, qZZ], gen_ch=self.qubit_chs[qTest]), phase=0, gain=self.pi_ef_gains[qTest, qZZ], waveform=f"pi_ef")
         self.sync_all()
 
         self.measure(
@@ -506,7 +423,7 @@ class HistogramProgram(AveragerProgram):
         # collect shots for the relevant adc and I and Q channels
         cfg=AttrDict(self.cfg)
         # print(np.average(self.di_buf[0]))
-        if qubit is None: qubit = self.cfg.expt.qubit
+        if qubit is None: qubit = self.cfg.expt.qTest
         else: assert qubit in range(self.num_qubits_sample), 'qubit out of range'
         shots_i0 = self.di_buf[qubit] / self.readout_lengths_adc[qubit]
         shots_q0 = self.dq_buf[qubit] / self.readout_lengths_adc[qubit]
@@ -529,7 +446,7 @@ class HistogramExperiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -622,8 +539,8 @@ class HistogramExperiment(Experiment):
         if data is None:
             data=self.data 
         
-        qubit = self.cfg.expt.qubit
-        fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, span=span, title=f'Qubit {qubit}')
+        qTest = self.cfg.expt.qTest
+        fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, span=span, title=f'Qubit {qTest}')
             
         print(f'ge fidelity (%): {100*fids[0]}')
         if self.cfg.expt.check_f:
@@ -679,22 +596,22 @@ class SingleShotOptExperiment(Experiment):
         threshold = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
         angle = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
 
-        qubit = self.cfg.expt.qubit
+        qTest = self.cfg.expt.qTest
 
         for f_ind, f in enumerate(tqdm(fpts, disable=not progress)):
             for g_ind, gain in enumerate(gainpts):
                 for l_ind, l in enumerate(lenpts):
                     shot = HistogramExperiment(soccfg=self.soccfg, config_file=self.config_file)
                     shot.cfg = deepcopy(self.cfg)
-                    shot.cfg.device.readout.frequency[qubit] = f
-                    shot.cfg.device.readout.gain[qubit] = gain
+                    shot.cfg.device.readout.frequency[qTest] = f
+                    shot.cfg.device.readout.gain[qTest] = gain
                     shot.cfg.device.readout.readout_length = l 
                     check_e = True
                     if 'check_f' not in self.cfg.expt: check_f = False
                     else:
                         check_f = self.cfg.expt.check_f
                         check_e = not check_f
-                    shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_e=check_e, check_f=check_f, qubit=self.cfg.expt.qubit)
+                    shot.cfg.expt = dict(reps=self.cfg.expt.reps, check_e=check_e, check_f=check_f, qTest=self.cfg.expt.qTest)
                     # print(shot.cfg)
                     shot.go(analyze=False, display=False, progress=False, save=False)
                     results = shot.analyze(verbose=False)

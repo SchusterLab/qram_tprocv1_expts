@@ -43,101 +43,134 @@ class T1Program(RAveragerProgram):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
         self.checkEF = self.cfg.expt.checkEF
-        
-        self.adc_ch = cfg.hw.soc.adcs.readout.ch
-        self.res_ch = cfg.hw.soc.dacs.readout.ch
-        self.res_ch_type = cfg.hw.soc.dacs.readout.type
-        self.qubit_ch = cfg.hw.soc.dacs.qubit.ch
-        self.qubit_ch_type = cfg.hw.soc.dacs.qubit.type
 
-        self.q_rp = self.ch_page(self.qubit_ch) # get register page for qubit_ch
+        qTest = self.cfg.expt.qTest
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
+        
+        self.adc_chs = cfg.hw.soc.adcs.readout.ch
+        self.res_chs = cfg.hw.soc.dacs.readout.ch
+        self.res_ch_types = cfg.hw.soc.dacs.readout.type
+        self.qubit_chs = cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_types = cfg.hw.soc.dacs.qubit.type
+
+        self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
         self.r_wait = 3
-        self.safe_regwi(self.q_rp, self.r_wait, self.us2cycles(cfg.expt.start))
+        self.safe_regwi(self.q_rps[qTest], self.r_wait, self.us2cycles(cfg.expt.start))
         
-        self.f_ge = self.freq2reg(cfg.device.qubit.f_ge, gen_ch=self.qubit_ch)
-        self.f_ef_reg = self.freq2reg(cfg.device.qubit.f_ef, gen_ch=self.qubit_ch)
-        self.f_res_reg = self.freq2reg(cfg.device.readout.frequency, gen_ch=self.res_ch, ro_ch=self.adc_ch)
-        self.readout_length_dac = self.us2cycles(cfg.device.readout.readout_length, gen_ch=self.res_ch)
-        self.readout_length_adc = self.us2cycles(cfg.device.readout.readout_length, ro_ch=self.adc_ch)
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4,4))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4,4))
+        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4,4))
+        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4,4))
+        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4,4))
+        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4,4))
+        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4,4))
+        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4,4))
+        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4,4))
+        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4,4))
 
-        # declare res dacs
+        self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
+        self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
+        self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
+
+        # declare all res dacs
         self.measure_chs = []
-        mask = None
-        mixer_freq = None # MHz
-        mux_freqs = None # MHz
-        mux_gains = None
-        ro_ch = None
-        if self.res_ch_type == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-        elif self.res_ch_type == 'mux4':
-            assert self.res_ch == 6
-            ro_ch = self.adc_ch
-            mask = [0, 1, 2, 3] # indices of mux_freqs, mux_gains list to play
-            mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq
-            mux_freqs = [0]*4
-            mux_freqs[cfg.expt.qubit] = cfg.device.readout.frequency
-            mux_gains = [0]*4
-            mux_gains[cfg.expt.qubit] = cfg.device.readout.gain
-        self.declare_gen(ch=self.res_ch, nqz=cfg.hw.soc.dacs.readout.nyquist, mixer_freq=mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=ro_ch)
-        self.measure_chs.append(self.res_ch)
+        mask = [] # indices of mux_freqs, mux_gains list to play
+        mux_mixer_freq = None
+        mux_freqs = [0]*4 # MHz
+        mux_gains = [0]*4
+        mux_ro_ch = None
+        mux_nqz = None
+        for q in range(self.num_qubits_sample):
+            assert self.res_ch_types[q] in ['full', 'mux4']
+            if self.res_ch_types[q] == 'full':
+                if self.res_chs[q] not in self.measure_chs:
+                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
+                    self.measure_chs.append(self.res_chs[q])
+                
+            elif self.res_ch_types[q] == 'mux4':
+                assert self.res_chs[q] == 6
+                mask.append(q)
+                if mux_mixer_freq is None: mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
+                else: assert mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q] # ensure all mux channels have specified the same mixer freq
+                mux_freqs[q] = cfg.device.readout.frequency[q]
+                mux_gains[q] = cfg.device.readout.gain[q]
+                mux_ro_ch = self.adc_chs[q]
+                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
+                if self.res_chs[q] not in self.measure_chs:
+                    self.measure_chs.append(self.res_chs[q])
+        if 'mux4' in self.res_ch_types: # declare mux4 channel
+            self.declare_gen(ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch)
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if self.adc_chs[q] not in self.ro_chs:
+                self.declare_readout(ch=self.adc_chs[q], length=self.readout_lengths_adc[q], freq=self.cfg.device.readout.frequency[q], gen_ch=self.res_chs[q])
 
         # declare qubit dacs
-        mixer_freq = None
-        if self.qubit_ch_type == 'int4':
-            mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq
-        self.declare_gen(ch=self.qubit_ch, nqz=cfg.hw.soc.dacs.qubit.nyquist, mixer_freq=mixer_freq)
+        for q in range(self.num_qubits_sample):
+            mixer_freq = None
+            if self.qubit_ch_types[q] == 'int4':
+                mixer_freq = cfg.hw.soc.dacs.qubit.mixer_freq[q]
+            if self.qubit_chs[q] not in self.gen_chs:
+                self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
 
-        # declare adcs
-        self.declare_readout(ch=self.adc_ch, length=self.readout_length_adc, freq=cfg.device.readout.frequency, gen_ch=self.res_ch)
-
-        self.pi_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ge.sigma, gen_ch=self.qubit_ch)
+        self.pi_sigma = self.us2cycles(self.pi_ge_sigmas[qTest, qTest], gen_ch=self.qubit_chs[qTest])
 
         # add qubit pulses to respective channels
-        if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
-            self.add_gauss(ch=self.qubit_ch, name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
+        if self.cfg.device.qubit.pulses.pi_ge.type[qTest].lower() == 'gauss' and self.pi_sigma > 0:
+            self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
 
         if self.checkEF:
-            self.pi_ef_sigma = self.us2cycles(cfg.device.qubit.pulses.pi_ef.sigma, gen_ch=self.qubit_ch)
+            self.pi_ef_sigma = self.us2cycles(self.pi_ef_sigmas[qTest, qTest], gen_ch=self.qubit_ch)
             self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
 
         # add readout pulses to respective channels
-        if self.res_ch_type == 'mux4':
-            self.set_pulse_registers(ch=self.res_ch, style="const", length=self.readout_length_dac, mask=mask)
-        else:
-            if cfg.device.readout.gain < 1:
-                gain = int(cfg.device.readout.gain * 2**15)
-            self.set_pulse_registers(ch=self.res_ch, style="const", freq=self.f_res_reg, phase=0, gain=gain, length=self.readout_length_dac)
+        if 'mux4' in self.res_ch_types:
+            self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
+        for q in range(self.num_qubits_sample):
+            if self.res_ch_types[q] != 'mux4':
+                if cfg.device.readout.gain[q] < 1:
+                    gain = int(cfg.device.readout.gain[q] * 2**15)
+                self.set_pulse_registers(ch=self.res_chs[q], style="const", freq=self.f_res_regs[q], phase=0, gain=gain, length=max(self.readout_lengths_dac))
+
 
         self.set_gen_delays()
         self.sync_all(200)
 
     def body(self):
         cfg=AttrDict(self.cfg)
+
+        qTest = self.cfg.expt.qTest
+
         self.reset_and_sync()
 
-        if self.cfg.device.qubit.pulses.pi_ge.type.lower() == 'gauss':
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ge, phase=0, gain=cfg.device.qubit.pulses.pi_ge.gain, waveform="pi_qubit")
+        f_ge_reg = self.freq2reg(self.f_ges[qTest, qTest], gen_ch=self.qubit_chs[qTest])
+        if self.cfg.device.qubit.pulses.pi_ge.type[qTest].lower() == 'gauss':
+            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=f_ge_reg, phase=0, gain=self.pi_ge_gains[qTest, qTest], waveform="pi_qubit")
         else:
-            self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=self.f_ge, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
+            self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=f_ge_reg, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
         self.sync_all()
 
         if self.checkEF:
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=self.f_ef_reg, phase=0, gain=cfg.device.qubit.pulses.pi_ef.gain, waveform="pi_ef_qubit")
+            f_ef_reg = self.freq2reg(self.f_efs[qTest, qTest], gen_ch=self.qubit_chs[qTest])
+            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=f_ef_reg, phase=0, gain=self.pi_ef_gains[qTest, qTest], waveform="pi_ef_qubit")
         self.sync_all()
 
         # wait for the time stored in the wait variable register
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rps[qTest], self.r_wait)
 
         self.sync_all()
-        
-        self.measure(pulse_ch=self.measure_chs, 
-             adcs=[self.adc_ch],
-             adc_trig_offset=cfg.device.readout.trig_offset,
-             wait=True,
-             syncdelay=self.us2cycles(cfg.device.readout.relax_delay))
+        self.measure(
+            pulse_ch=self.measure_chs, 
+            adcs=self.adc_chs,
+            adc_trig_offset=cfg.device.readout.trig_offset[qTest],
+            wait=True,
+            syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(4)]))
+        )
 
     def update(self):
-        self.mathi(self.q_rp, self.r_wait, self.r_wait, '+', self.us2cycles(self.cfg.expt.step)) # update wait time
+        qTest = self.cfg.expt.qTest
+        self.mathi(self.q_rps[qTest], self.r_wait, self.r_wait, '+', self.us2cycles(self.cfg.expt.step)) # update wait time
 
 
 class T1Experiment(Experiment):
@@ -150,6 +183,7 @@ class T1Experiment(Experiment):
         expts: number steps in sweep
         reps: number averages per experiment
         rounds: number rounds to repeat experiment sweep
+        qTest
     )
     """
 
@@ -157,28 +191,29 @@ class T1Experiment(Experiment):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
     def acquire(self, progress=False):
-        q_ind = self.cfg.expt.qubit
-
-        self.num_qubits_sample = len(self.cfg.device.qubit.f_ge)
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
-                if isinstance(value, list) and len(value) == self.num_qubits_sample:
-                    subcfg.update({key: value[q_ind]})
-                elif isinstance(value, dict):
+                if isinstance(value, dict):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
-                            if isinstance(value3, list) and len(value3) == self.num_qubits_sample:
-                                value2.update({key3: value3[q_ind]})                                
+                            if not(isinstance(value3, list)):
+                                value2.update({key3: [value3]*num_qubits_sample})                                
+                elif not(isinstance(value, list)):
+                    subcfg.update({key: [value]*num_qubits_sample})
 
+        qTest = self.cfg.expt.qTest
         if 'checkEF' not in self.cfg.expt:
             self.cfg.expt.checkEF = False
         if self.cfg.expt.checkEF:
             self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
+            self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length
+
         t1 = T1Program(soccfg=self.soccfg, cfg=self.cfg)
         x_pts, avgi, avgq = t1.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
 
-        avgi = avgi[0][0]
-        avgq = avgq[0][0]
+        avgi = avgi[qTest][0]
+        avgq = avgq[qTest][0]
         amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
         phases = np.angle(avgi+1j*avgq) # Calculating the phase        
 
@@ -223,6 +258,8 @@ class T1Experiment(Experiment):
     def display(self, data=None, fit=True, fit_log=False):
         if data is None:
             data=self.data 
+
+        qTest = self.cfg.expt.qTest
         
         plt.figure(figsize=(10, 5))
         plt.subplot(111,title="$T_1$", xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
@@ -240,8 +277,7 @@ class T1Experiment(Experiment):
         avgq = data["avgq"]
 
         plt.figure(figsize=(10,10))
-        qubit = self.cfg.expt.qubit
-        title = "$T_1$" + (' EF' if self.cfg.expt.checkEF else '') + f' on Q{qubit}'
+        title = "$T_1$" + (' EF' if self.cfg.expt.checkEF else '') + f' on Q{qTest}'
         plt.subplot(211, title=title, ylabel="I [ADC units]")
         plt.plot(xpts, avgi,'.-')
         if fit:
