@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 import experiments.fitting as fitter
 from experiments.single_qubit.single_shot import hist
-from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, AbstractStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts
+from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, AbstractStateTomo2QProgram
 
 # ====================================================== #
 

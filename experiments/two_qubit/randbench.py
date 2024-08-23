@@ -15,7 +15,8 @@ from tqdm import tqdm_notebook as tqdm
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram, QutritAveragerProgram
 from experiments.two_qubit.length_rabi_EgGf import LengthRabiEgGfProgram
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, sort_counts_1q, correct_readout_err, fix_neg_counts, infer_gef_popln_2readout
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, sort_counts_1q, infer_gef_popln_2readout
+from TomoAnalysis import TomoAnalysis
 
 import experiments.fitting as fitter
 default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -410,7 +411,8 @@ class SimultaneousRBExperiment(Experiment):
                     # 0, 1
                     counts = np.array([sort_counts_1q(shots[adc_ch])])
                     data['counts_raw'].append(counts)
-                    counts = fix_neg_counts(correct_readout_err(counts, data['counts_calib']))
+                    tomo_analysis = TomoAnalysis(nb_qubits=1, tomo_qubits=qubits)
+                    counts = tomo_analysis.fix_neg_counts(tomo_analysis.correct_readout_err(counts, data['counts_calib']))
                     counts = counts[0] # go back to just 1d array
                     data["popln"][-1].append(counts[1]/sum(counts))
                     # print('variation', var, 'gate list', gate_list, 'counts', counts)
@@ -532,7 +534,7 @@ class SimultaneousRBEFProgram(QutritAveragerProgram):
     RB program for single qubit gates on the ef subspace
     """
 
-    def clifford(self, qubit, pulse_name:str, extra_phase=0, inverted=False, play=False):
+    def clifford(self, qubit, pulse_name:str, extra_phase=0, ZZ_qubit=None, inverted=False, play=False):
         """
         Convert a clifford pulse name into the function that performs the pulse.
         If inverted, play the inverse of this gate (the extra phase is added on top of the inversion)
@@ -562,7 +564,7 @@ class SimultaneousRBEFProgram(QutritAveragerProgram):
 
             # print('WARNING NOT PLAYING PULSE')
             # pulse_func(qubit, pihalf='/2' in gate, neg=neg, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
-            pulse_func(qubit, pihalf='/2' in gate, neg=neg, divide_len=False, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
+            pulse_func(qubit, pihalf='/2' in gate, ZZ_qubit=ZZ_qubit, neg=neg, divide_len=False, extra_phase=extra_phase, play=play, reload=False) # very important to not reload unless necessary to save memory on the gen
             self.sync_all(5) # THIS IS NECESSARY IN RB WHEN THERE ARE MORE THAN O(30) PULSES SINCE THE TPROC CAN'T KEEP UP FOR SHORT PULSES
 
     def __init__(self, soccfg, cfg, gate_list, qubit_list):
@@ -591,25 +593,28 @@ class SimultaneousRBEFProgram(QutritAveragerProgram):
             if ZZ_qubit != qTest: self.X_pulse(q=ZZ_qubit, play=True)
         self.X_pulse(q=qTest, ZZ_qubit=ZZ_qubit, play=True)
 
+        test_qZZ = None
+        if 'test_qZZ' in self.cfg.expt:
+            test_qZZ = self.cfg.expt.test_qZZ
 
         # Do all the gates given in the initialize except for the total gate, measure
         for i in range(len(self.gate_list) - 1):
-            self.clifford(qubit=self.qubit_list[i], pulse_name=self.gate_list[i], play=True)
+            self.clifford(qubit=self.qubit_list[i], pulse_name=self.gate_list[i], ZZ_qubit=test_qZZ, play=True)
             self.sync_all()
 
         # Do the inverse by applying the total gate with pi phase
         # This is actually wrong if there is more than 1 qubit!!! need to apply an inverse total gate for each qubit!!
-        self.clifford(qubit=self.qubit_list[-1], pulse_name=self.gate_list[-1], inverted=True, play=True)
+        self.clifford(qubit=self.qubit_list[-1], pulse_name=self.gate_list[-1], ZZ_qubit=test_qZZ, inverted=True, play=True)
         self.sync_all() # align channels and wait 10ns
 
         # Measure the population of just the e state when e/f are not distinguishable - check the g population
         setup_measure = None
         if 'setup_measure' in self.cfg.expt: setup_measure = self.cfg.expt.setup_measure
         if setup_measure != None and 'qDrive_ge' in setup_measure:
-            self.X_pulse(q=self.qDrive, play=True) # not sure whether needs some phase adjustment
+            self.X_pulse(q=self.qDrive, ZZ_qubit=ZZ_qubit, play=True) # not sure whether needs some phase adjustment
         # Bring Gf to Ge, or stays in same state.
         if setup_measure != None and 'qDrive_ef' in setup_measure:
-            self.Xef_pulse(self.qDrive, play=True) # not sure whether needs some phase adjustment
+            self.Xef_pulse(self.qDrive, ZZ_qubit=ZZ_qubit, play=True) # not sure whether needs some phase adjustment
 
         self.measure(
             pulse_ch=self.measure_chs, 
@@ -632,10 +637,11 @@ class SimultaneousRBEFExperiment(Experiment):
         reps_f: use a different number of averages per sequence when measuring with the f readout
         variations: number different sequences per depth
         gate_char: a single qubit clifford gate (str) to characterize. If not None, runs interleaved RB instead of regular RB.
-        qubits: the qubits to perform simultaneous RB on. If using EgGf subspace, specify just qA (where qA, qB represents the Eg->Gf qubits)
+        qubits: [qTest]
         singleshot_reps: reps per state for singleshot calibration
         post_process: 'threshold' (uses single shot binning), 'scale' (scale by ge_avgs), or None
         ZZ_qubit: if not None, initializes this qubit in e in addition to the qubit we are doing the EF RB on
+        test_qZZ: plays the pulse on qTest that is ZZ shifted by test_qZZ for all clifford gates
         measure_f: qubit: if not None, calibrates the single qubit f state measurement on this qubit and also runs the measurement twice to distinguish e and f states
         thresholds: (optional) don't rerun singleshot and instead use this
         ge_avgs: (optional) don't rerun singleshot and instead use this
@@ -988,16 +994,17 @@ class SimultaneousRBEFExperiment(Experiment):
                         counts_calib_this = data['counts_calib_total'][loop]
 
                         # print('ge counts calib', counts_calib_this[:,:2])
-                        counts_ge_corrected = correct_readout_err([counts_raw_total_this[:2]], counts_calib_this[:,:2])
+                        tomo_analysis = TomoAnalysis(nb_qubits=1, tomo_qubits=self.cfg.expt.qubits)
+                        counts_ge_corrected = tomo_analysis.correct_readout_err([counts_raw_total_this[:2]], counts_calib_this[:,:2])
                         # print('ge corrected', counts_ge_corrected)
-                        counts_ge_corrected = fix_neg_counts(counts_ge_corrected)[0]
+                        counts_ge_corrected = tomo_analysis.fix_neg_counts(counts_ge_corrected)[0]
                         # print('neg ge corrected', counts_ge_corrected)
 
                         # print('gf counts calib', counts_calib_this[:,2:])
                         # print('gf raw', counts_raw_total_this[2:])
-                        counts_gf_corrected = correct_readout_err([counts_raw_total_this[2:]], counts_calib_this[:,2:])
+                        counts_gf_corrected = tomo_analysis.correct_readout_err([counts_raw_total_this[2:]], counts_calib_this[:,2:])
                         # print('gf corrected', counts_gf_corrected)
-                        counts_gf_corrected = fix_neg_counts(counts_gf_corrected)[0]
+                        counts_gf_corrected = tomo_analysis.fix_neg_counts(counts_gf_corrected)[0]
                         # print('neg gf corrected', counts_gf_corrected)
 
                         g = counts_ge_corrected[0] / np.sum(counts_ge_corrected)
@@ -1005,7 +1012,7 @@ class SimultaneousRBEFExperiment(Experiment):
                         e = 1 - g - f
                         counts_corrected = [[g, e, f]]
                         # print('counts_corrected', counts_corrected)
-                        counts_corrected = fix_neg_counts(counts_corrected)
+                        counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
                         # print('neg corrected', counts_corrected)
 
                         g_count_plot.append(counts_raw_total_this[0])
@@ -1014,8 +1021,8 @@ class SimultaneousRBEFExperiment(Experiment):
                         f_pop_plot.append(f*np.sum(counts_gf_corrected))
                     
                     else:
-                        counts_corrected = correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
-                        counts_corrected = fix_neg_counts(counts_corrected)
+                        counts_corrected = tomo_analysis.correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
+                        counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
 
                     data['poplns_2q_loops'][loop, idepth, ivar, :] = counts_corrected/np.sum(counts_corrected)
         
@@ -1100,7 +1107,7 @@ class SimultaneousRBEFExperiment(Experiment):
 
         plt.figure(figsize=(8,6))
         irb = 'gate_char' in self.cfg.expt and self.cfg.expt.gate_char is not None
-        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EF RB on Q{self.cfg.expt.qubits[0]}'
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EF RB on Q{self.cfg.expt.qubits[0]}{" with ZZ Q"+str(self.cfg.expt.test_qZZ) if "test_qZZ" in self.cfg.expt and self.cfg.expt.test_qZZ is not None else ""}'
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
         depths = data['xpts']
@@ -1631,8 +1638,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 for ivar in range(self.cfg.expt.variations):
                     # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
                     # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
-                    counts_corrected = correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
-                    counts_corrected = fix_neg_counts(counts_corrected)
+                    tomo_analysis = TomoAnalysis(nb_qubits=2, tomo_qubits=self.cfg.expt.qubits)
+                    counts_corrected = tomo_analysis.correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
+                    counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
                     data['poplns_2q_loops'][loop, idepth, ivar, :] = counts_corrected/np.sum(counts_corrected)
 
         data['poplns_2q'] = np.average(data['poplns_2q_loops'], axis=0)

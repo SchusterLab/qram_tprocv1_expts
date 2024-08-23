@@ -9,7 +9,7 @@ from tqdm import tqdm_notebook as tqdm
 
 from experiments.clifford_averager_program import QutritAveragerProgram, CliffordAveragerProgram
 from experiments.single_qubit.single_shot import hist
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, correct_readout_err, fix_neg_counts
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram
 
 def sort_counts_3q(shotsA, shotsB, shotsC):
     # data is returned as n000, n001, ... measured for the 3 qubits

@@ -9,6 +9,7 @@ from tqdm import tqdm_notebook as tqdm
 
 from experiments.clifford_averager_program import QutritAveragerProgram, CliffordAveragerProgram
 from experiments.single_qubit.single_shot import hist
+from TomoAnalysis import TomoAnalysis
 
 def sort_counts(shotsA, shotsB):
     # data is returned as n00, n01, n10, n11 measured for the two qubits
@@ -24,52 +25,6 @@ def sort_counts_1q(shots):
     n1 = np.sum(shots)
     return np.array([n0, n1])
 
-"""
-See qiskit measurement error mitigation procedure: [https://qiskit.org/textbook/ch-quantum-hardware/measurement-error-mitigation.html](https://qiskit.org/textbook/ch-quantum-hardware/measurement-error-mitigation.html)
-"""
-
-def correct_readout_err(n, n_conf):
-    n = np.array(n, dtype=float)
-    conf_mat = np.array(n_conf, dtype=float)
-    assert len(n.shape) == 2 # 2d array
-    assert len(conf_mat.shape) == 2 # 2d array
-    old_sum = sum(n[0])
-    n_out_states = np.shape(n_conf)[0] # number of possible states that we are correcting our counts into
-    for r, row in enumerate(conf_mat):
-        conf_mat[r] /= sum(row) # normalize so counts for each state prep sum to 1
-    conf_mat = np.transpose(conf_mat) # want counts for each state prep on columns
-    # Check the determinant to make sure we are not running into machine precision
-    # det = np.linalg.det(conf_mat)
-    # print('DETERMINANT', det)
-    if np.shape(conf_mat)[0] == np.shape(conf_mat)[1]: # square matrix
-        conf_mat_inv = np.linalg.inv(conf_mat)
-    else: conf_mat_inv = np.linalg.pinv(conf_mat)
-    # print('conf mat transpose', conf_mat) 
-    # print('inv conf mat transpose', conf_mat_inv)
-    # C_id = invM . C_noisy
-    n = np.array(n, dtype=float)
-    out_n = np.zeros(shape=(np.shape(n)[0], n_out_states))
-    for r in range(np.shape(n)[0]): # correct each set of measurements (rows of n)
-        # print('n[r]', r, n[r])
-        out_n[r] = (conf_mat_inv @ n[r].T).T
-        out_n[r] *= old_sum/sum(n[r]) # scale so total counts in each row of out_n is same as total counts in each row of n
-    return np.around(out_n, decimals=5)
-
-
-def fix_neg_counts(counts):
-    counts = np.array(counts)
-    assert len(counts.shape) == 2 # 2d array
-
-    for i_n, n in enumerate(counts):
-        orig_sum = sum(n)
-        while len(n[n<0]) > 0: # repeat while still has neg counts
-            # print(i_n, n)
-            assert orig_sum > 0, 'Negative sum of counts'
-            most_neg_ind = np.argmin(n)
-            n += abs(n[most_neg_ind]) / (len(n) - 1)
-            n[most_neg_ind] = 0
-        n *= orig_sum/sum(n)
-    return counts
 
 """
 Infer the populations of the g, e, (and f) states given 1 (2) measurements:
@@ -111,8 +66,9 @@ def infer_gef_popln(qubits, counts1, calib_order=None, counts2=None, measure_f_q
     assert np.shape(counts1)[0] == 1 # set of counts for 1 state preparation
     if fix_neg_counts_flag is not None: assert np.shape(calib_order)[0] == np.shape(counts1)[1]
 
-    if counts_calib is not None: counts1 = correct_readout_err(counts1, counts_calib)
-    if fix_neg_counts_flag: counts1 = fix_neg_counts(counts1)
+    tomo_analysis = TomoAnalysis(nb_qubits=2, tomo_qubits=qubits)
+    if counts_calib is not None: counts1 = tomo_analysis.correct_readout_err(counts1, counts_calib)
+    if fix_neg_counts_flag: counts1 = tomo_analysis.fix_neg_counts(counts1)
     counts1 = counts1[0] # go back to just 1d array
     # print('corrected counts1', counts1)
 
@@ -128,8 +84,8 @@ def infer_gef_popln(qubits, counts1, calib_order=None, counts2=None, measure_f_q
         # if we care about distinguishing e/f, the "g" popln of the 2nd experiment is the real e popln, and the real f popln is whatever is left
         for q in measure_f_qubits: epop_q[q] = 0 # reset this to recalculate e population
 
-        if counts_calib is not None: counts2 = correct_readout_err(counts2, counts_calib)
-        if fix_neg_counts_flag: counts2 = fix_neg_counts(counts2)
+        if counts_calib is not None: counts2 = tomo_analysis.correct_readout_err(counts2, counts_calib)
+        if fix_neg_counts_flag: counts2 = tomo_analysis.fix_neg_counts(counts2)
         counts2 = counts2[0] # go back to just 1d array
         # print('corrected counts2', counts2)
 
@@ -169,10 +125,11 @@ def infer_gef_popln_2readout(qubits, counts_raw_total, calib_order, counts_calib
     assert len(np.shape(counts_raw_total)) == 1 # 1d array for counts_raw_total
     assert np.shape(counts_calib)[1] == np.shape(counts_raw_total)[0]
 
-    counts_corrected = correct_readout_err([counts_raw_total], counts_calib)
+    tomo_analysis = TomoAnalysis(nb_qubits=2, tomo_qubits=qubits)
+    counts_corrected = tomo_analysis.correct_readout_err([counts_raw_total], counts_calib)
     # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
     # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
-    if fix_neg_counts_flag: counts_corrected = fix_neg_counts(counts_corrected)
+    if fix_neg_counts_flag: counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
 
     counts_corrected = counts_corrected[0] # go back to just 1d array
     assert np.shape(counts_corrected) == np.shape(calib_order), f'shape of counts_corrected is {np.shape(counts_corrected)} and shape of calib_order is {np.shape(calib_order)}'

@@ -9,7 +9,7 @@ from slab import Experiment, dsfit, AttrDict
 
 import experiments.fitting as fitter
 from experiments.single_qubit.single_shot import hist
-from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, sort_counts, correct_readout_err, fix_neg_counts
+from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, sort_counts
 
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.

@@ -14,7 +14,7 @@ import experiments.fitting as fitter
 
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, AbstractStateTomo1QProgram, ErrorMitigationStateTomo1QProgram, sort_counts, correct_readout_err, fix_neg_counts, infer_gef_popln
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, AbstractStateTomo1QProgram, ErrorMitigationStateTomo1QProgram, sort_counts, infer_gef_popln
 from experiments.three_qubit.threeQ_state_tomo import AbstractStateTomo3QProgram, ErrorMitigationStateTomo3QProgram, sort_counts_3q, make_3q_calib_order, make_3q_meas_order
 from experiments.four_qubit.fourQ_state_tomo import AbstractStateTomo4QProgram, ErrorMitigationStateTomo4QProgram, sort_counts_4q, make_4q_calib_order, make_4q_meas_order
 
@@ -199,6 +199,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.phase[2]
             if pihalf: virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[2]
             self.overall_phase[2] += virtual_Z
+            # print('virtual Z', virtual_Z)
         if sync_after: self.sync_all()
         return count_us
 
@@ -423,20 +424,21 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         if 'run_protocol' in self.cfg.expt and self.cfg.expt.run_protocol: play_pulses = [0, 1, 2, 3, 4]
         elif 'play_pulses' in self.cfg.expt: play_pulses = self.cfg.expt.play_pulses
 
+        pi_half_swaps = [False, False] # Q2/Q1, Q3/Q1
+        if 'pi_half_swaps' in self.cfg.expt and self.cfg.expt.pi_half_swaps is not None:
+            pi_half_swaps = self.cfg.expt.pi_half_swaps
+            assert len(pi_half_swaps) == 2
+
         prev_pulse = 0
         for i_pulse, pulse_num in enumerate(play_pulses):
             # 1. apply Eg-Gf with qDrive=2: gegg -> ggfg [path 1]
             if pulse_num == 1:
-                print('WARNING PLAYING PIHALF FOR THE Q2/Q1 SWAP!')
-                count_us = self.gegg_ggfg(count_us, add_phase=add_phase, pihalf=True, sync_after=True)
-                # count_us = self.gegg_ggfg(count_us, add_phase=add_phase, pihalf=False, sync_after=True)
+                count_us = self.gegg_ggfg(count_us, add_phase=add_phase, pihalf=pi_half_swaps[0], sync_after=True)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
 
             # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
             if pulse_num == 2:
-                print('WARNING PLAYING PIHALF FOR THE Q3/Q1 SWAP!')
-                count_us = self.eegg_eggf(count_us, add_phase=add_phase, pihalf=True, sync_after=False)
-                # count_us = self.eegg_eggf(count_us, add_phase=add_phase, pihalf=False, sync_after=False)
+                count_us = self.eegg_eggf(count_us, add_phase=add_phase, pihalf=pi_half_swaps[1], sync_after=False)
                 # print('DOING SYNC BETWEEN SWAPS')
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
 
@@ -451,7 +453,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             # This one should be run before 3 because the ZZ from q2 on q3 EF is very large, while the ZZ from q3 on q2 EF is quite small
             if pulse_num == 4:
                 if prev_pulse == 1 or prev_pulse == 2: self.sync_all()
-                count_us = self.q3_ef(count_us, pihalf=False, sync_after=True)
+                count_us = self.q3_ef(count_us, pihalf=False, ZZ_qubit=0, sync_after=True)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
                 # self.sync_all(5)
             
