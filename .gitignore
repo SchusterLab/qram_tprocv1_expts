@@ -1,2 +1,4 @@
 *__pycache__
-data/
+Thumbs.db
+*.h5
+qram-control/
