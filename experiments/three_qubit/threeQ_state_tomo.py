@@ -10,6 +10,7 @@ from tqdm import tqdm_notebook as tqdm
 from experiments.clifford_averager_program import QutritAveragerProgram, CliffordAveragerProgram
 from experiments.single_qubit.single_shot import hist
 from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram
+from TomoAnalysis import TomoAnalysis
 
 def sort_counts_3q(shotsA, shotsB, shotsC):
     # data is returned as n000, n001, ... measured for the 3 qubits
@@ -92,6 +93,14 @@ class AbstractStateTomo3QProgram(AbstractStateTomo2QProgram):
 
         self.reset_and_sync()
 
+        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
+            if 'cool_idle' in self.cfg.expt and self.cfg.expt.cool_idle is not None:
+                cool_idle = self.cfg.expt.cool_idle
+            self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
+
+        if self.readout_cool: self.measure_readout_cool()
+
         # Prep state to characterize
         kwargs = self.cfg.expt.state_prep_kwargs
         if kwargs is None: kwargs = dict()
@@ -116,14 +125,15 @@ class AbstractStateTomo3QProgram(AbstractStateTomo2QProgram):
         self.measure(pulse_ch=self.measure_chs, adcs=self.adc_chs, adc_trig_offset=self.cfg.device.readout.trig_offset[0], wait=True, syncdelay=syncdelay) 
 
     def collect_counts(self, angle=None, threshold=None):
-        shots, avgq = self.get_shots(angle=angle, threshold=threshold)
+        ishots, _ = self.get_shots(angle=angle, threshold=threshold)
         # collect shots for all adcs, then sorts into e, g based on >/< threshold and angle rotation
 
         qubits = self.cfg.expt.tomo_qubits
         # get the shots for the qubits we care about
-        shots = np.array([shots[self.adc_chs[q]] for q in qubits])
+        shots = np.array([ishots[self.adc_chs[q]] for q in qubits])
 
-        return sort_counts_3q(shots[0], shots[1], shots[2])
+        tomo_analysis = TomoAnalysis(nb_qubits=3)
+        return tomo_analysis.sort_counts(shots)
 
 # ===================================================================== #
 
@@ -162,50 +172,34 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
             if num_in_e >= 1:
                 # print(prep_state, f'pulse {first_e}')
                 self.X_pulse(q=qubits[first_e], play=True)
-                self.sync_all(10)
         # print('first', first_e)
 
         if num_in_e >= 2: # ee
             second_e = prep_state[first_e+1:].index('e') + first_e + 1
-            ZZs = np.reshape(self.cfg.device.qubit.ZZs, (4,4))
-            freq = self.freq2reg(self.cfg.device.qubit.f_ge[qubits[second_e]] + ZZs[qubits[second_e], qubits[first_e]], gen_ch=self.qubit_chs[qubits[second_e]])
-            waveform = f'qubit{qubits[second_e]}_ZZ{qubits[first_e]}'
-            if waveform not in self.envelopes:
-                sigma_cycles = self.us2cycles(self.pi_sigmas_us[qubits[second_e]], gen_ch=self.qubit_chs[qubits[second_e]])
-                self.add_gauss(ch=self.qubit_chs[qubits[second_e]], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-                gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[second_e]]
-            elif qubits[second_e] == 1:
-                gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[qubits[first_e]]
-            elif qubits[first_e] == 1:
-                gain = self.cfg.device.qubit.pulses.pi_Q_ZZ1.gain[qubits[second_e]]
-            else: assert False, "There's probably a bug in your conditional statements"
-            # print(prep_state, f'pulse {second_e}')
-            self.setup_and_pulse(ch=self.qubit_chs[qubits[second_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-            self.sync_all(10)
+            self.X_pulse(q=qubits[second_e], ZZ_qubit=qubits[first_e], play=True)
             # print('second', second_e)
 
         if num_in_e >= 3: # eee
             third_e = prep_state[second_e+1:].index('e') + second_e + 1
-            freq = self.freq2reg(
-                self.cfg.device.qubit.f_ge[qubits[third_e]] + ZZs[qubits[third_e], qubits[first_e]] + ZZs[qubits[third_e], qubits[second_e]], 
-                gen_ch=self.qubit_chs[qubits[third_e]])
+            freq = self.f_ges[qubits[third_e], qubits[first_e]] + self.f_ges[qubits[third_e], qubits[second_e]] - self.f_ges[qubits[third_e], qubits[third_e]]
+            freq = self.freq2reg(freq, gen_ch=self.qubit_chs[qubits[third_e]])
             waveform = f'pi_ge_q{qubits[third_e]}'
-            gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[third_e]]
+            gain = self.pi_ge_gains[qubits[third_e], qubits[third_e]]
             # print(prep_state, f'pulse {third_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[third_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-            self.sync_all(10)
+            self.sync_all()
             # print('third', third_e)
 
         if num_in_e >= 4: # eeee
             fourth_e = prep_state[second_e+1:].index('e') + second_e + 1
-            freq = self.freq2reg(
-                self.cfg.device.qubit.f_ge[qubits[fourth_e]] + ZZs[qubits[fourth_e], qubits[first_e]] + ZZs[qubits[fourth_e], qubits[second_e]] + ZZs[qubits[fourth_e], qubits[third_e]],
-                gen_ch=self.qubit_chs[qubits[fourth_e]])
+
+            freq = self.f_ges[qubits[fourth_e], qubits[first_e]] + self.f_ges[qubits[fourth_e], qubits[second_e]] + self.f_ges[qubits[fourth_e], qubits[third_e]] - 2*self.f_ges[qubits[fourth_e], qubits[fourth_e]]
+            freq = self.freq2reg(freq, gen_ch=self.qubit_chs[qubits[fourth_e]])
             waveform = f'pi_ge_q{qubits[fourth_e]}'
-            gain = self.cfg.device.qubit.pulses.pi_ge.gain[qubits[fourth_e]]
+            gain = self.pi_ge_gains[qubits[fourth_e], qubits[fourth_e]]
             # print(prep_state, f'pulse {fourth_e}')
             self.setup_and_pulse(ch=self.qubit_chs[qubits[fourth_e]], style='arb', freq=freq, phase=0, gain=gain, waveform=waveform)
-            self.sync_all(10)
+            self.sync_all()
             # print('fourth', fourth_e)
 
     def initialize(self):

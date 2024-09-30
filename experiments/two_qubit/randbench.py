@@ -15,7 +15,7 @@ from tqdm import tqdm_notebook as tqdm
 from experiments.single_qubit.single_shot import hist
 from experiments.clifford_averager_program import CliffordAveragerProgram, CliffordEgGfAveragerProgram, QutritAveragerProgram
 from experiments.two_qubit.length_rabi_EgGf import LengthRabiEgGfProgram
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram, ErrorMitigationStateTomo2QProgram, sort_counts, sort_counts_1q, infer_gef_popln_2readout
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram, ErrorMitigationStateTomo2QProgram, infer_gef_popln_2readout
 from TomoAnalysis import TomoAnalysis
 
 import experiments.fitting as fitter
@@ -359,6 +359,7 @@ class SimultaneousRBExperiment(Experiment):
         data.update({"xpts":[], "popln":[], "popln_err":[]})
 
         depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+        tomo_analysis = TomoAnalysis(nb_qubits=1)
         for depth in tqdm(depths):
             # print(f'depth {depth} gate list (last gate is the total gate)')
             data['xpts'].append([])
@@ -409,7 +410,7 @@ class SimultaneousRBExperiment(Experiment):
                 if self.cfg.expt.post_process == 'threshold':
                     shots, _ = randbench.get_shots(angle=angles_q, threshold=thresholds_q)
                     # 0, 1
-                    counts = np.array([sort_counts_1q(shots[adc_ch])])
+                    counts = np.array([tomo_analysis.sort_counts([shots[adc_ch]])])
                     data['counts_raw'].append(counts)
                     tomo_analysis = TomoAnalysis(nb_qubits=1, tomo_qubits=qubits)
                     counts = tomo_analysis.fix_neg_counts(tomo_analysis.correct_readout_err(counts, data['counts_calib']))
@@ -789,6 +790,7 @@ class SimultaneousRBEFExperiment(Experiment):
 
             if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
 
+            tomo_analysis = TomoAnalysis(nb_qubits=1)
             for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
                 # print(f'depth {depth} gate list (last gate is the total gate)')
                 if loop == 0:
@@ -838,7 +840,7 @@ class SimultaneousRBEFExperiment(Experiment):
                     if self.cfg.expt.post_process == 'threshold':
                         shots, _ = randbench.get_shots(angle=angles_q, threshold=thresholds_q)
                         # 0, 1/2
-                        counts = np.array([sort_counts_1q(shots[adc_ch])])
+                        counts = np.array([tomo_analysis.sort_counts([shots[adc_ch]])])
                         data['counts_raw'][0].append(counts)
                         # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
@@ -935,7 +937,7 @@ class SimultaneousRBEFExperiment(Experiment):
                         if self.cfg.expt.post_process == 'threshold':
                             shots, _ = randbench.get_shots(angle=angles_f_q, threshold=thresholds_f_q)
                             # 0/1, 2
-                            counts = np.array([sort_counts_1q(shots[adc_ch])])
+                            counts = np.array([tomo_analysis.sort_counts([shots[adc_ch]])])
                             data['counts_raw'][1].append(counts)
                             # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
@@ -989,12 +991,12 @@ class SimultaneousRBEFExperiment(Experiment):
                     # after correcting readout error, counts corrected should correspond to counts in [g, e, f] (the calib_order)
                     # instead of [gA, eA, gB, fB] (the raw counts)
 
+                    tomo_analysis = TomoAnalysis(nb_qubits=1, tomo_qubits=self.cfg.expt.qubits)
                     if separate_correction:
                         counts_raw_total_this = data['counts_raw_total'][loop, idepth, ivar]
                         counts_calib_this = data['counts_calib_total'][loop]
 
                         # print('ge counts calib', counts_calib_this[:,:2])
-                        tomo_analysis = TomoAnalysis(nb_qubits=1, tomo_qubits=self.cfg.expt.qubits)
                         counts_ge_corrected = tomo_analysis.correct_readout_err([counts_raw_total_this[:2]], counts_calib_this[:,:2])
                         # print('ge corrected', counts_ge_corrected)
                         counts_ge_corrected = tomo_analysis.fix_neg_counts(counts_ge_corrected)[0]
@@ -1019,7 +1021,7 @@ class SimultaneousRBEFExperiment(Experiment):
                         f_count_plot.append(counts_raw_total_this[3])
                         g_pop_plot.append(g*np.sum(counts_ge_corrected))
                         f_pop_plot.append(f*np.sum(counts_gf_corrected))
-                    
+
                     else:
                         counts_corrected = tomo_analysis.correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
                         counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
@@ -1454,6 +1456,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
             if 'shot_avg' not in self.cfg.expt: self.cfg.expt.shot_avg=1
 
+            tomo_analysis = TomoAnalysis(nb_qubits=2)
             for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
                 # print(f'depth {depth} gate list (last gate is the total gate)')
                 if loop == 0:
@@ -1490,7 +1493,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     if self.cfg.expt.post_process == 'threshold':
                         shots, _ = randbench.get_shots(angle=angles_q, threshold=thresholds_q)
                         # 00, 01, 10, 11
-                        counts = np.array([sort_counts(shots[adcNotDrive_ch], shots[adcDrive_ch])])
+                        counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])
                         data['counts_raw'][0].append(counts)
                         # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
@@ -1585,7 +1588,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                         if self.cfg.expt.post_process == 'threshold':
                             shots, _ = randbench.get_shots(angle=angles_f_q, threshold=thresholds_f_q)
                             # 00, 02, 10, 12
-                            counts = np.array([sort_counts(shots[adcNotDrive_ch], shots[adcDrive_ch])])
+                            counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])
                             data['counts_raw'][1].append(counts)
                             # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
@@ -1638,9 +1641,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 for ivar in range(self.cfg.expt.variations):
                     # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
                     # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
-                    tomo_analysis = TomoAnalysis(nb_qubits=2, tomo_qubits=self.cfg.expt.qubits)
+                    tomo_analysis = TomoAnalysis(nb_qubits=2)
                     counts_corrected = tomo_analysis.correct_readout_err([data['counts_raw_total'][loop, idepth, ivar]], data['counts_calib_total'][loop])
-                    counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
+                    # counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
                     data['poplns_2q_loops'][loop, idepth, ivar, :] = counts_corrected/np.sum(counts_corrected)
 
         data['poplns_2q'] = np.average(data['poplns_2q_loops'], axis=0)
@@ -1649,8 +1652,11 @@ class SimultaneousRBEgGfExperiment(Experiment):
         print('poplns_2q shape', np.shape(data['poplns_2q']))
 
         # [gg, ge, eg, ee, gf, ef]
+        
         probs_eg = data['poplns_2q'][:, :, 2]
         probs_gf = data['poplns_2q'][:, :, 4]
+        
+        
 
         data['popln_eg_std'] = np.std(probs_eg, axis=1)
         data['popln_eg_avg'] = np.average(probs_eg, axis=1)
@@ -1664,6 +1670,12 @@ class SimultaneousRBEgGfExperiment(Experiment):
         data['popln_eg_subspace_avg'] = np.average(probs_eg/sum_prob_subspace, axis=1)
         print('shape sum prob_eg + prob_gf', np.shape(sum_prob_subspace))
         print('shape average sum over each depth', np.shape(data['popln_subspace_avg']), 'should equal', np.shape(unique_depths))
+                
+        
+        
+        
+        
+        
 
         if not fit: return data
 

@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from copy import deepcopy
 from qick import *
 from qick.helpers import gauss
 
@@ -10,6 +11,8 @@ import scipy as sp
 import matplotlib.pyplot as plt
 
 import experiments.fitting as fitter
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram, ErrorMitigationStateTomo2QProgram, infer_gef_popln_2readout
+from experiments.single_qubit.single_shot import hist
 
 # ====================================================== #
 
@@ -78,6 +81,14 @@ class AmplitudeRabiProgram(RAveragerProgram):
         super().sync_all(t=t, gen_t0=self.gen_delays)
 
 
+    def gf_readout_init(self, qubits=None, sync_after=False):
+        if qubits is None: qubits = range(self.num_qubits_sample)
+        for q in qubits:
+            self.setup_and_pulse(ch=self.qubit_chs[q], style="arb", phase=0, freq=self.freq2reg(self.f_efs[q, q], gen_ch=self.qubit_chs[q]), gain=self.pi_ef_gains[q, q], waveform=f"pi_ef_qubit{q}")
+            if sync_after: self.sync_all()
+        self.sync_all()
+
+
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
@@ -99,7 +110,10 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.res_ch_types = cfg.hw.soc.dacs.readout.type
         self.qubit_chs = cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = cfg.hw.soc.dacs.qubit.type
+
+        self.cool_qubits = False
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.cool_qubits = self.cfg.expt.cool_qubits
             self.swap_f0g1_chs = self.cfg.hw.soc.dacs.swap_f0g1.ch
             self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
             mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
@@ -118,7 +132,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4,4))
 
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
-        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+        if self.cool_qubits:
             self.f_f0g1_reg = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
         self.readout_lengths_adc = [self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)]
@@ -207,7 +221,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
             if self.qubit_chs[q] not in self.gen_chs:
                 self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
 
-        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+        if self.cool_qubits:
             mixer_freq = None
             for q in self.cfg.expt.cool_qubits:
                 if self.swap_f0g1_ch_types[q] == 'int4':
@@ -257,14 +271,21 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
 
-        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            for q in self.cfg.expt.cool_qubits:
+        self.use_gf_readout = False
+        if 'use_gf_readout' in self.cfg.expt and self.cfg.expt.use_gf_readout:
+            self.use_gf_readout = self.cfg.expt.use_gf_readout
+        if self.use_gf_readout or self.cool_qubits:
+            if not self.use_gf_readout: add_ef_qubits = self.cfg.expt.cool_qubits
+            else: add_ef_qubits = range(self.num_qubits_sample) 
+            for q in add_ef_qubits:
                 self.pisigma_ef = self.us2cycles(self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]) # default pi_ef value
                 self.add_gauss(ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef*4)
-                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
-                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
-                else: assert False, 'not implemented'
-            self.f_f0g1_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
+                if self.cool_qubits:
+                    if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == 'flat_top':
+                        self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3*4)
+                    else: assert False, 'not implemented'
+            if self.cool_qubits:
+                self.f_f0g1_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(cfg.device.qubit.f_f0g1, self.qubit_chs)]
 
         # add readout pulses to respective channels
         if 'mux4' in self.res_ch_types:
@@ -293,7 +314,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
 
         self.reset_and_sync()
 
-        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+        if self.cool_qubits:
             cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
             cool_qubits = self.cfg.expt.cool_qubits
             if 'cool_idle' in self.cfg.expt and self.cfg.expt.cool_idle is not None:
@@ -328,6 +349,33 @@ class AmplitudeRabiProgram(RAveragerProgram):
             remaining_idle -= last_pulse_len
             last_idle = max((remaining_idle, sorted_cool_idle[-1]))
             self.sync_all(self.us2cycles(last_idle))
+        
+        self.readout_cool = False
+        if 'readout_cool' in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
+            assert 'n_init_readout' in self.cfg.expt
+            assert 'n_trig' in self.cfg.expt
+            assert 'init_read_wait_us' in self.cfg.expt 
+            assert self.cfg.expt.rounds == 1, 'shots get averaged in a weird way when rounds != 1'
+
+            init_read_wait_us = self.cfg.expt.init_read_wait_us
+            n_trig = self.cfg.expt.n_trig
+
+            extended_readout_delay_cycles = 3 # delay between readout repeats for one "readout"
+            for i_readout in range(self.cfg.expt.n_init_readout):
+                for i_trig in range(n_trig):
+                    if i_trig == n_trig - 1:
+                        syncdelay = self.us2cycles(init_read_wait_us) # last readout for this trigger stack
+                    else: syncdelay = extended_readout_delay_cycles # only sync to the next readout in the same trigger stack
+                    print('sync delay us', self.cycles2us(syncdelay))
+                    # Note that by default the mux channel will play the pulse for all frequencies for the max of the pulse times on all channels - but the acquistion may not be happening the entire time.
+                    if self.use_gf_readout: self.gf_readout_init()
+                    self.measure(
+                        pulse_ch=self.measure_chs, 
+                        adcs=self.adc_chs,
+                        adc_trig_offset=self.cfg.device.readout.trig_offset[0],
+                        wait=True,
+                        syncdelay=syncdelay)
 
         # initializations as necessary
         if self.checkZZ:                    
@@ -396,6 +444,9 @@ class AmplitudeRabiProgram(RAveragerProgram):
 
         # align channels and measure
         self.sync_all()
+        if self.use_gf_readout:
+            self.gf_readout_init()
+            print('WARNING: are you sure you want to be doing gf_readout_init before final measurement in this experiment?')
         self.measure(
             pulse_ch=self.measure_chs, 
             adcs=self.adc_chs,
@@ -412,7 +463,54 @@ class AmplitudeRabiProgram(RAveragerProgram):
         step = self.cfg.expt.step
         if self.qubit_ch_types[qTest] == 'int4': step = step << 16
         self.mathi(self.q_rps[qTest], self.r_gain2, self.r_gain2, '+', step) # update test gain
+
+
+    def acquire(self, soc, get_shots=False, load_pulses=True, progress=False, save_experiments=None):
+        if not self.readout_cool:
+            self.cfg.expt.n_trig = 1
+            self.cfg.expt.n_init_readout = 0
         
+        output = super().acquire(soc, load_pulses=load_pulses, progress=progress, readouts_per_experiment=1+self.cfg.expt.n_trig*self.cfg.expt.n_init_readout, save_experiments=save_experiments)
+        xpts, avgi, avgq = output
+        if not get_shots: return output
+        else: return xpts, *self.get_shots()
+
+
+    def get_shots(self):
+        n_init_readout = self.cfg.expt.n_init_readout
+        n_trig = self.cfg.expt.n_trig
+        print('n_init_readout', n_init_readout, 'n_trig', n_trig)
+
+        if 'expts' not in self.cfg.expt: self.cfg.expt.expts = 1
+        assert self.cfg.expt.rounds == 1, 'something weird seems to happen when rounds is not = 1...'
+
+        shots_i = np.array([self.di_buf[i].reshape((self.cfg.expt.expts, (1+n_init_readout*n_trig)*self.cfg.expt.reps)) / self.readout_lengths_adc[i] for i in range(len(self.ro_chs))])
+        shots_q = np.array([self.dq_buf[i].reshape((self.cfg.expt.expts, (1+n_init_readout*n_trig)*self.cfg.expt.reps)) / self.readout_lengths_adc[i] for i in range(len(self.ro_chs))])
+
+        shots_i_reshaped = np.zeros((len(self.ro_chs), self.cfg.expt.expts, 1+n_init_readout, self.cfg.expt.reps))
+        shots_q_reshaped = np.zeros((len(self.ro_chs), self.cfg.expt.expts, 1+n_init_readout, self.cfg.expt.reps))
+        for i in range(len(self.ro_chs)):
+            for expt in range(self.cfg.expt.expts):
+                meas_per_expt = 1+n_init_readout*n_trig
+
+                # reshape + average over n_trig for the init readouts
+                if n_init_readout > 0 and n_trig > 0:
+                    # init reads shape: reps, n_init_readout, n_trig
+                    shots_i_init_reads = np.reshape(np.reshape(shots_i[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, :-1], (self.cfg.expt.reps, n_init_readout, n_trig))
+                    shots_q_init_reads = np.reshape(np.reshape(shots_q[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, :-1], (self.cfg.expt.reps, n_init_readout, n_trig))
+
+                    shots_i_reshaped[i, expt, :-1, :] = np.average(shots_i_init_reads, axis=2).T
+                    shots_q_reshaped[i, expt, :-1, :] = np.average(shots_q_init_reads, axis=2).T
+
+                # reshape for the final readout (only 1 n_trig here)
+                # final read shape: reps
+                shots_i_final_read = np.reshape(shots_i[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, -1]
+                shots_q_final_read = np.reshape(shots_q[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, -1]
+                shots_i_reshaped[i, expt, -1, :] = shots_i_final_read
+                shots_q_reshaped[i, expt, -1, :] = shots_q_final_read
+        print('shape at get_shots', shots_i_reshaped.shape)
+        return shots_i_reshaped, shots_q_reshaped
+
 # ====================================================== #
                       
 class AmplitudeRabiExperiment(Experiment):
@@ -457,34 +555,137 @@ class AmplitudeRabiExperiment(Experiment):
 
         print(f'Running amp rabi {"EF " if self.cfg.expt.checkEF else ""}on Q{qTest} {"with ZZ Q" + str(qZZ) if qZZ != qTest else ""}')
 
+        readout_cool = False
+        if 'readout_cool' in self.cfg.expt:
+            readout_cool = self.cfg.expt.readout_cool
+
+            self.use_gf_readout = False
+            if 'use_gf_readout' in self.cfg.expt and self.cfg.expt.use_gf_readout:
+                self.use_gf_readout = self.cfg.expt.use_gf_readout
+                self.cfg.expt.n_trig *= 2
+        # if self.use_gf_readout:
+        #     self.cfg.device.readout.readout_length = 2*np.array(self.cfg.device.readout.readout_length)
+        #     print('readout params', self.cfg.device.readout)
+
+
+        # ================= #
+        # Get single shot calibration for test qubit
+        # ================= #
+        data = dict()
+
+        if readout_cool:
+            self.meas_order = ['Z', 'X', 'Y']
+            self.calib_order = ['g', 'e'] # should match with order of counts for each tomography measurement 
+            data.update({'counts_calib':[]})
+            self.pulse_dict = dict()
+
+            # Error mitigation measurements: prep in g, e to recalibrate measurement angle and measure confusion matrix
+            calib_prog_dict = dict()
+            for prep_state in tqdm(self.calib_order):
+                # print(prep_state)
+                cfg = AttrDict(deepcopy(self.cfg))
+                cfg.expt.qubit = qTest
+                cfg.expt.reps = self.cfg.expt.singleshot_reps
+                cfg.expt.rounds = 1
+                cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
+                err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                calib_prog_dict.update({prep_state:err_tomo})
+
+            g_prog = calib_prog_dict['g']
+            Ig, Qg = g_prog.get_shots(verbose=False)
+            threshold = [0]*num_qubits_sample
+            angle = [0]*num_qubits_sample
+
+            # Get readout angle + threshold for qubit
+            e_prog = calib_prog_dict['e']
+            Ie, Qe = e_prog.get_shots(verbose=False)
+            shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
+            fid, thresholdq, angleq = hist(data=shot_data, plot=progress, verbose=False)
+            threshold[qTest] = thresholdq
+            angle[qTest] = angleq
+
+            if progress:
+                print('thresholds', threshold)
+                print('angles', angle)
+
+            # Process the shots taken for the confusion matrix with the calibration angles
+            for prep_state in self.calib_order:
+                counts = calib_prog_dict[prep_state].collect_counts(angle=angle, threshold=threshold)
+                data['counts_calib'].append(counts)
+            data['thresholds'] = threshold
+            data['angles'] = angle
+
         amprabi = AmplitudeRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
         # print(amprabi)
         # from qick.helpers import progs2json
         # print(progs2json([amprabi.dump_prog()]))
-        
-        xpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], threshold=None, load_pulses=True, progress=progress)
+
+        xpts, idata, qdata = amprabi.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=progress, get_shots=readout_cool)
         # print(amprabi)
 
-        # shots_i = amprabi.di_buf[adc_ch].reshape((self.cfg.expt.expts, self.cfg.expt.reps)) / amprabi.readout_length_adc
-        # shots_i = np.average(shots_i, axis=1)
-        # print(len(shots_i), self.cfg.expt.expts)
-        # shots_q = amprabi.dq_buf[adc_ch] / amprabi.readout_length_adc
-        # print(np.std(shots_i), np.std(shots_q))
-        
-        avgi = avgi[qTest][0]
-        avgq = avgq[qTest][0]
-        amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
-        phases = np.angle(avgi+1j*avgq) # Calculating the phase        
-        
-        # data={'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases}
-        data={'xpts': xpts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases}
+        if not readout_cool:
+            avgi = idata[qTest][0]
+            avgq = qdata[qTest][0]
+            amps = np.abs(avgi+1j*avgq) # Calculating the magnitude
+            phases = np.angle(avgi+1j*avgq) # Calculating the phase        
+            data.update({'xpts': xpts, 'avgi':avgi, 'avgq':avgq, 'amps':amps, 'phases':phases})
+        else: data.update({'xpts': xpts, 'idata':idata, 'qdata':qdata})
+            
+
         self.data=data
         return data
 
-    def analyze(self, data=None, fit=True, fitparams=None):
+    def rot_iq_data(self, idata, qdata, angle):
+        idata_rot = idata*np.cos(np.pi/180*angle) - qdata*np.sin(np.pi/180*angle)
+        qdata_rot = idata*np.sin(np.pi/180*angle) + qdata*np.cos(np.pi/180*angle)
+        return idata_rot, qdata_rot
+
+    def analyze(self, data=None, fit=True, post_select=False, ps_threshold=None, fitparams=None):
         if data is None:
             data=self.data
         
+        qTest = self.cfg.expt.qTest
+
+        readout_cool = False
+        if 'readout_cool' in self.cfg.expt:
+            readout_cool = self.cfg.expt.readout_cool
+
+        if readout_cool:
+            # shots data shape: (len(self.ro_chs), self.cfg.expt.expts, 1+n_init_readout, self.cfg.expt.reps)       
+            # final_iqdata: data from the normal readout post experiment, post selected if necessary
+            final_idata = data['idata'][qTest,:,-1,:]
+            final_qdata = data['qdata'][qTest,:,-1,:]
+            data['avgi'] = np.average(final_idata, axis=1)
+            data['avgq'] = np.average(final_qdata, axis=1)
+            keep_prev = np.ones_like(final_idata, dtype='bool')
+            if post_select:
+                if ps_threshold is None:
+                    ps_threshold = data['thresholds'][qTest][0]
+                    data['ps_threshold'] = ps_threshold
+                for i_readout in range(self.cfg.expt.n_init_readout):
+                    # iqdata_readout: data from the i_readout-th readout
+                    idata_readout = data['idata'][qTest,:,i_readout,:]
+                    qdata_readout = data['qdata'][qTest,:,i_readout,:]
+                    idata_readout_rot, qdata_readout_rot = self.rot_iq_data(idata_readout, qdata_readout, data['angles'][qTest])
+                    keep_prev = np.logical_and(keep_prev, idata_readout_rot < ps_threshold)
+                    print('i_readout', i_readout, ': keep', np.sum(keep_prev), 'of', self.cfg.expt.expts * self.cfg.expt.reps, f'shots ({np.sum(keep_prev)/(self.cfg.expt.expts * self.cfg.expt.reps)} %)')
+                    print('threshold', ps_threshold)
+                    # print(idata_readout_rot)
+                    # print()
+                    # print(keep_prev)
+
+                    data[f'avgi_select{i_readout}'] = np.zeros(self.cfg.expt.expts)
+                    data[f'avgq_select{i_readout}'] = np.zeros(self.cfg.expt.expts)
+                    for i_expt in range(self.cfg.expt.expts):
+                        data[f'avgi_select{i_readout}'][i_expt] = np.average(final_idata[i_expt][keep_prev[i_expt]])
+                        data[f'avgq_select{i_readout}'][i_expt] = np.average(final_qdata[i_expt][keep_prev[i_expt]])
+
+                    data['avgi'] = data[f'avgi_select{i_readout}']
+                    data['avgq'] = data[f'avgq_select{i_readout}']
+            data['amps'] = np.abs(data['avgi'] + 1j*data['avgq'])
+            data['phases'] = np.angle(data['avgi'] + 1j*data['avgq'])
+
         if fit:
             # fitparams=[amp, freq (non-angular), phase (deg), decay time, amp offset]
             # fitparams=[yscale, freq, phase_deg, y0]
@@ -511,6 +712,7 @@ class AmplitudeRabiExperiment(Experiment):
             data['fit_err_avgi'] = pCov_avgi   
             data['fit_err_avgq'] = pCov_avgq
             data['fit_err_amps'] = pCov_amps
+
         return data
 
     def display(self, data=None, fit=False, **kwargs):

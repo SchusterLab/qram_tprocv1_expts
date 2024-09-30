@@ -15,6 +15,127 @@ logger = logging.getLogger('qick.qick_asm')
 logger.setLevel(logging.ERROR)
 
 """
+Takes ishots, qshots, angle, threshold all specified for 1 qubit only (so angle, threshold are both numbers)
+If angle is not None, applies the rotation to ishots, qshots
+If threshold is not None, bins shots into 0/1 if less than/greater than threshold
+If avg shots is True, returns the average value of ishots (qshots if specified)
+"""
+def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, avg_shots=False):
+    ishots_1q = np.array(ishots_1q)
+    qshots_1q = np.array(qshots_1q)
+    assert len(np.array(ishots_1q).shape) == 1 # 1d array, for 1q only
+    if qshots_1q is not None:
+        assert len(np.array(ishots_1q).shape) == 1 # 1d array, for 1q only
+    if angle is not None:
+        assert qshots_1q is not None
+        assert len(np.array(angle).shape) == 0 # number for 1q only
+    if threshold is not None:
+        assert len(np.array(threshold).shape) == 0 # number for 1q only
+
+    ifinal = ishots_1q
+    qfinal = qshots_1q if qshots_1q is not None else np.zeros_like(ifinal)
+    
+    if angle is not None:
+        ifinal = ishots_1q*np.cos(np.pi/180*angle) - qshots_1q*np.sin(np.pi/180*angle)
+        qfinal = ishots_1q*np.sin(np.pi/180*angle) + qshots_1q*np.cos(np.pi/180*angle)
+    
+    if threshold is not None:
+        ifinal = np.heaviside(ifinal - threshold, 0)
+        qfinal = np.zeros_like(ifinal)
+    
+    if avg_shots:
+        ifinal = np.average(ifinal)
+        qfinal = np.average(qfinal)
+    
+    return ifinal, qfinal
+
+"""
+final_qubit: qubit whose final, post selected shots should be returned
+all_ishots_raw_q: ishots for each qubit, shape should be (adc_chs, n_init_readout + 1, reps)
+all_qshots_raw_q: optional qshots if ishots was not already rotated
+angles: if specified, combines ishots_raw and qshots_raw to get the rotated shots
+ps_thresholds: post selection thresholds for all qubits. Make sure these have been calibrated for each of ps_qubits!
+ps_qubits: qubits to do post selection on
+post_process: post processing on the final readout, 'threshold' or 'scale'
+thresholds: thresholding for all qubits. Only uses the value for the final readout, and only does so if post_process='threshold (1 qubit only)
+    
+returns: shots_final for final_qubit only, post processed as requested
+"""
+def post_select_shots(final_qubit, all_ishots_raw_q, ps_thresholds, ps_qubits, n_init_readout, all_qshots_raw_q=None, angles=None, post_process='threshold', thresholds=None, verbose=False, return_keep_indices=False):
+    assert len(all_ishots_raw_q.shape) == 3
+    if angles is not None: 
+        assert all_qshots_raw_q is not None
+        assert len(all_qshots_raw_q.shape) == 3
+    if angles is not None:
+        shots_final, _ = rotate_and_threshold(ishots_1q=all_ishots_raw_q[final_qubit, -1, :], qshots_1q=all_qshots_raw_q[final_qubit, -1, :], angle=angles[final_qubit], threshold=None, avg_shots=False)
+    else: shots_final = all_ishots_raw_q[final_qubit, -1, :]
+    reps_orig = len(shots_final)
+
+    keep_prev = np.ones_like(shots_final, dtype='bool')
+    for i_readout in range(n_init_readout):
+        for ps_qubit in ps_qubits:
+            # For initialization readouts, shots_raw is the rotated i value
+            if angles is not None:
+                shots_readout, _ = rotate_and_threshold(ishots_1q=all_ishots_raw_q[ps_qubit, i_readout, :], qshots_1q=all_qshots_raw_q[ps_qubit, i_readout, :], angle=angles[ps_qubit], threshold=None, avg_shots=False)
+            else: shots_readout = all_ishots_raw_q[ps_qubit, i_readout, :]
+            # print(ps_qubit, np.average(shots_readout))
+
+            keep_prev = np.logical_and(keep_prev, shots_readout < ps_thresholds[ps_qubit])
+    
+            # if verbose:
+            #     print('i_readout', i_readout, 'ps_qubit', ps_qubit, 'keep', np.sum(keep_prev), 'of', reps_orig, f'shots ({100*np.sum(keep_prev)/reps_orig} %)')
+    if verbose:
+        print('keep', np.sum(keep_prev), 'of', reps_orig, f'shots ({100*np.sum(keep_prev)/reps_orig} %)')
+
+    # Apply thresholding if necessary
+    assert post_process in [None, 'threshold']
+    if post_process == 'threshold' and thresholds is not None:
+        assert len(np.array(thresholds).shape) == 1 # array
+    if post_process is None: thresholds = [None]*4
+    if thresholds is None: assert post_process is None
+    shots_final, _ = rotate_and_threshold(ishots_1q=shots_final, threshold=thresholds[final_qubit], avg_shots=False)
+
+    assert shots_final.shape == keep_prev.shape
+    if return_keep_indices: return shots_final[keep_prev], keep_prev
+    return shots_final[keep_prev]
+
+"""
+Given a set of ps_thresholds_init for all qubits, adjust by ratio. The ratio is defined relative to the
+ge_avgs provided as [Ig, Qg, Ie, Qe]*num_qubits, which will be rotated by angles for each of the qubits;
+Adjust should be specified for each qubit
+Adjust = 0 indicates keep the ps_threshold as the default threshold point
+Adjust < 0: adjust = -1 indicates to set the ps_threshold to the (rotated) g avg value, linear scaling between 0 and -1
+Adjust > 0: adjust = +1 indicates to set the ps_threshold to the (rotated) e avg value, linear scaling between 0 and 1
+"""
+def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles):
+    num_qubits_sample = 4
+    ps_thresholds_init = np.array(ps_thresholds_init)
+    ge_avgs = np.array(ge_avgs)
+    angles = np.array(angles)
+    adjust = np.array(adjust)
+    assert ps_thresholds_init.shape == (num_qubits_sample,)
+    assert ge_avgs.shape == (num_qubits_sample, 4)
+    assert adjust.shape == (num_qubits_sample,)
+    g_avgs = np.array([
+        rotate_and_threshold(ishots_1q=[ge_avgs[q, 0]], qshots_1q=[ge_avgs[q, 1]], angle=angles[q], threshold=None, avg_shots=False)[0][0] for q in range(num_qubits_sample)
+    ])
+    e_avgs = np.array([
+        rotate_and_threshold(ishots_1q=[ge_avgs[q, 2]], qshots_1q=[ge_avgs[q, 3]], angle=angles[q], threshold=None, avg_shots=False)[0][0] for q in range(num_qubits_sample)
+    ])
+    # print('new g avgs', g_avgs)
+    # print('new e avgs', e_avgs)
+
+    ps_thresholds = ps_thresholds_init.copy()
+    # print('old ps threshold', ps_thresholds)
+    for q in range(len(adjust)):
+        if adjust[q] < 0: ps_thresholds[q] += adjust[q]*(ps_thresholds_init[q] - g_avgs[q])
+        elif adjust[q] > 0: ps_thresholds[q] += adjust[q]*(e_avgs[q] - ps_thresholds_init[q])
+    # print('new ps threshold', ps_thresholds)
+    return ps_thresholds
+    
+
+
+"""
 Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2
 """
 class CliffordAveragerProgram(AveragerProgram):
@@ -268,9 +389,10 @@ class CliffordAveragerProgram(AveragerProgram):
     special: adiabatic, pulseiq
     """
     # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=False, **kwargs):
+    def X_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=False, sync_after=True, **kwargs):
         # q: qubit number in config
         if ZZ_qubit is None: ZZ_qubit = q
+        assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
         f_ge_MHz = self.f_ges[q, ZZ_qubit]
         gain = self.pi_ge_gains[q, ZZ_qubit]
         phase_deg = self.overall_phase[q] + extra_phase
@@ -305,28 +427,28 @@ class CliffordAveragerProgram(AveragerProgram):
             else: gain = self.pi_ge_half_gain_pi_sigmas[q, ZZ_qubit]
             name += '_half'
         assert f_ge_MHz > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
-        assert gain > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
+        assert gain > 0, f'{"pihalf " if pihalf else ""}pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
         assert sigma_cycles > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
         if neg: phase_deg -= 180
         if type == 'const':
-            self.handle_const_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', length=sigma_cycles, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
+            self.handle_const_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', length=sigma_cycles, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
         elif type == 'gauss':
-            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
+            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after) 
         elif type == 'adiabatic':
             assert not pihalf, 'Cannot do pihalf pulse with adiabatic'
-            self.handle_adiabatic_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', mu=mu, beta=beta, period_us=period_us, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
+            self.handle_adiabatic_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', mu=mu, beta=beta, period_us=period_us, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
         elif type == 'pulseiq':
             assert not pihalf, 'Cannot do pihalf pulse with pulseiq'
-            self.handle_IQ_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
+            self.handle_IQ_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', I_mhz_vs_us=I_mhz_vs_us, Q_mhz_vs_us=Q_mhz_vs_us, times_us=times_us, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
         elif type == 'flat_top':
             assert False, 'flat top not checked yet'
             flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.length[q], gen_ch=self.qubit_chs[q]) - 3*4
             self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, flat_length=flat_length, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         else: assert False, f'Pulse type {type} not supported.'
 
-    def Y_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=False):
+    def Y_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=False, sync_after=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, ZZ_qubit=ZZ_qubit, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, adiabatic=adiabatic, phrst=phrst, reload=reload)
+        self.X_pulse(q, pihalf=pihalf, divide_len=divide_len, ZZ_qubit=ZZ_qubit, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y', flag=flag, adiabatic=adiabatic, phrst=phrst, reload=reload, sync_after=sync_after)
 
     def Z_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, **kwargs):
         dac_type = self.qubit_ch_types[q]
@@ -369,10 +491,16 @@ class CliffordAveragerProgram(AveragerProgram):
         self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
 
+        self.cool_qubits = False
         if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.cool_qubits = self.cfg.expt.cool_qubits
             self.swap_f0g1_chs = self.cfg.hw.soc.dacs.swap_f0g1.ch
             self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
             mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
+
+        self.readout_cool = False
+        if 'readout_cool' in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
 
         self.overall_phase = [0]*self.num_qubits_sample
 
@@ -392,7 +520,7 @@ class CliffordAveragerProgram(AveragerProgram):
         self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
 
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
-        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+        if self.cool_qubits:
             self.f_f0g1_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_f0g1, self.qubit_chs)]
 
         self.readout_lengths_dac = [self.us2cycles(length, gen_ch=gen_ch) for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)]
@@ -447,7 +575,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.declare_gen(ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq)
             self.X_pulse(q=q, play=False, reload=True)
 
-        if 'cool_qubits' in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+        if self.cool_qubits:
             mixer_freq = None
             for q in self.cfg.expt.cool_qubits:
                 if self.swap_f0g1_ch_types[q] == 'int4':
@@ -470,41 +598,126 @@ class CliffordAveragerProgram(AveragerProgram):
         self.set_gen_delays()
         self.sync_all(200)
 
-    """ Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
-    Returns avgi, avgq, avgi_err, avgq_err which avgi/q are avg over shot_avg and avgi/q_err is (std dev of each group of shots)/sqrt(shot_avg)
+
+    def measure_readout_cool(self, n_init_readout=None, n_trig=None, init_read_wait_us=None, extended_readout_delay_cycles=3):
+        if n_init_readout is None:
+            assert 'n_init_readout' in self.cfg.expt
+            n_init_readout = self.cfg.expt.n_init_readout
+        if n_trig is None:
+            assert 'n_trig' in self.cfg.expt
+            n_trig = self.cfg.expt.n_trig
+        if init_read_wait_us is None:
+            assert 'init_read_wait_us' in self.cfg.expt 
+            init_read_wait_us = self.cfg.expt.init_read_wait_us
+        if 'rounds' in self.cfg.expt: assert self.cfg.expt.rounds == 1, 'shots get averaged in a weird way when rounds != 1'
+
+        if self.use_gf_readout is not None:
+            # n_trig *= 2
+            self.gf_readout_init(qubits=self.cfg.expt.use_gf_readout)
+        for i_readout in range(n_init_readout):
+            for i_trig in range(n_trig):
+                trig_offset = self.cfg.device.readout.trig_offset[0]
+                if i_trig == n_trig - 1:
+                    syncdelay = self.us2cycles(init_read_wait_us) # last readout for this trigger stack
+                else:
+                    syncdelay = extended_readout_delay_cycles # only sync to the next readout in the same trigger stack
+                    # trig_offset = 0
+
+                # print('sync delay us', self.cycles2us(syncdelay))
+                # Note that by default the mux channel will play the pulse for all frequencies for the max of the pulse times on all channels - but the acquistion may not be happening the entire time.
+                self.measure(
+                    pulse_ch=self.measure_chs, 
+                    adcs=self.adc_chs,
+                    adc_trig_offset=trig_offset,
+                    wait=True,
+                    syncdelay=syncdelay)
+
+
     """
-    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, return_err=False):
-        buf_len = len(self.di_buf[0])
+    Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
+    Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
+    """
+    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False):
+
+        idata, qdata = self.get_multireadout_shots(angle=angle, threshold_final=threshold)
+
+        idata = idata[:, -1, :]
+        qdata = qdata[:, -1, :]
+        if avg_shots:
+            idata = np.average(idata, axis=1)
+            qdata = np.average(qdata, axis=1)
+        return idata, qdata
+    
+
+    """
+    For all readouts, angle is applied if None; threshold_final is applied only to the last readout
+    threshold_final should be specified for all qubits
+    if avg_trigs is False, return as if each trig is a separate readout
+    """
+    def get_multireadout_shots(self, angle=None, threshold_final=None, avg_trigs=True):
+        n_init_readout = self.cfg.expt.n_init_readout
+        n_trig = self.cfg.expt.n_trig
+        # print('n_init_readout', n_init_readout, 'n_trig', n_trig)
+
+        # NOTE: this code assumes the number of expts in a single program is 1 (i.e. this must be an Averager not RAverager program!)
 
         self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         if angle is None: angle = [0]*self.num_qubits_sample
-        bufi = np.array([
-            self.di_buf[i]*np.cos(np.pi/180*angle[i]) - self.dq_buf[i]*np.sin(np.pi/180*angle[i])
-            for i, ch in enumerate(self.ro_chs)])
-        bufi = np.array([bufi[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
-        if threshold is not None: # categorize single shots
-            bufi = np.array([np.heaviside(bufi[ch] - threshold[ch], 0) for ch in range(len(self.adc_chs))])
-        avgi = np.average(bufi, axis=1) # [num_chs]
-        bufi_err = np.std(bufi, axis=1) / np.sqrt(buf_len) # [num_chs]
-        if verbose: print([np.median(bufi[i]) for i in range(4)])
 
-        bufq = np.array([
-            self.di_buf[i]*np.sin(np.pi/180*angle[i]) + self.dq_buf[i]*np.cos(np.pi/180*angle[i])
-            for i, ch in enumerate(self.ro_chs)])
-        bufq = np.array([bufq[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
-        avgq = np.average(bufq, axis=1) # [num_chs]
-        bufq_err = np.std(bufq, axis=1) / np.sqrt(buf_len) # [num_chs]
-        if verbose: print([np.median(bufq[i]) for i in range(4)])
+        di_buf = np.array([self.di_buf[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        dq_buf = np.array([self.dq_buf[i]/ro['length'] for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        for i, ch in enumerate(self.ro_chs):
+            idata_ch, qdata_ch = rotate_and_threshold(ishots_1q=di_buf[i], qshots_1q=dq_buf[i], angle=angle[i], threshold=None, avg_shots=False)
+            di_buf[i] = idata_ch
+            dq_buf[i] = qdata_ch
 
-        if avg_shots:
-            idata = avgi
-            qdata = avgq
-        else:
-            idata = bufi
-            qdata = bufq
+        shots_i = di_buf.reshape((len(self.ro_chs), (1+n_init_readout*n_trig)*self.cfg.expt.reps))
+        shots_q = dq_buf.reshape((len(self.ro_chs), (1+n_init_readout*n_trig)*self.cfg.expt.reps))
 
-        if return_err: return idata, qdata, bufi_err, bufq_err
-        else: return idata, qdata 
+        shots_reshaped_shape = (len(self.ro_chs), 1+n_init_readout, self.cfg.expt.reps)
+        if not avg_trigs:
+            shots_reshaped_shape = (len(self.ro_chs), 1+n_init_readout*n_trig, self.cfg.expt.reps)
+        shots_i_reshaped = np.zeros(shots_reshaped_shape)
+        shots_q_reshaped = np.zeros(shots_reshaped_shape)
+        for i in range(len(self.ro_chs)):
+            meas_per_expt = 1+n_init_readout*n_trig
+
+            # reshape + average over n_trig for the init readouts
+            if n_init_readout > 0 and n_trig > 0:
+                # init reads shape: reps, n_init_readout, n_trig
+                if avg_trigs:
+                    shots_i_init_reads = np.reshape(np.reshape(shots_i[i], (self.cfg.expt.reps, meas_per_expt))[:, :-1], (self.cfg.expt.reps, n_init_readout, n_trig))
+                    shots_q_init_reads = np.reshape(np.reshape(shots_q[i], (self.cfg.expt.reps, meas_per_expt))[:, :-1], (self.cfg.expt.reps, n_init_readout, n_trig))
+                    shots_i_reshaped[i, :-1, :] = np.average(shots_i_init_reads, axis=2).T
+                    shots_q_reshaped[i, :-1, :] = np.average(shots_q_init_reads, axis=2).T
+                else:
+                    shots_i_init_reads = np.reshape(np.reshape(shots_i[i], (self.cfg.expt.reps, meas_per_expt))[:, :-1], (self.cfg.expt.reps, n_init_readout*n_trig))
+                    shots_q_init_reads = np.reshape(np.reshape(shots_q[i], (self.cfg.expt.reps, meas_per_expt))[:, :-1], (self.cfg.expt.reps, n_init_readout*n_trig))
+                    shots_i_reshaped[i, :-1, :] = shots_i_init_reads.T
+                    shots_q_reshaped[i, :-1, :] = shots_q_init_reads.T
+
+            # reshape for the final readout (only 1 n_trig here)
+            # final read shape: reps
+            shots_i_final_read = np.reshape(shots_i[i], (self.cfg.expt.reps, meas_per_expt))[:, -1]
+            shots_q_final_read = np.reshape(shots_q[i], (self.cfg.expt.reps, meas_per_expt))[:, -1]
+            shots_i_reshaped[i, -1, :] = shots_i_final_read
+            shots_q_reshaped[i, -1, :] = shots_q_final_read
+        
+        if threshold_final is not None:
+            for ch in range(len(self.ro_chs)):
+                shots_i_reshaped[ch, -1, :], _ = rotate_and_threshold(ishots_1q=shots_i_reshaped[ch, -1, :], threshold=threshold_final[ch])
+
+        # final shape: (ro_chs, n_init_readout + 1, reps)
+        # or if not avg_trigs: (ro_chs, n_init_readout*n_trig + 1, reps)
+        return shots_i_reshaped, shots_q_reshaped
+    
+
+    def acquire(self, soc, load_pulses=True, progress=False, save_experiments=None):
+        if not self.readout_cool:
+            self.cfg.expt.n_trig = 1
+            self.cfg.expt.n_init_readout = 0
+        return super().acquire(soc, load_pulses=load_pulses, progress=progress, readouts_per_experiment=1+self.cfg.expt.n_trig*self.cfg.expt.n_init_readout, save_experiments=save_experiments)
+
 
     """
     If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
@@ -514,16 +727,15 @@ class CliffordAveragerProgram(AveragerProgram):
     def acquire_rotated(self, soc, progress, angle=None, threshold=None, ge_avgs=None, post_process=None, verbose=False):
         avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
         if post_process == None: 
-            avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
-            if angle is None: return avgi_rot, avgq_rot
-            else: return avgi_rot, avgi_err
+            avgi_rot, avgq_rot = self.get_shots(angle=angle, avg_shots=True, verbose=verbose)
+            return avgi_rot, avgq_rot
         elif post_process == 'threshold':
             assert threshold is not None
-            popln, avgq_rot, popln_err, avgq_err = self.get_shots(angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, return_err=True)
-            return popln, popln_err
+            popln, avgq_rot = self.get_shots(angle=angle, threshold=threshold, avg_shots=True, verbose=verbose)
+            return popln, avgq_rot
         elif post_process == 'scale':
             assert ge_avgs is not None
-            avgi_rot, avgq_rot, avgi_err, avgq_err = self.get_shots(angle=angle, avg_shots=True, verbose=verbose, return_err=True)
+            avgi_rot, avgq_rot = self.get_shots(angle=angle, avg_shots=True, verbose=verbose)
 
             ge_avgs_rot = [None]*4
             for q, angle_q in enumerate(angle):
@@ -544,8 +756,7 @@ class CliffordAveragerProgram(AveragerProgram):
             ge_avgs_rot = np.asarray(ge_avgs_rot)
             avgi_rot -= ge_avgs_rot[:,0]
             avgi_rot /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
-            avgi_err /= ge_avgs_rot[:,1] - ge_avgs_rot[:,0]
-            return avgi_rot, avgi_err
+            return avgi_rot, avgq_rot
         else:
             assert False, 'Undefined post processing flag, options are None, threshold, scale'
 
@@ -555,7 +766,7 @@ class CliffordAveragerProgram(AveragerProgram):
 Take care of extra clifford pulses for qutrits.
 """
 class QutritAveragerProgram(CliffordAveragerProgram):
-    def Xef_pulse(self, q, pihalf=False, divide_len=True, name='X_ef', ZZ_qubit=None, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+    def Xef_pulse(self, q, pihalf=False, divide_len=True, name='X_ef', ZZ_qubit=None, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True, sync_after=True):
         ch = self.qubit_chs[q]
         if ZZ_qubit is None: ZZ_qubit = q
         f_ef_MHz = self.f_efs[q, ZZ_qubit]
@@ -574,23 +785,23 @@ class QutritAveragerProgram(CliffordAveragerProgram):
                 gain = self.pi_ef_half_gains[q, ZZ_qubit]
             else: gain = self.pi_ef_half_gain_pi_sigmas[q, ZZ_qubit]
             name += '_half'
-        assert f_ef_MHz > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
-        assert gain > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
-        assert sigma_cycles > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
+        assert f_ef_MHz > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        assert gain > 0, f'{"pihalf " if pihalf else ""}EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        assert sigma_cycles > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
         if neg: phase_deg -= 180
         if type == 'const':
-            self.handle_const_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', length=sigma_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
+            self.handle_const_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', length=sigma_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
         elif type == 'gauss':
-            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
+            self.handle_gauss_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
         elif type == 'flat_top':
             sigma_ramp_cycles = 3
             flat_length_cycles = sigma_cycles - sigma_ramp_cycles*4
-            self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_ramp_cycles, flat_length=flat_length_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload)
+            self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=ch, waveformname=f'{waveformname}_q{q}', sigma=sigma_ramp_cycles, flat_length=flat_length_cycles, freq_MHz=f_ef_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
         else: assert False, f'Pulse type {type} not supported.'
     
-    def Yef_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True):
+    def Yef_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, play=False, flag=None, phrst=0, reload=True, sync_after=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
-        self.Xef_pulse(q, pihalf=pihalf, divide_len=divide_len, ZZ_qubit=ZZ_qubit, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y_ef', flag=flag, phrst=phrst, reload=reload)
+        self.Xef_pulse(q, pihalf=pihalf, divide_len=divide_len, ZZ_qubit=ZZ_qubit, neg=not neg, extra_phase=90+extra_phase, play=play, name='Y_ef', flag=flag, phrst=phrst, reload=reload, sync_after=sync_after)
 
     def Zef_pulse(self, q, pihalf=False, neg=False, extra_phase=0, play=False, **kwargs):
         dac_type = self.qubit_ch_types[q]
@@ -640,7 +851,14 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         last_idle = max((remaining_idle, sorted_cool_idle[-1]))
         # print('last idle', last_idle)
         self.sync_all(self.us2cycles(last_idle))
-        
+
+
+    def gf_readout_init(self, qubits=None, sync_after=False):
+        if qubits is None: qubits = range(self.num_qubits_sample)
+        for q in qubits:
+            self.Xef_pulse(q=q, play=True, sync_after=sync_after)
+        self.sync_all()
+
 
     def initialize(self):
         super().initialize()

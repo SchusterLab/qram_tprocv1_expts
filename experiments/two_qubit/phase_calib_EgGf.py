@@ -210,8 +210,7 @@ class EgGfPhaseExperiment(Experiment):
         print('target X pop', final_X_pop)
         best_ind = np.argmin(np.abs(data['popln_X']-final_X_pop))
         best_phase = data['xpts'][best_ind]
-        print(f'closest population', data['popln_X'][best_ind], 'at phase', best_phase, 'deg')
-        print(f'phase adjust for 1 {"pi/2" if test_pi_half else "pi"} swap:', 2*best_phase/n_pulses, 'deg')
+        print(f'phase adjust for 1 {"pi/2" if test_pi_half else "pi"} swap:', best_phase, 'deg')
         
         plt.figure()
         plt.plot(data['xpts'], data['popln_X'], '.-')

@@ -121,8 +121,8 @@ class T1Program(RAveragerProgram):
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit", sigma=self.pi_sigma, length=self.pi_sigma*4)
 
         if self.checkEF:
-            self.pi_ef_sigma = self.us2cycles(self.pi_ef_sigmas[qTest, qTest], gen_ch=self.qubit_ch)
-            self.add_gauss(ch=self.qubit_ch, name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
+            self.pi_ef_sigma = self.us2cycles(self.pi_ef_sigmas[qTest, qTest], gen_ch=self.qubit_chs[qTest])
+            self.add_gauss(ch=self.qubit_chs[qTest], name="pi_ef_qubit", sigma=self.pi_ef_sigma, length=self.pi_ef_sigma*4)
 
         # add readout pulses to respective channels
         if 'mux4' in self.res_ch_types:
@@ -148,12 +148,12 @@ class T1Program(RAveragerProgram):
         if self.cfg.device.qubit.pulses.pi_ge.type[qTest].lower() == 'gauss':
             self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=f_ge_reg, phase=0, gain=self.pi_ge_gains[qTest, qTest], waveform="pi_qubit")
         else:
-            self.setup_and_pulse(ch=self.qubit_ch, style="const", freq=f_ge_reg, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
+            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="const", freq=f_ge_reg, phase=0, gain=cfg.expt.start, length=self.pi_sigma)
         self.sync_all()
 
         if self.checkEF:
             f_ef_reg = self.freq2reg(self.f_efs[qTest, qTest], gen_ch=self.qubit_chs[qTest])
-            self.setup_and_pulse(ch=self.qubit_ch, style="arb", freq=f_ef_reg, phase=0, gain=self.pi_ef_gains[qTest, qTest], waveform="pi_ef_qubit")
+            self.setup_and_pulse(ch=self.qubit_chs[qTest], style="arb", freq=f_ef_reg, phase=0, gain=self.pi_ef_gains[qTest, qTest], waveform="pi_ef_qubit")
         self.sync_all()
 
         # wait for the time stored in the wait variable register

@@ -12,11 +12,12 @@ from slab import Experiment, NpEncoder, AttrDict
 
 import experiments.fitting as fitter
 
-from experiments.single_qubit.single_shot import hist
+from experiments.single_qubit.single_shot import hist, multihist
 from experiments.clifford_averager_program import CliffordAveragerProgram
-from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, AbstractStateTomo1QProgram, ErrorMitigationStateTomo1QProgram, sort_counts, infer_gef_popln
-from experiments.three_qubit.threeQ_state_tomo import AbstractStateTomo3QProgram, ErrorMitigationStateTomo3QProgram, sort_counts_3q, make_3q_calib_order, make_3q_meas_order
-from experiments.four_qubit.fourQ_state_tomo import AbstractStateTomo4QProgram, ErrorMitigationStateTomo4QProgram, sort_counts_4q, make_4q_calib_order, make_4q_meas_order
+from experiments.two_qubit.twoQ_state_tomography import AbstractStateTomo2QProgram, ErrorMitigationStateTomo2QProgram, AbstractStateTomo1QProgram, ErrorMitigationStateTomo1QProgram, infer_gef_popln
+from experiments.three_qubit.threeQ_state_tomo import AbstractStateTomo3QProgram, ErrorMitigationStateTomo3QProgram, make_3q_calib_order, make_3q_meas_order
+from experiments.four_qubit.fourQ_state_tomo import AbstractStateTomo4QProgram, ErrorMitigationStateTomo4QProgram, make_4q_calib_order, make_4q_meas_order
+from TomoAnalysis import TomoAnalysis
 
 
 default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -179,8 +180,9 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 shots_psq0[0].append(shots[qA][i_shot])
                 shots_psq0[1].append(shots[qB][i_shot])
         
-        counts_psq0 = sort_counts(shotsA=shots_psq0[0], shotsB=shots_psq0[1])
-        counts_psq1 = sort_counts(shotsA=shots_psq1[0], shotsB=shots_psq1[1])
+        tomo_analysis = TomoAnalysis(nb_qubits=2)
+        counts_psq0 = tomo_analysis.sort_counts([shots_psq0[0], shots_psq0[1]])
+        counts_psq1 = tomo_analysis.sort_counts([shots_psq1[0], shots_psq1[1]])
         return (counts_psq0, counts_psq1)
 
 
@@ -222,17 +224,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         if ZZ_qubit is None: ZZ_qubit = 2
         phase_deg = self.overall_phase[2]
         phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[2])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]), type=self.pi_ef_types[2], phase=phase, gain=self.pi_ef_gains[2, ZZ_qubit], sigma_us=self.pi_ef_sigmas[2, ZZ_qubit], waveform=f'pi_ef_q2{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}')
+        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[2], freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]), type=self.pi_ef_types[2], phase=phase, gain=self.pi_ef_gains[2, ZZ_qubit], sigma_us=self.pi_ef_sigmas[2, ZZ_qubit], waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}_q2')
         if sync_after: self.sync_all()
         return count_us
 
     def q3_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
-        if ZZ_qubit is None: ZZ_qubit = 3
-        phase_deg = self.overall_phase[3]
-        phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[3])
-        count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.freq2reg(self.f_efs[3, ZZ_qubit], gen_ch=self.qubit_chs[3]), type=self.pi_ef_types[3], phase=phase, gain=self.pi_ef_gains[3, ZZ_qubit], sigma_us=self.pi_ef_sigmas[3, ZZ_qubit], waveform=f'pi_ef_q3{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=3 else ""}')
-        if sync_after: self.sync_all()
-        return count_us
+        self.Xef_pulse(q=3, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
+        if self.timestep_us < np.inf: assert False, 'no time stepping on the ef pulse right now'
+        return 0
+        # if ZZ_qubit is None: ZZ_qubit = 3
+        # phase_deg = self.overall_phase[3]
+        # phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[3])
+        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.freq2reg(self.f_efs[3, ZZ_qubit], gen_ch=self.qubit_chs[3]), type=self.pi_ef_types[3], phase=phase, gain=self.pi_ef_gains[3, ZZ_qubit], sigma_us=self.pi_ef_sigmas[3, ZZ_qubit], waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=3 else ""}_q3')
+        # if sync_after: self.sync_all()
+        # return count_us
 
 
 
@@ -337,50 +342,69 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.add_gauss(ch=self.qubit_chs[1], name='qubit1_semiZZ0_half', sigma=pi2_sigma_cycles, length=4*pi2_sigma_cycles)
             self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq_reg, phase=phase, gain=gain, waveform='qubit1_semiZZ0_half')
             self.sync_all()
+        
+        elif init_state == '|1002>':
+            self.X_pulse(q=0, play=True)
+            self.X_pulse(q=3, ZZ_qubit=0, play=True)
+            self.Xef_pulse(q=3, ZZ_qubit=0, play=True)
 
-        elif 'Q1' in init_state: # specify other qubits to prepare. it will always be specified as QxQ1_regular_state_name, with regular state name specified as |Qx>|Q1>
-            assert init_state[2:5] == 'Q1_'
-            q_other = int(init_state[1])
-            assert q_other == 2 or q_other == 3
+        elif 'Q' in init_state: # specify other qubits to prepare. it will always be specified as QaQb_regular_state_name, with regular state name specified as |Qa>|Qb>
+            assert init_state[0] == 'Q'
+            assert init_state[2] == 'Q'
+            qa = int(init_state[1])
+            qb = int(init_state[3])
             init_state_other = init_state[5:]
 
             if init_state_other == '|0>|0>':
                 pass
 
             elif init_state_other == '|0>|1>':
-                self.Y_pulse(q=1, play=True)
+                self.Y_pulse(q=qb, play=True)
 
             elif init_state_other == '|0>|2>':
-                self.Y_pulse(q=1, play=True)
-                self.Yef_pulse(q=1, play=True)
+                self.Y_pulse(q=qb, play=True)
+                self.Yef_pulse(q=qb, play=True)
 
             elif init_state_other == '|0>|0+1>':
-                self.Y_pulse(q=1, play=True, pihalf=True)
+                self.Y_pulse(q=qb, play=True, pihalf=True)
 
             elif init_state_other == '|1>|0>':
-                self.Y_pulse(q=q_other, play=True, pihalf=False)
+                self.Y_pulse(q=qa, play=True, pihalf=False)
 
             elif init_state_other == '|2>|0>':
-                self.Y_pulse(q=q_other, play=True, pihalf=False)
-                self.Yef_pulse(q=q_other, play=True)
+                self.Y_pulse(q=qa, play=True, pihalf=False)
+                self.Yef_pulse(q=qa, play=True)
+
+            elif init_state_other == '|2>|1>':
+                self.Y_pulse(q=qb, play=True)
+                self.Y_pulse(q=qa, ZZ_qubit=1, play=True)
+                self.Yef_pulse(q=qa, ZZ_qubit=1, play=True)
 
             elif init_state_other == '|2T>|0>': # no ge pulse (check thermal population)
-                self.Yef_pulse(q=q_other, play=True)
+                self.Yef_pulse(q=qa, play=True)
 
             elif init_state_other == '|1>|0+1>':
-                self.Y_pulse(q=q_other, play=True)
-                self.Y_pulse(q=1, ZZ_qubit=q_other, pihalf=True, play=True)
+                self.Y_pulse(q=qa, play=True)
+                self.Y_pulse(q=qb, ZZ_qubit=qa, pihalf=True, play=True)
 
             elif init_state_other == '|1>|1>':
-                self.Y_pulse(q=q_other, play=True)
-                self.Y_pulse(q=1, ZZ_qubit=q_other, play=True)
+                self.Y_pulse(q=qa, play=True)
+                self.Y_pulse(q=qb, ZZ_qubit=qa, play=True)
 
             elif init_state_other == '|0+1>|0>':
-                self.Y_pulse(q=q_other, play=True, pihalf=True) # -> 0+1
+                self.Y_pulse(q=qa, play=True, pihalf=True) # -> 0+1
 
             elif init_state_other == '|0+1>|1>':
-                self.Y_pulse(q=1, play=True) # -> 1
-                self.Y_pulse(q=q_other, ZZ_qubit=1, pihalf=True, play=True)
+                self.Y_pulse(q=qb, play=True) # -> 1
+                self.Y_pulse(q=qa, ZZ_qubit=qb, pihalf=True, play=True)
+            
+            elif init_state_other == '|testX>':
+                self.X_pulse(q=0, play=True)
+                self.Y_pulse(q=0, pihalf=True, neg=True, play=True)
+            elif init_state_other == '|testY>':
+                self.X_pulse(q=0, play=True)
+                self.X_pulse(q=0, pihalf=True, play=True)
+
 
             else:
                 assert False, f'Init state {init_state} not valid'
@@ -417,6 +441,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         # ================= #
         # Begin protocol v2
         # ================= #
+        # print('WARNING, INITIALIZING IN SOMETHING RANDOM')
+        # self.X_pulse(q=0, play=True, pihalf=True)
+        # self.X_pulse(q=0, play=True, pihalf=True)
+
         add_phase = False
         if 'add_phase' in self.cfg.expt: add_phase = self.cfg.expt.add_phase
         
@@ -429,6 +457,11 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             pi_half_swaps = self.cfg.expt.pi_half_swaps
             assert len(pi_half_swaps) == 2
 
+        if 'sync_between_swaps' not in self.cfg.expt:
+            self.cfg.expt.sync_between_swaps = False
+        if 'sync_between_efs' not in self.cfg.expt:
+            self.cfg.expt.sync_between_efs = True
+
         prev_pulse = 0
         for i_pulse, pulse_num in enumerate(play_pulses):
             # 1. apply Eg-Gf with qDrive=2: gegg -> ggfg [path 1]
@@ -438,8 +471,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
             # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
             if pulse_num == 2:
-                count_us = self.eegg_eggf(count_us, add_phase=add_phase, pihalf=pi_half_swaps[1], sync_after=False)
-                # print('DOING SYNC BETWEEN SWAPS')
+                count_us = self.eegg_eggf(count_us, add_phase=add_phase, pihalf=pi_half_swaps[1], sync_after=self.cfg.expt.sync_between_swaps)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
 
             # 3. apply ef pulse on Q2 (at this point guaranteed no excitation in Q1) [path 1]
@@ -451,9 +483,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
             # 4. apply ef pulse on Q3 (at this point guaranteed no excitation in Q1) [path 2]
             # This one should be run before 3 because the ZZ from q2 on q3 EF is very large, while the ZZ from q3 on q2 EF is quite small
+            # But actually q2 and q3 should never simultaneously be populated! So technically you should be able to just run the 2 ef pulses simultaneously
             if pulse_num == 4:
                 if prev_pulse == 1 or prev_pulse == 2: self.sync_all()
-                count_us = self.q3_ef(count_us, pihalf=False, ZZ_qubit=0, sync_after=True)
+                count_us = self.q3_ef(count_us, pihalf=False, ZZ_qubit=0, sync_after=self.cfg.expt.sync_between_efs)
                 if count_us < self.timestep_us: self.end_times_us.append(count_us)
                 # self.sync_all(5)
             
@@ -496,9 +529,9 @@ class QramProtocolExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='qram_protocol', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         qubits = self.cfg.expt.tomo_qubits
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -507,9 +540,9 @@ class QramProtocolExperiment(Experiment):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
                             if not(isinstance(value3, list)):
-                                value2.update({key3: [value3]*num_qubits_sample})                                
+                                value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
 
         timesteps = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
         print('timesteps', timesteps)
@@ -517,14 +550,25 @@ class QramProtocolExperiment(Experiment):
         data={"xpts":[], "avgi":[[],[],[],[]], "avgq":[[],[],[],[]], "avgi_err":[[],[],[],[]], "avgq_err":[[],[],[],[]], "amps":[[],[],[],[]], "phases":[[],[],[],[]]}
 
         self.meas_order = ['ZZ', 'ZX', 'ZY', 'XZ', 'XX', 'XY', 'YZ', 'YX', 'YY']
-        # print('WARNING, ONLY MEASURING 1 BASIS')
-        # self.meas_order = ['ZY']
         self.calib_order = ['gg', 'ge', 'eg', 'ee'] # should match with order of counts for each tomography measurement 
         self.tomo_qubits = self.cfg.expt.tomo_qubits
         if 'post_select' in self.cfg.expt and self.cfg.expt.post_select: data.update({'counts_tomo_ps0':[], 'counts_tomo_ps1':[],'counts_calib':[]})
         else: data.update({'counts_tomo':[], 'counts_calib':[]})
         if 'post_select' not in self.cfg.expt: self.cfg.expt.post_select = False
         if 'calib_apply_q1_pi2' not in self.cfg.expt: self.cfg.expt.calib_apply_q1_pi2 = False
+
+        self.readout_cool = False
+        if 'readout_cool' in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
+        if not self.readout_cool: self.cfg.expt.n_init_readout = 0
+
+        if 'n_init_readout' not in self.cfg.expt: self.cfg.expt.n_init_readout = 0
+        data[f'ishots_raw'] = np.zeros(shape=(len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+        data[f'qshots_raw'] = np.zeros(shape=(len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+
+        self.ncalib = len(self.calib_order) + (2*(self.num_qubits_sample - len(self.cfg.expt.tomo_qubits)) if self.readout_cool else 0)
+        data['calib_ishots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
+        data['calib_qshots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
 
         # ================= #
         # Get single shot calibration for qubits
@@ -537,12 +581,12 @@ class QramProtocolExperiment(Experiment):
             angles_q = self.cfg.expt.angles
             thresholds_q = self.cfg.expt.thresholds
             ge_avgs_q = self.cfg.expt.ge_avgs
-            for q in range(num_qubits_sample):
+            for q in range(self.num_qubits_sample):
                 if ge_avgs_q[q] is None:
                     ge_avgs_q[q] = np.zeros_like(ge_avgs_q[qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
             ge_avgs_q = np.array(ge_avgs_q)
             data['counts_calib'] = self.cfg.expt.counts_calib
-            print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
+            if progress: print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
 
         else:
             thresholds_q = [0]*4
@@ -555,7 +599,7 @@ class QramProtocolExperiment(Experiment):
 
             # Error mitigation measurements: prep in gg, ge, eg, ee to recalibrate measurement angle and measure confusion matrix
             calib_prog_dict = dict()
-            for prep_state in tqdm(self.calib_order):
+            for prep_state in tqdm(self.calib_order, disable=not progress):
                 # print(prep_state)
                 sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=sscfg.expt.calib_apply_q1_pi2)
                 err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
@@ -564,8 +608,8 @@ class QramProtocolExperiment(Experiment):
 
             g_prog = calib_prog_dict['gg']
             Ig, Qg = g_prog.get_shots(verbose=False)
-            threshold = [0]*num_qubits_sample
-            angle = [0]*num_qubits_sample
+            threshold = [0]*self.num_qubits_sample
+            angle = [0]*self.num_qubits_sample
 
             # Get readout angle + threshold for qubits
             for qi, q in enumerate(sscfg.expt.tomo_qubits):
@@ -575,56 +619,55 @@ class QramProtocolExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                 print(f'Qubit ({q})')
-                fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_q[q] = threshold[0]
                 ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                 angles_q[q] = angle
                 fids_q[q] = fid[0]
                 print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
-            
+
             # Process the shots taken for the confusion matrix with the calibration angles (for tomography)
-            for prep_state in self.calib_order:
+            for iprep, prep_state in enumerate(self.calib_order):
                 counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
                 data['counts_calib'].append(counts)
+                data[f'calib_ishots_raw'][iprep, :, :, :], data[f'calib_qshots_raw'][iprep, :, :, :] = calib_prog_dict[prep_state].get_multireadout_shots()
 
+            # Do the calibration for the remaining qubits in case you want to do post selection
+            if self.readout_cool or self.cfg.expt.expts > 1 or (self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits):
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = self.cfg.expt.singleshot_reps
+                ps_calib_prog_dict = dict()
+                iprep_temp = len(self.calib_order)
+                for q in range(self.num_qubits_sample):
+                    if q in self.cfg.expt.tomo_qubits: continue # already did these
+                    sscfg.expt.qubit = q
+                    for prep_state in tqdm(['g', 'e'], disable=not progress):
+                        # print(prep_state)
+                        sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                        err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                        err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                        ps_calib_prog_dict.update({prep_state:err_tomo})
 
-            if self.cfg.expt.expts > 1 or (self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits): # Do single shot for non-tomo qubits also
-                
-                sscfg.expt.tomo_qubits = []
-                for q in range(4):
-                    if q not in self.cfg.expt.tomo_qubits: sscfg.expt.tomo_qubits.append(q)
-                assert len(sscfg.expt.tomo_qubits) == 2
+                        # Save the full counts from the calibration experiments using the measured angles for all qubits in case you want to do post selection on the calibration
+                        data[f'calib_ishots_raw'][iprep_temp, :, :, :], data[f'calib_qshots_raw'][iprep_temp, :, :, :] = err_tomo.get_multireadout_shots()
+                        iprep_temp += 1
 
-                # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
-                calib_prog_dict = dict()
-                for prep_state in tqdm(self.calib_order):
-                    # print(prep_state)
-                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
-                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
-                    calib_prog_dict.update({prep_state:err_tomo})
+                    g_prog = ps_calib_prog_dict['g']
+                    Ig, Qg = g_prog.get_shots(verbose=False)
 
-                g_prog = calib_prog_dict['gg']
-                Ig, Qg = g_prog.get_shots(verbose=False)
-                threshold = [0]*num_qubits_sample
-                angle = [0]*num_qubits_sample
-
-                # Get readout angle + threshold for qubits
-                for qi, q in enumerate(sscfg.expt.tomo_qubits):
-                    calib_e_state = 'gg'
-                    calib_e_state = calib_e_state[:qi] + 'e' + calib_e_state[qi+1:]
-                    e_prog = calib_prog_dict[calib_e_state]
+                    # Get readout angle + threshold for qubit
+                    e_prog = ps_calib_prog_dict['e']
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                    print(f'Qubit  ({q})')
-                    fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                    print(f'Qubit ({q}) ge')
+                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                     thresholds_q[q] = threshold[0]
-                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     angles_q[q] = angle
-                    fids_q[q] = fid[0]
+                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
 
-            data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
+        data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
+
         print(f'thresholds={thresholds_q},')
         print(f'angles={angles_q},')
         print(f'ge_avgs={ge_avgs_q},')
@@ -644,8 +687,11 @@ class QramProtocolExperiment(Experiment):
 
             # Perform 2q state tomo only on last timestep
             if self.cfg.expt.tomo_2q and time_i == len(timesteps) - 1:
-                for basis in tqdm(self.meas_order):
+                for ibasis, basis in enumerate(tqdm(self.meas_order)):
+                    # print('WARNING, ONLY MEASURING 1 BASIS')
+                    # basis = 'ZX'
                     # print(basis)
+
                     cfg = AttrDict(deepcopy(self.cfg))
                     cfg.expt.basis = basis
                     tomo_prog = QramProtocolProgram(soccfg=self.soccfg, cfg=cfg)
@@ -663,6 +709,7 @@ class QramProtocolExperiment(Experiment):
                     else:
                         data['counts_tomo'].append(counts)
                         print(basis, counts)
+                    data[f'ishots_raw'][ibasis, :, :, :], data[f'qshots_raw'][ibasis, :, :, :] = tomo_prog.get_multireadout_shots()
                     self.pulse_dict.update({basis:tomo_prog.pulse_dict})
 
             else:
@@ -782,148 +829,6 @@ class QramProtocolExperiment(Experiment):
 
 # ===================================================================== #
 
-def multihist(data, check_qubit, qubits, check_states, play_pulses_list, g_states, e_states, theta=None, plot=True, verbose=True):
-    """
-    span: histogram limit is the mean +/- span
-    theta given and returned in deg
-    assume data is passed in form data['iqshots'] = [(idata, qdata)]*len(check_states), idata=[... *num_shots]*4
-    check_states: an array of strs of the init_state specifying each configuration to plot a histogram for
-    play_pulses_list: list of play_pulses corresponding to check_states, see code for play_pulses
-    g_states are indices to the check_states to categorize as "g" (the rest are "e")
-    """
-    numbins = 200
-    iqshots = data['iqshots']
-    if plot:
-        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(12, 8))
-        fig.suptitle(f'Readout on $|Q{qubits[0]}\\rangle |Q{qubits[1]}\\rangle$, check Q{check_qubit}')
-        fig.tight_layout()
-        # axs[0,0].set_xlabel('I [ADC levels]')
-        axs[0,0].set_ylabel('Q [ADC levels]')
-        axs[0,0].set_title('Unrotated')
-        axs[0,0].axis('equal')
-
-        # axs[0,1].set_xlabel('I [ADC levels]')
-        axs[0,1].axis('equal')
-
-        axs[1,0].set_ylabel('Counts')
-        axs[1,0].set_xlabel('I [ADC levels]')       
-
-        axs[1,1].set_xlabel('I [ADC levels]')
-
-        plt.subplots_adjust(hspace=0.25, wspace=0.15)        
-
-        Ig_tot = []
-        Qg_tot = []
-        Ie_tot = []
-        Qe_tot = []
-        for check_i, data_check in enumerate(iqshots):
-            I, Q = data_check
-            I = I[check_qubit]
-            Q = Q[check_qubit]
-            if check_i in g_states:
-                Ig_tot = np.concatenate((Ig_tot, I))
-                Qg_tot = np.concatenate((Qg_tot, Q))
-            elif check_i in e_states:
-                Ie_tot = np.concatenate((Ig_tot, I))
-                Qe_tot = np.concatenate((Qg_tot, Q))
-
-        """Compute the rotation angle"""
-        if theta is None:
-            xg, yg = np.median(Ig_tot), np.median(Qg_tot)
-            xe, ye = np.median(Ie_tot), np.median(Qe_tot)
-            theta = -np.arctan2((ye-yg), (xe-xg))
-        else: theta *= np.pi/180
-
-        Ig_tot_new = Ig_tot*np.cos(theta) - Qg_tot*np.sin(theta)
-        Qg_tot_new = Ig_tot*np.sin(theta) + Qg_tot*np.cos(theta) 
-        Ie_tot_new = Ie_tot*np.cos(theta) - Qe_tot*np.sin(theta)
-        Qe_tot_new = Ie_tot*np.sin(theta) + Qe_tot*np.cos(theta) 
-        I_tot_new = np.concatenate((Ie_tot_new, Ig_tot_new))
-        span = (np.max(I_tot_new) - np.min(I_tot_new))/2
-        midpoint = (np.max(I_tot_new) + np.min(I_tot_new))/2
-        xlims = [midpoint-span, midpoint+span]
-
-    n_tot_g = [0]*numbins
-    n_tot_e = [0]*numbins
-    for check_i, data_check in enumerate(iqshots):
-        check_state = check_states[check_i]
-        play_pulses = play_pulses_list[check_i]
-
-        I, Q = data_check
-        I = I[check_qubit]
-        Q = Q[check_qubit]
-
-        xmed, ymed = np.median(I), np.median(Q)
-
-        if verbose:
-            print(check_state, 'play_pulses', play_pulses, 'unrotated medians:')
-            print(f'I {xmed} +/- {np.std(I)} \t Q {ymed} +/- {np.std(Q)} \t Amp {np.abs(xmed+1j*ymed)}')
-
-        """Rotate the IQ data"""
-        I_new = I*np.cos(theta) - Q*np.sin(theta)
-        Q_new = I*np.sin(theta) + Q*np.cos(theta) 
-
-        """New means of each blob"""
-        xmed_new, ymed_new = np.median(I_new), np.median(Q_new)
-        if verbose:
-            print(f'Rotated (theta={theta}):')
-            print(f'I {xmed_new} +/- {np.std(I_new)} \t Q {ymed_new} +/- {np.std(Q_new)} \t Amp {np.abs(xmed_new+1j*ymed_new)}')
-
-        if plot:
-            label = f'{check_state}'
-            if len(play_pulses) > 1 or play_pulses[0] != 0:
-                label += f' play {play_pulses}'
-            axs[0,0].scatter(I, Q, label=label, color=default_colors[check_i], marker='.', edgecolor='None', alpha=0.3)
-            axs[0,0].plot([xmed], [ymed], color='k', linestyle=':', marker='o', markerfacecolor=default_colors[check_i], markersize=5)
-
-            axs[0,1].scatter(I_new, Q_new, label=label, color=default_colors[check_i], marker='.', edgecolor='None', alpha=0.3)
-            axs[0,1].plot([xmed_new], [ymed_new], color='k', linestyle=':', marker='o', markerfacecolor=default_colors[check_i], markersize=5)
-
-            if check_i in g_states or check_i in e_states: linestyle = linestyle_cycle[0]
-            else: linestyle = linestyle_cycle[1]
-
-            n, bins, p = axs[1,0].hist(I_new, bins=numbins, range=xlims, color=default_colors[check_i], label=label, histtype='step', linestyle=linestyle)
-
-            # axs[1,1].plot(bins[:-1], np.cumsum(n)/n.sum(), label=label, color=default_colors[check_i], linestyle=linestyle)
-            axs[1,1].plot(bins[:-1], np.cumsum(n)/n.sum(), color=default_colors[check_i], linestyle=linestyle)
-
-        else: # just getting the n, bins for data processing
-            n, bins = np.histogram(I_new, bins=numbins, range=xlims)
-
-        if check_i in g_states: n_tot_g += n
-        elif check_i in e_states: n_tot_e += n
-
-    """Compute the fidelity using overlap of the histograms"""
-    fids = []
-    thresholds = []
-    contrast = np.abs(np.cumsum(n_tot_g)/n_tot_g.sum() - np.cumsum(n_tot_e)/n_tot_e.sum())
-    tind=contrast.argmax()
-    thresholds.append(bins[tind])
-    fids.append(contrast[tind])
-
-    if plot: 
-        axs[0,1].set_title(f'Rotated ($\\theta={theta*180/np.pi:.5}^\\circ$)')
-        
-        axs[1,0].axvline(thresholds[0], color='0.2', linestyle='--')
-        axs[1,0].set_title(f'Fidelity g-e: {100*fids[0]:.3}%')
-
-        axs[1,1].set_title('Cumulative Sum')
-        axs[1,1].plot(bins[:-1], np.cumsum(n_tot_g)/n_tot_g.sum(), 'b', label='g')
-        axs[1,1].plot(bins[:-1], np.cumsum(n_tot_e)/n_tot_e.sum(), 'r', label='e')
-        axs[1,1].axvline(thresholds[0], color='0.2', linestyle='--')
-
-        prop = {'size': 8}
-        axs[0,0].legend(loc='upper right', prop=prop)
-        axs[0,1].legend(loc='upper right', prop=prop)
-        axs[1,0].legend(loc='upper left', prop=prop)
-        axs[1,1].legend(prop=prop)
-
-        plt.show()
-
-    return fids, thresholds, theta*180/np.pi # fids: ge, gf, ef
-
-# ------------------------------------------------------- #
-
 class QramProtocolSingleShotExperiment(Experiment):
     """
     Basically just a histogram experiment with the qram protocol code already built in
@@ -937,9 +842,9 @@ class QramProtocolSingleShotExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='QramSingleShotHist', config_file=None, progress=None):
         super().__init__(soccfg=soccfg, path=path, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -947,9 +852,9 @@ class QramProtocolSingleShotExperiment(Experiment):
                         if isinstance(value2, dict):
                             for key3, value3 in value2.items():
                                 if not(isinstance(value3, list)):
-                                    value2.update({key3: [value3]*num_qubits_sample})                                
+                                    value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
         self.cfg.expt.tomo_qubits = [0, 1, 2, 3] # this is just to make the super class happy
 
         check_states=self.cfg.expt.check_states
@@ -970,8 +875,8 @@ class QramProtocolSingleShotExperiment(Experiment):
             cfg_i.expt.init_state = check_state
             cfg_i.expt.play_pulses = play_pulses
             protocol_prog = QramProtocolProgram(soccfg=self.soccfg, cfg=cfg_i)
-            avgi, avgq = protocol_prog.acquire(soc=self.im[self.cfg.aliases.soc], load_pulses=True, progress=True)
-            idata, qdata = protocol_prog.get_shots(angle=None, avg_shots=False, verbose=False, return_err=False)
+            avgi, avgq = protocol_prog.acquire(soc=self.im[self.cfg.aliases.soc], load_pulses=True, progress=progress)
+            idata, qdata = protocol_prog.get_shots(angle=None, avg_shots=False, verbose=False)
             # each idata, qdata has 4 readouts, each with the number of shots
             data['iqshots'].append((idata, qdata))
 
@@ -982,15 +887,32 @@ class QramProtocolSingleShotExperiment(Experiment):
 
         return data
 
-    def analyze(self, data=None, check_qubit=None, qubits=None, theta=None, check_states=None, g_states=None, verbose=True, **kwargs):
+    def analyze(self, data=None, check_qubit=None, qubits=None, theta=None, check_states=None, play_pulses_list=None, g_states=None, e_states=None, verbose=True, **kwargs):
         if data is None:
             data=self.data
         
-        fids, thresholds, angle = multihist(data=data, check_qubit=check_qubit, qubits=qubits, check_states=check_states, g_states=g_states, theta=theta, plot=False, verbose=verbose)
-        data['fids'] = fids
-        data['angle'] = angle
-        data['thresholds'] = thresholds
-        
+        # fids, thresholds, angle = multihist(data=data, check_qubit=check_qubit, qubits=qubits, check_states=check_states, g_states=g_states, e_states=e_states, theta=theta, plot=False, verbose=verbose)
+        # data['fids'] = fids
+        # data['angle'] = angle
+        # data['thresholds'] = thresholds
+
+
+        print('argwhere', check_states.index('Q2Q1_|2>|1>'))
+
+        fids, thresholds, angle = multihist(data=data, check_qubit=1, qubits=qubits, check_states=check_states, play_pulses_list=play_pulses_list, g_states=[0], e_states=[1], theta=theta, plot=False, verbose=verbose)
+        idata, qdata = data['iqshots'][check_states.index('Q2Q1_|2>|1>')]
+        idata_rot = idata * np.cos(np.pi/180*angle) - qdata*np.sin(np.pi/180*angle)
+        shots1 = np.array([np.heaviside(idata_rot - thresholds[0], 0)])
+
+        fids, thresholds, angle = multihist(data=data, check_qubit=2, qubits=qubits, check_states=check_states, play_pulses_list=play_pulses_list, g_states=[0], e_states=[2], theta=theta, plot=False, verbose=verbose)
+        idata, qdata = data['iqshots'][check_states.index('Q2Q1_|2>|1>')]
+        idata_rot = idata * np.cos(np.pi/180*angle) - qdata*np.sin(np.pi/180*angle)
+        shots2 = np.array([np.heaviside(idata_rot - thresholds[0], 0)])
+
+        tomo_analysis = TomoAnalysis(nb_qubits=2)
+        counts = tomo_analysis.sort_counts([shots1, shots2])
+        print('counts')
+        print(counts)
         return data
 
     def display(self, data=None, check_qubit=None, qubits=None, theta=None, check_states=None, play_pulses_list=None, g_states=None, e_states=None, verbose=True, **kwargs):
@@ -1001,8 +923,8 @@ class QramProtocolSingleShotExperiment(Experiment):
         # if 0 not in qubits:
         #     for i in range(len(check_states)):
         #         check_states[i] = check_states[i][5:]
-         
-        fids, thresholds, angle = multihist(data=data, check_qubit=check_qubit, qubits=qubits, check_states=check_states, play_pulses_list=play_pulses_list, g_states=g_states, e_states=e_states, theta=theta, plot=True, verbose=verbose)
+
+        fids, thresholds, angle = multihist(data=data, check_qubit=check_qubit, qubits=qubits, check_states=check_states, play_pulses_list=play_pulses_list, g_states=g_states, e_states=e_states, theta=theta, plot=True, verbose=verbose, export=True)
             
         print(f'average ge fidelity (%): {100*fids[0]}')
         print(f'rotation angle (deg): {angle}')
@@ -1057,7 +979,7 @@ class QramVariantsT1Experiment(Experiment):
 
     def acquire(self, progress=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items() :
                 if isinstance(value, dict):
@@ -1065,9 +987,9 @@ class QramVariantsT1Experiment(Experiment):
                         if isinstance(value2, dict):
                             for key3, value3 in value2.items():
                                 if not(isinstance(value3, list)):
-                                    value2.update({key3: [value3]*num_qubits_sample})                                
+                                    value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
         self.cfg.expt.tomo_qubits = [0, 1, 2, 3] # this is just to make the super class happy
 
         adc_chs = self.cfg.hw.soc.adcs.readout.ch
@@ -1180,9 +1102,9 @@ class QramProtocol1QTomoExperiment(Experiment):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
         self.cfg.all_qubits = [0, 1, 2, 3]
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         self.qubit = self.cfg.expt.qubit
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -1191,9 +1113,9 @@ class QramProtocol1QTomoExperiment(Experiment):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
                             if not(isinstance(value3, list)):
-                                value2.update({key3: [value3]*num_qubits_sample})                                
+                                value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
         
         if 'meas_order' not in self.cfg.expt or self.cfg.expt.meas_order is None:
             self.meas_order = ['Z', 'X', 'Y']
@@ -1201,6 +1123,19 @@ class QramProtocol1QTomoExperiment(Experiment):
         self.calib_order = ['g', 'e'] # should match with order of counts for each tomography measurement 
         data={'counts_tomo':[], 'counts_calib':[]}
         self.pulse_dict = dict()
+
+        if 'n_init_readout' not in self.cfg.expt: self.cfg.expt.n_init_readout = 0
+        data[f'ishots_raw'] = np.zeros(shape=(len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+        data[f'qshots_raw'] = np.zeros(shape=(len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+
+        self.readout_cool = False
+        if 'readout_cool' in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
+        if not self.readout_cool: self.cfg.expt.n_init_readout = 0
+
+        self.ncalib = len(self.calib_order) + (2*(self.num_qubits_sample - 1) if self.readout_cool else 0)
+        data['calib_ishots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
+        data['calib_qshots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
 
         # ================= #
         # Get single shot calibration for qubits
@@ -1210,17 +1145,17 @@ class QramProtocol1QTomoExperiment(Experiment):
             angles_q = self.cfg.expt.angles
             thresholds_q = self.cfg.expt.thresholds
             ge_avgs_q = self.cfg.expt.ge_avgs
-            for q in range(num_qubits_sample):
+            for q in range(self.num_qubits_sample):
                 if ge_avgs_q[q] is None:
                     ge_avgs_q[q] = np.zeros_like(ge_avgs_q[self.cfg.expt.tomo_qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
             ge_avgs_q = np.array(ge_avgs_q)
             data['counts_calib'] = self.cfg.expt.counts_calib
-            print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
+            if progress: print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
 
         else:
             # Error mitigation measurements: prep in g, e to recalibrate measurement angle and measure confusion matrix
             calib_prog_dict = dict()
-            for prep_state in tqdm(self.calib_order):
+            for prep_state in tqdm(self.calib_order, disable=not progress):
                 # print(prep_state)
                 cfg = AttrDict(deepcopy(self.cfg))
                 cfg.expt.reps = self.cfg.expt.singleshot_reps
@@ -1231,28 +1166,66 @@ class QramProtocol1QTomoExperiment(Experiment):
 
             g_prog = calib_prog_dict['g']
             Ig, Qg = g_prog.get_shots(verbose=False)
-            thresholds_q = [0]*num_qubits_sample
-            angles_q = [0]*num_qubits_sample
-            ge_avgs_q = [[0]*4]*num_qubits_sample
+            thresholds_q = [0]*self.num_qubits_sample
+            angles_q = [0]*self.num_qubits_sample
+            ge_avgs_q = [[0]*4]*self.num_qubits_sample
 
             # Get readout angle + threshold for qubit
             e_prog = calib_prog_dict['e']
             Ie, Qe = e_prog.get_shots(verbose=False)
             shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=Ie[self.qubit], Qe=Qe[self.qubit])
-            fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+            fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
             thresholds_q[self.qubit] = threshold[0]
             angles_q[self.qubit] = angle
             ge_avgs_q[self.qubit] = [np.average(Ig[self.qubit]), np.average(Qg[self.qubit]), np.average(Ie[self.qubit]), np.average(Qe[self.qubit])]
+
+            # Process the shots taken for the confusion matrix with the calibration angles
+            for iprep, prep_state in enumerate(self.calib_order):
+                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                data['counts_calib'].append(counts)
+                data[f'calib_ishots_raw'][iprep, :, :, :], data[f'calib_qshots_raw'][iprep, :, :, :] = calib_prog_dict[prep_state].get_multireadout_shots()
+
+            # Do the calibration for the remaining qubits in case you want to do post selection
+            if self.readout_cool:
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = self.cfg.expt.singleshot_reps
+                ps_calib_prog_dict = dict()
+                iprep_temp = len(self.calib_order)
+                for q in range(self.num_qubits_sample):
+                    if q == self.cfg.expt.qubit: continue # already did these
+                    sscfg.expt.qubit = q
+                    for prep_state in tqdm(['g', 'e'], disable=not progress):
+                        # print(prep_state)
+                        sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                        err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                        err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                        ps_calib_prog_dict.update({prep_state:err_tomo})
+
+                        # Save the full counts from the calibration experiments using the measured angles for all qubits in case you want to do post selection on the calibration
+                        data[f'calib_ishots_raw'][iprep_temp, :, :, :], data[f'calib_qshots_raw'][iprep_temp, :, :, :] = err_tomo.get_multireadout_shots()
+                        iprep_temp += 1
+
+                    g_prog = ps_calib_prog_dict['g']
+                    Ig, Qg = g_prog.get_shots(verbose=False)
+
+                    # Get readout angle + threshold for qubit
+                    e_prog = ps_calib_prog_dict['e']
+                    Ie, Qe = e_prog.get_shots(verbose=False)
+                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                    print(f'Qubit ({q}) ge')
+                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    thresholds_q[q] = threshold[0]
+                    angles_q[q] = angle
+                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+
+            data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
 
             if progress:
                 print(f'thresholds={thresholds_q},')
                 print(f'angles={angles_q},')
                 print(f'ge_avgs={ge_avgs_q}',',')
 
-            # Process the shots taken for the confusion matrix with the calibration angles
-            for prep_state in self.calib_order:
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
-                data['counts_calib'].append(counts)
             if progress: print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
         data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
@@ -1262,9 +1235,13 @@ class QramProtocol1QTomoExperiment(Experiment):
         # ================= #
 
         # Tomography measurements
-        for basis in tqdm(self.meas_order):
+        for ibasis, basis in enumerate(tqdm(self.meas_order, disable=not progress)):
             # print(basis)
             cfg = AttrDict(deepcopy(self.cfg))
+            # print('WARNING CHANGING PI PULSE FREQUENCY')
+            # cfg.device.qubit.f_ge[0] = cfg.device.qubit.f_ge[0] + 5.3
+            # print(cfg.device.qubit.f_ge)
+
             cfg.expt.basis = basis
             cfg.expt.timestep = np.inf
             tomo = QramProtocol1QTomoProgram(soccfg=self.soccfg, cfg=cfg)
@@ -1272,6 +1249,7 @@ class QramProtocol1QTomoExperiment(Experiment):
             tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             counts = tomo.collect_counts(angle=angles_q, threshold=thresholds_q)
             data['counts_tomo'].append(counts)
+            data[f'ishots_raw'][ibasis, :, :, :], data[f'qshots_raw'][ibasis, :, :, :] = tomo.get_multireadout_shots()
             self.pulse_dict.update({basis:tomo.pulse_dict})
 
         self.data=data
@@ -1314,9 +1292,9 @@ class QramProtocol3QTomoExperiment(Experiment):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
         self.cfg.all_qubits = [0, 1, 2, 3]
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False, debug=False):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         qubits = self.cfg.expt.tomo_qubits
         qA, qB, qC = qubits
 
@@ -1326,9 +1304,9 @@ class QramProtocol3QTomoExperiment(Experiment):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
                             if not(isinstance(value3, list)):
-                                value2.update({key3: [value3]*num_qubits_sample})                                
+                                value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
         
         self.meas_order = make_3q_meas_order()
         # self.meas_order = ['XXY']
@@ -1348,6 +1326,18 @@ class QramProtocol3QTomoExperiment(Experiment):
         if self.cfg.expt.tomo_3q: data.update({'counts_tomo':[]})
         self.pulse_dict = dict()
 
+        self.readout_cool = False
+        if 'readout_cool' in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
+        if not self.readout_cool: self.cfg.expt.n_init_readout = 0
+
+        if 'n_init_readout' not in self.cfg.expt: self.cfg.expt.n_init_readout = 0
+        data[f'ishots_raw'] = np.zeros(shape=(len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+        data[f'qshots_raw'] = np.zeros(shape=(len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+
+        self.ncalib = len(self.calib_order) + (2*(self.num_qubits_sample - len(self.cfg.expt.tomo_qubits)) if self.readout_cool else 0)
+        data['calib_ishots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
+        data['calib_qshots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
 
         # ================= #
         # Get single shot calibration for qubits
@@ -1359,12 +1349,12 @@ class QramProtocol3QTomoExperiment(Experiment):
             thresholds_q = self.cfg.expt.thresholds
             ge_avgs_q = self.cfg.expt.ge_avgs
             q_not_in_tomo = 1
-            for q in range(num_qubits_sample):
+            for q in range(self.num_qubits_sample):
                 if ge_avgs_q[q] is None:
                     ge_avgs_q[q] = np.zeros_like(ge_avgs_q[qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
             ge_avgs_q = np.array(ge_avgs_q)
             data['counts_calib'] = self.cfg.expt.counts_calib
-            print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
+            if progress: print('Re-using provided angles, thresholds, ge_avgs, counts_calib')
 
         else:
             # Initialize Q1 in e for calibration matrix
@@ -1372,7 +1362,7 @@ class QramProtocol3QTomoExperiment(Experiment):
             if 'setup_q1_e' in self.cfg.expt: setup_q1_e = self.cfg.expt.setup_q1_e
 
             calib_prog_dict = dict()
-            for prep_state in tqdm(self.calib_order):
+            for prep_state in tqdm(self.calib_order, disable=not progress):
                 # print(prep_state)
                 cfg = AttrDict(deepcopy(self.cfg))
                 cfg.expt.reps = self.cfg.expt.singleshot_reps
@@ -1383,9 +1373,9 @@ class QramProtocol3QTomoExperiment(Experiment):
 
             g_prog = calib_prog_dict['ggg']
             Ig, Qg = g_prog.get_shots(verbose=False)
-            thresholds_q = [0]*num_qubits_sample
-            angles_q = [0]*num_qubits_sample
-            ge_avgs_q = [[0]*4]*num_qubits_sample
+            thresholds_q = [0]*self.num_qubits_sample
+            angles_q = [0]*self.num_qubits_sample
+            ge_avgs_q = [[0]*4]*self.num_qubits_sample
 
             for iq, q in enumerate(qubits):
                 state = 'ggg'
@@ -1394,20 +1384,55 @@ class QramProtocol3QTomoExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                 print(f'Qubit  ({q})')
-                fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_q[q] = threshold[0]
                 angles_q[q] = angle
                 ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
-                print('fidelity (%)', fid[0]*100)
+                print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
+
+            # Process the shots taken for the confusion matrix with the calibration angles
+            for iprep, prep_state in enumerate(self.calib_order):
+                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                data['counts_calib'].append(counts)
+                data[f'calib_ishots_raw'][iprep, :, :, :], data[f'calib_qshots_raw'][iprep, :, :, :] = calib_prog_dict[prep_state].get_multireadout_shots()
+
+            # Do the calibration for the remaining qubits in case you want to do post selection
+            if self.readout_cool or self.cfg.expt.expts > 1 or (self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits):
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = self.cfg.expt.singleshot_reps
+                ps_calib_prog_dict = dict()
+                iprep_temp = len(self.calib_order)
+                for q in range(self.num_qubits_sample):
+                    if q in self.cfg.expt.tomo_qubits: continue # already did these
+                    sscfg.expt.qubit = q
+                    for prep_state in tqdm(['g', 'e'], disable=not progress):
+                        # print(prep_state)
+                        sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                        err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                        err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                        ps_calib_prog_dict.update({prep_state:err_tomo})
+
+                        # Save the full counts from the calibration experiments using the measured angles for all qubits in case you want to do post selection on the calibration
+                        data[f'calib_ishots_raw'][iprep_temp, :, :, :], data[f'calib_qshots_raw'][iprep_temp, :, :, :] = err_tomo.get_multireadout_shots()
+                        iprep_temp += 1
+
+                    g_prog = ps_calib_prog_dict['g']
+                    Ig, Qg = g_prog.get_shots(verbose=False)
+
+                    # Get readout angle + threshold for qubit
+                    e_prog = ps_calib_prog_dict['e']
+                    Ie, Qe = e_prog.get_shots(verbose=False)
+                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                    print(f'Qubit ({q}) ge')
+                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    thresholds_q[q] = threshold[0]
+                    angles_q[q] = angle
+                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
 
             print(f'thresholds={thresholds_q},')
             print(f'angles={angles_q},')
             print(f'ge_avgs={ge_avgs_q}',',')
-
-            # Process the shots taken for the confusion matrix with the calibration angles
-            for prep_state in self.calib_order:
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
-                data['counts_calib'].append(counts)
             print(f"counts_calib={np.array(data['counts_calib']).tolist()}")
 
         data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
@@ -1485,7 +1510,7 @@ class QramProtocol3QTomoExperiment(Experiment):
             # -------------- #
             if self.cfg.expt.tomo_3q and time_i == len(timesteps) - 1:
                 # Tomography measurements
-                for basis in tqdm(self.meas_order):
+                for ibasis, basis in enumerate(tqdm(self.meas_order, disable=not progress)):
                     # print(basis)
                     cfg = AttrDict(deepcopy(self.cfg))
                     cfg.expt.basis = basis
@@ -1514,6 +1539,7 @@ class QramProtocol3QTomoExperiment(Experiment):
 
                     counts = tomo.collect_counts(angle=angles_q, threshold=thresholds_q)
                     data['counts_tomo'].append(counts)
+                    data[f'ishots_raw'][ibasis, :, :, :], data[f'qshots_raw'][ibasis, :, :, :] = tomo.get_multireadout_shots()
                     self.pulse_dict.update({basis:tomo.pulse_dict})
 
         if self.cfg.expt.expts > 1:
@@ -1668,9 +1694,9 @@ class QramProtocolExperiment4Q(Experiment):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
         self.cfg.all_qubits = [0, 1, 2, 3]
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         qubits = [0, 1, 2, 3]
         # qubits = self.cfg.expt.tomo_qubits
         # qA, qB, qC, qD = qubits
@@ -1682,9 +1708,9 @@ class QramProtocolExperiment4Q(Experiment):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
                             if not(isinstance(value3, list)):
-                                value2.update({key3: [value3]*num_qubits_sample})                                
+                                value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
 
         timesteps = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
         print('timesteps', timesteps)
@@ -1713,7 +1739,7 @@ class QramProtocolExperiment4Q(Experiment):
             thresholds_q = self.cfg.expt.thresholds
             ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
             data['counts_calib'] = self.cfg.expt.counts_calib
-            print('Re-using provided angles, thresholds, ge_avgs')
+            if progress: print('Re-using provided angles, thresholds, ge_avgs')
         else:
             calib_prog_dict = dict()
             for prep_state in tqdm(self.calib_order):
@@ -1727,9 +1753,9 @@ class QramProtocolExperiment4Q(Experiment):
 
             g_prog = calib_prog_dict['gggg']
             Ig, Qg = g_prog.get_shots(verbose=False)
-            thresholds_q = [0]*num_qubits_sample
-            angles_q = [0]*num_qubits_sample
-            ge_avgs_q = [0]*num_qubits_sample
+            thresholds_q = [0]*self.num_qubits_sample
+            angles_q = [0]*self.num_qubits_sample
+            ge_avgs_q = [0]*self.num_qubits_sample
             for iq, q in enumerate(qubits):
                 state = 'gggg'
                 state = state[:iq] + 'e' + state[iq+1:]
@@ -1737,7 +1763,7 @@ class QramProtocolExperiment4Q(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                 print(f'Qubit  ({q})')
-                fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_q[q] = threshold[0]
                 angles_q[q] = angle
                 ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]

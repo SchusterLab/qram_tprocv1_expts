@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 import experiments.fitting as fitter
 from experiments.single_qubit.single_shot import hist
-from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, AbstractStateTomo2QProgram
+from experiments.two_qubit.twoQ_state_tomography import ErrorMitigationStateTomo2QProgram, AbstractStateTomo2QProgram, ErrorMitigationStateTomo1QProgram
 
 # ====================================================== #
 
@@ -491,7 +491,7 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
                     subcfg.update({key: [value]*num_qubits_sample})
 
         assert len(self.cfg.expt.IQ_qubits) == 2, 'not implemented loops for more than 2 qubits'
-        data={"gainpts":[], "avgi":[[], []], "avgq":[[], []], "amps":[[], []], "phases":[[], []], 'counts_calib':[], 'counts_raw':[]}
+        data={"avgi":[[], []], "avgq":[[], []], "amps":[[], []], "phases":[[], []], 'counts_calib':[], 'counts_raw':[]}
 
         # ================= #
         # Get single shot calibration for 2 qubits
@@ -570,6 +570,7 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
         gainpts = []
         for q in self.cfg.expt.IQ_qubits:
             gainpts.append(self.cfg.expt.starts[q] + self.cfg.expt.steps[q]*np.arange(self.cfg.expt.expts[q]))
+            data[f'gainpts{q}'] = gainpts[q]
 
         self.cfg.expt.start = self.cfg.expt.starts[0]
         self.cfg.expt.step = self.cfg.expt.steps[0]
@@ -590,8 +591,6 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
                 data['amps'][q].append(np.abs(avgi[q] + 1j*avgq[q]))
                 data['phases'][q].append(np.angle(avgi[q] + 1j*avgq[q])) # Calculating the phase        
         
-        data['gainpts'] = gainpts
-
         for k, a in data.items():
             data[k] = np.array(a)
         self.data=data
@@ -602,11 +601,11 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
             data=self.data
         if not fit: return
 
-        if gain0_range is None: gain0_range = [np.min(data['gainpts'][0]), np.max(data['gainpts'][0])]
-        if gain1_range is None: gain1_range = [np.min(data['gainpts'][1]), np.max(data['gainpts'][1])]
+        if gain0_range is None: gain0_range = [np.min(data['gainpts0']), np.max(data['gainpts0'])]
+        if gain1_range is None: gain1_range = [np.min(data['gainpts1']), np.max(data['gainpts1'])]
 
-        gain0s = data['gainpts'][0]
-        gain1s = data['gainpts'][1]
+        gain0s = data['gainpts0']
+        gain1s = data['gainpts1']
         gain0_range_indices = [np.argmin(np.abs(gain0s-gain0_range[0])), np.argmin(np.abs(gain0s-gain0_range[1]))]
         gain1_range_indices = [np.argmin(np.abs(gain1s-gain1_range[0])), np.argmin(np.abs(gain1s-gain1_range[1]))]
         # print(gain0_range_indices, gain1_range_indices)
@@ -624,8 +623,8 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
         if data is None:
             data=self.data 
         
-        x_sweep = data['gainpts'][0]
-        y_sweep = data['gainpts'][1]
+        x_sweep = data['gainpts0']
+        y_sweep = data['gainpts1']
         
         for q in self.cfg.expt.IQ_qubits:
             avgi = data['avgi'][q]
@@ -650,8 +649,8 @@ class AmplitudeRabiOptimalCtrlChevronExperiment(Experiment):
                 print(f'Q{q} popln at gain0 {plot_gain0}, gain1 {plot_gain1}:', popln)
             else:
                 if fit:
-                    plot_gain0 = data['gainpts'][0][data['best_gain0']]
-                    plot_gain1 = data['gainpts'][0][data['best_gain1']]
+                    plot_gain0 = data['gainpts0'][data['best_gain0']]
+                    plot_gain1 = data['gainpts1'][data['best_gain1']]
                     plt.axvline(plot_gain0, color='r')
                     plt.axhline(plot_gain1, color='r')
                     popln = avgi[data['best_gain1'], data['best_gain0']]
@@ -723,9 +722,9 @@ class OptimalCtrlTomo2QExperiment(Experiment):
     def __init__(self, soccfg=None, path='', prefix='OptimalControl2QTomo', config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
 
-    def acquire(self, progress=False):
+    def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
-        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         qA, qB = self.cfg.expt.tomo_qubits
 
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
@@ -734,20 +733,34 @@ class OptimalCtrlTomo2QExperiment(Experiment):
                     for key2, value2 in value.items():
                         for key3, value3 in value2.items():
                             if not(isinstance(value3, list)):
-                                value2.update({key3: [value3]*num_qubits_sample})                                
+                                value2.update({key3: [value3]*self.num_qubits_sample})                                
                 elif not(isinstance(value, list)):
-                    subcfg.update({key: [value]*num_qubits_sample})
+                    subcfg.update({key: [value]*self.num_qubits_sample})
 
         assert len(self.cfg.expt.IQ_qubits) == 2, 'only implemented loops for IQ on 2 qubits'
         
         self.meas_order = ['ZZ', 'ZX', 'ZY', 'XZ', 'XX', 'XY', 'YZ', 'YX', 'YY']
         self.calib_order = ['gg', 'ge', 'eg', 'ee'] # should match with order of counts for each tomography measurement 
-        data={'counts_tomo_gains':np.zeros(shape=(self.cfg.expt.expts[0], self.cfg.expt.expts[1], len(self.meas_order), len(self.calib_order))), 'counts_calib':[], "gainpts":[],}
+        data={'counts_tomo_gains':np.zeros(shape=(self.cfg.expt.expts[0], self.cfg.expt.expts[1], len(self.meas_order), len(self.calib_order))), 'counts_calib':[]}
         gainpts = []
         for q in self.cfg.expt.IQ_qubits:
             gainpts_q = self.cfg.expt.starts[q] + self.cfg.expt.steps[q]*np.arange(self.cfg.expt.expts[q])
             gainpts.append(gainpts_q)
+            data[f'gainpts{q}'] = gainpts_q
             print(f'gainpts Q{q}', gainpts_q)
+        
+        self.readout_cool = False
+        if 'readout_cool' in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
+        if not self.readout_cool: self.cfg.expt.n_init_readout = 0
+
+        if 'n_init_readout' not in self.cfg.expt: self.cfg.expt.n_init_readout = 0
+        data[f'ishots_raw'] = np.zeros(shape=(len(gainpts[0]), len(gainpts[1]), len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+        data[f'qshots_raw'] = np.zeros(shape=(len(gainpts[0]), len(gainpts[1]), len(self.meas_order), self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.reps)) # raw data tomo experiments
+
+        self.ncalib = len(self.calib_order) + (2*(self.num_qubits_sample - len(self.cfg.expt.tomo_qubits)) if self.readout_cool else 0)
+        data['calib_ishots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
+        data['calib_qshots_raw'] = np.zeros(shape=(self.ncalib, self.num_qubits_sample, self.cfg.expt.n_init_readout+1, self.cfg.expt.singleshot_reps)) # raw rotated g data for the calibration histograms for each of the measure experiments
         
         # ================= #
         # Get single shot calibration for qubits
@@ -759,7 +772,7 @@ class OptimalCtrlTomo2QExperiment(Experiment):
             angles_q = self.cfg.expt.angles
             thresholds_q = self.cfg.expt.thresholds
             ge_avgs_q = self.cfg.expt.ge_avgs
-            for q in range(num_qubits_sample):
+            for q in range(self.num_qubits_sample):
                 if ge_avgs_q[q] is None:
                     ge_avgs_q[q] = np.zeros_like(ge_avgs_q[self.cfg.expt.tomo_qubits[0]]) # just get the shape of the arrays correct by picking the old ge_avgs_q of a q that was definitely measured
             ge_avgs_q = np.array(ge_avgs_q)
@@ -786,8 +799,8 @@ class OptimalCtrlTomo2QExperiment(Experiment):
 
             g_prog = calib_prog_dict['gg']
             Ig, Qg = g_prog.get_shots(verbose=False)
-            threshold = [0]*num_qubits_sample
-            angle = [0]*num_qubits_sample
+            threshold = [0]*self.num_qubits_sample
+            angle = [0]*self.num_qubits_sample
 
             # Get readout angle + threshold for qubits
             for qi, q in enumerate(sscfg.expt.tomo_qubits):
@@ -797,7 +810,7 @@ class OptimalCtrlTomo2QExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                 print(f'Qubit ({q})')
-                fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_q[q] = threshold[0]
                 ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                 angles_q[q] = angle
@@ -805,9 +818,44 @@ class OptimalCtrlTomo2QExperiment(Experiment):
                 print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
             
             # Process the shots taken for the confusion matrix with the calibration angles (for tomography)
-            for prep_state in self.calib_order:
+            for iprep, prep_state in enumerate(self.calib_order):
                 counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
                 data['counts_calib'].append(counts)
+                data[f'calib_ishots_raw'][iprep, :, :, :], data[f'calib_qshots_raw'][iprep, :, :, :] = calib_prog_dict[prep_state].get_multireadout_shots()
+
+            # Do the calibration for the remaining qubits in case you want to do post selection
+            if self.readout_cool or self.cfg.expt.expts > 1 or (self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits):
+                sscfg = AttrDict(deepcopy(self.cfg))
+                sscfg.expt.reps = self.cfg.expt.singleshot_reps
+                ps_calib_prog_dict = dict()
+                iprep_temp = len(self.calib_order)
+                for q in range(self.num_qubits_sample):
+                    if q in self.cfg.expt.tomo_qubits: continue # already did these
+                    sscfg.expt.qubit = q
+                    for prep_state in tqdm(['g', 'e'], disable=not progress):
+                        # print(prep_state)
+                        sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
+                        err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=sscfg)
+                        err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+                        ps_calib_prog_dict.update({prep_state:err_tomo})
+
+                        # Save the full counts from the calibration experiments using the measured angles for all qubits in case you want to do post selection on the calibration
+                        data[f'calib_ishots_raw'][iprep_temp, :, :, :], data[f'calib_qshots_raw'][iprep_temp, :, :, :] = err_tomo.get_multireadout_shots()
+                        iprep_temp += 1
+
+                    g_prog = ps_calib_prog_dict['g']
+                    Ig, Qg = g_prog.get_shots(verbose=False)
+
+                    # Get readout angle + threshold for qubit
+                    e_prog = ps_calib_prog_dict['e']
+                    Ie, Qe = e_prog.get_shots(verbose=False)
+                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                    print(f'Qubit ({q}) ge')
+                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    thresholds_q[q] = threshold[0]
+                    angles_q[q] = angle
+                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    print(f'ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}')
 
             data.update(dict(thresholds=thresholds_q, angles=angles_q, ge_avgs=ge_avgs_q)) 
         print(f'thresholds={thresholds_q},')
@@ -828,7 +876,7 @@ class OptimalCtrlTomo2QExperiment(Experiment):
                 tomo_cfg.expt.IQ_gain = [gain0, gain1]
 
                 # Tomography measurements
-                for i_basis, basis in enumerate(self.meas_order):
+                for ibasis, basis in enumerate(self.meas_order):
                     # print(basis)
                     cfg = AttrDict(deepcopy(tomo_cfg))
                     cfg.expt.basis = basis
@@ -848,9 +896,9 @@ class OptimalCtrlTomo2QExperiment(Experiment):
                     #     print('q', q, 'amps', np.abs(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
 
                     counts = tomo.collect_counts(angle=angles_q, threshold=thresholds_q)
-                    data['counts_tomo_gains'][igain0, igain1][i_basis] = counts
+                    data['counts_tomo_gains'][igain0, igain1][ibasis] = counts
+                    data[f'ishots_raw'][igain0, igain1, ibasis, :, :, :], data[f'qshots_raw'][igain0, igain1, ibasis, :, :, :] = tomo.get_multireadout_shots()
                     if igain0 == 0 and igain1 == 0: self.pulse_dict.update({basis:tomo.pulse_dict})
-        data['gainpts'] = gainpts
 
         self.data=data
         return data
