@@ -280,9 +280,8 @@ class LengthRabiProgram(AveragerProgram):
                 else:
                     assert False, "not implemented"
 
-        if (
-            "error_amp" in self.cfg.expt and self.cfg.expt.error_amp
-        ):  # add pihalf initialization pulse for error amplification
+        if "error_amp" in self.cfg.expt and self.cfg.expt.error_amp:
+            # add pihalf initialization pulse for error amplification
             if divide_len:
                 self.pi_test_half_gain = (
                     self.gain_pi_test
@@ -421,20 +420,23 @@ class LengthRabiProgram(AveragerProgram):
                 assert "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None
                 n_pulses = self.cfg.expt.n_pulses
                 # print('init pi/2 freq', self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]), 'gain', self.pi_test_half_gain)
-                self.setup_and_pulse(
-                    ch=self.qubit_chs[qTest],
-                    style="arb",
-                    freq=self.f_pi_test_reg,
-                    phase=0,
-                    gain=int(self.pi_test_half_gain),
-                    waveform="pi_test_half",
-                )
+
+                if "pi_minuspi" not in self.cfg.expt or not self.cfg.expt.pi_minuspi:
+                    # play initial pi/2 pulse if you're just doing error amplification and not the pi/-pi sweep
+                    self.setup_and_pulse(
+                        ch=self.qubit_chs[qTest],
+                        style="arb",
+                        freq=self.f_pi_test_reg,
+                        phase=0,
+                        gain=int(self.pi_test_half_gain),
+                        waveform="pi_test_half",
+                    )
                 self.sync_all()
 
                 for i in range(int(2 * n_pulses)):
                     # print('pulse pi test freq', self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]), 'qtest', qTest,'gain', self.gain_pi_test)
                     phase = 0
-                    if "pi_minuspi" in self.cfg.expt:
+                    if "pi_minuspi" in self.cfg.expt and self.cfg.expt.pi_minuspi:
                         if i % 2 == 1:
                             phase = self.deg2reg(-180, gen_ch=self.qubit_chs[qTest])
 
@@ -1177,6 +1179,8 @@ class PiMinusPiExperiment(Experiment):
         qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
         test_pi_half: calibrate the pi/2 instead of pi pulse by dividing length cycles // 2
     )
+
+    See https://arxiv.org/pdf/2406.08295 Appendix E
     """
 
     def __init__(
@@ -1213,6 +1217,8 @@ class PiMinusPiExperiment(Experiment):
         qZZ = self.cfg.expt.qZZ
         if qZZ is None:
             qZZ = qTest
+
+        self.cfg.expt.pi_minuspi = True
 
         data = dict()
 
@@ -1397,20 +1403,20 @@ class PiMinusPiExperiment(Experiment):
         prods = []
         for col in range(len(data["freq_sweep"])):
             col_data = data["amps"][:, col]
-            prod = np.prod(col_data)
-            prods.append(np.sqrt(1-prod))
+            prod = np.prod(1 - col_data)
+            prods.append(np.sqrt(prod))
 
-        plt.figure(figsize=(7, 4))
+        plt.figure(figsize=(8, 4))
         plt.plot(data["freq_sweep"], prods, ".-")
         plt.xlabel("Frequency [MHz]")
-        plt.ylabel("Fit Product")
+        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
 
         if not fit:
             plt.show()
             return data
 
         popt, pcov = fitter.fit_gauss(data["freq_sweep"], np.array(prods))
-        fit_freq = popt[2]
+        fit_freq = popt[1]
         data["best_freq"] = fit_freq
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
@@ -1418,7 +1424,7 @@ class PiMinusPiExperiment(Experiment):
             old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
         print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
 
-        # plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
+        plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
         plt.show()
 
         return data

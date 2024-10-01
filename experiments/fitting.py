@@ -190,21 +190,20 @@ def fit_gauss(xdata, ydata, fitparams=None):
         fitparams = [None] * 4
     else:
         fitparams = np.copy(fitparams)
-    midpoint = np.average((np.max(xdata), np.min(xdata)))
     if fitparams[0] is None:
         fitparams[0] = np.max(ydata)
     if fitparams[1] is None:
         fitparams[1] = xdata[np.argmax(ydata)]
     if fitparams[2] is None:
-        fitparams[2] = (midpoint - np.min(xdata)) / 4
+        fitparams[2] = (np.max(xdata) - np.min(xdata)) / 8
     if fitparams[3] is None:
         fitparams[3] = np.min(ydata)
     pOpt = fitparams
     # print('fitparams guess:', fitparams)
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     bounds = (
-        [fitparams[0] * 0.5, np.min(xdata), fitparams[2] * 0.1, -np.inf],
-        [fitparams[0] * 1.5, np.max(xdata), fitparams[2] * 10, np.inf],
+        [fitparams[0] * 0.5, np.min(xdata), fitparams[2] * 0.1, 0],
+        [fitparams[0] * 1.5, np.max(xdata), fitparams[2] * 10, np.max(ydata)],
     )
     for i, param in enumerate(fitparams):
         if not (bounds[0][i] < param < bounds[1][i]):

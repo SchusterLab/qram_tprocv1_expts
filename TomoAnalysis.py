@@ -110,7 +110,7 @@ class TomoAnalysis():
         self.psi_basis = psi_basis
         self.psi_basis_flat = psi_basis_flat
 
-        config_path = os.path.join(os.getcwd(), config_file)
+        config_path = os.path.join('s:\\Connie\\experiments\\qram_tprocv1_expts\\configs\\', config_file)
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         self.config_file = AttrDict(config)

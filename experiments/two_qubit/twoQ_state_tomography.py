@@ -1,19 +1,18 @@
-import matplotlib.pyplot as plt
-import numpy as np
-from qick import *
 import json
 from copy import deepcopy
 
-from slab import Experiment, NpEncoder, AttrDict
-from tqdm import tqdm_notebook as tqdm
-
+import matplotlib.pyplot as plt
+import numpy as np
 from experiments.clifford_averager_program import (
-    QutritAveragerProgram,
     CliffordAveragerProgram,
+    QutritAveragerProgram,
     rotate_and_threshold,
 )
 from experiments.single_qubit.single_shot import hist
+from qick import *
+from slab import AttrDict, Experiment, NpEncoder
 from TomoAnalysis import TomoAnalysis
+from tqdm import tqdm_notebook as tqdm
 
 """
 Infer the populations of the g, e, (and f) states given 1 (2) measurements:
@@ -105,9 +104,7 @@ def infer_gef_popln(
                 if q not in measure_f_qubits:
                     continue
                 if counts_state[i_q] == "g":
-                    epop_q[q] += (
-                        counts2[i_counts_state] / tot_counts2
-                    )  # e population shows up as g population
+                    epop_q[q] += counts2[i_counts_state] / tot_counts2  # e population shows up as g population
         for i_q, q in enumerate(qubits):
             if q not in measure_f_qubits:
                 continue
@@ -129,9 +126,7 @@ Returns gpop_q, epop_q, fpop_q which are the g/e/f populations of all 4 qubits.
 """
 
 
-def infer_gef_popln_2readout(
-    qubits, counts_raw_total, calib_order, counts_calib, fix_neg_counts_flag=True
-):
+def infer_gef_popln_2readout(qubits, counts_raw_total, calib_order, counts_calib, fix_neg_counts_flag=True):
 
     gpop_q = [0] * 4
     epop_q = [0] * 4
@@ -146,9 +141,7 @@ def infer_gef_popln_2readout(
     assert np.shape(counts_calib)[1] == np.shape(counts_raw_total)[0]
 
     tomo_analysis = TomoAnalysis(nb_qubits=2, tomo_qubits=qubits)
-    counts_corrected = tomo_analysis.correct_readout_err(
-        [counts_raw_total], counts_calib
-    )
+    counts_corrected = tomo_analysis.correct_readout_err([counts_raw_total], counts_calib)
     # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
     # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
     if fix_neg_counts_flag:
@@ -187,9 +180,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
     )
     """
 
-    def setup_measure(
-        self, qubit, basis: str, play=False, ZZ_qubit=None, flag="ZZcorrection"
-    ):
+    def setup_measure(self, qubit, basis: str, play=False, ZZ_qubit=None, flag="ZZcorrection"):
         """
         Convert string indicating the measurement basis into the appropriate single qubit pulse (pre-measurement pulse)
         Make sure to reload the pulses to ensure the pulse with flag ZZ correction is saved!
@@ -207,7 +198,6 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 flag=flag,
                 reload=True,
             )  # -Y/2 pulse to get from +X to +Z
-            # self.Y_pulse(2, pihalf=True, play=play, neg=True, flag=flag)
         elif basis == "Y":
             self.X_pulse(
                 qubit,
@@ -218,8 +208,6 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 flag=flag,
                 reload=True,
             )  # X/2 pulse to get from +Y to +Z
-            # print('WARNING FUNKY THINGS')
-            # self.X_pulse(2, pihalf=True, play=play, neg=False, flag=flag)
         else:
             pass  # measure in I/Z basis
         self.sync_all()
@@ -229,9 +217,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         Plays the pulses to prepare the state we want to do tomography on.
         Pass in kwargs to state_prep_pulse through cfg.expt.state_prep_kwargs
         """
-        raise NotImplementedError(
-            "Inherit this class and implement the state prep method!"
-        )
+        raise NotImplementedError("Inherit this class and implement the state prep method!")
 
     def initialize(self):
         super().initialize()
@@ -248,10 +234,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         self.reset_and_sync()
 
         if "cool_qubits" in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            cool_idle = [
-                self.cfg.device.qubit.pulses.pi_f0g1.idle[q]
-                for q in self.cfg.expt.cool_qubits
-            ]
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
             if "cool_idle" in self.cfg.expt and self.cfg.expt.cool_idle is not None:
                 cool_idle = self.cfg.expt.cool_idle
             self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
@@ -260,10 +243,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
             self.measure_readout_cool()
 
         # Prep state to characterize
-        if (
-            "state_prep_kwargs" not in self.cfg.expt
-            or self.cfg.expt.state_prep_kwargs is None
-        ):
+        if "state_prep_kwargs" not in self.cfg.expt or self.cfg.expt.state_prep_kwargs is None:
             kwargs = dict()
         else:
             kwargs = self.cfg.expt.state_prep_kwargs
@@ -274,12 +254,8 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         ZZ_qubit = None
         if "ZZ_qubit" in self.cfg.expt and self.cfg.expt.ZZ_qubit is not None:
             ZZ_qubit = self.cfg.expt.ZZ_qubit
-        self.setup_measure(
-            qubit=qubits[0], basis=self.basis[0], ZZ_qubit=ZZ_qubit, play=True
-        )
-        self.setup_measure(
-            qubit=qubits[1], basis=self.basis[1], ZZ_qubit=ZZ_qubit, play=True
-        )
+        self.setup_measure(qubit=qubits[0], basis=self.basis[0], ZZ_qubit=ZZ_qubit, play=True)
+        self.setup_measure(qubit=qubits[1], basis=self.basis[1], ZZ_qubit=ZZ_qubit, play=True)
 
         # Simultaneous measurement
         syncdelay = self.us2cycles(max(self.cfg.device.readout.relax_delay))
@@ -367,9 +343,7 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
                 freq = (self.f_ge[1, qubits[0]] + self.f_ge[1, qubits[1]]) / 2
                 freq = self.freq2reg(freq, gen_ch=self.qubit_chs[1])
                 waveform = f"pi_ge_ZZ{qubits[0]}_ZZ{qubits[1]}_q1"
-                sigma_cycles = self.us2cycles(
-                    self.pi_sigmas_us[1], gen_ch=self.qubit_chs[1]
-                )
+                sigma_cycles = self.us2cycles(self.pi_sigmas_us[1], gen_ch=self.qubit_chs[1])
                 self.add_gauss(
                     ch=self.qubit_chs[1],
                     name=waveform,
@@ -558,13 +532,9 @@ class EgGfStateTomographyExperiment(Experiment):
             # print(prep_state)
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.reps = self.cfg.expt.singleshot_reps
-            cfg.expt.state_prep_kwargs = dict(
-                prep_state=prep_state, apply_q1_pi2=cfg.expt.calib_apply_q1_pi2
-            )
+            cfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=cfg.expt.calib_apply_q1_pi2)
             err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=cfg)
-            err_tomo.acquire(
-                self.im[self.cfg.aliases.soc], load_pulses=True, progress=False
-            )
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             calib_prog_dict.update({prep_state: err_tomo})
 
         g_prog = calib_prog_dict["gg"]
@@ -595,9 +565,7 @@ class EgGfStateTomographyExperiment(Experiment):
 
         # Process the shots taken for the confusion matrix with the calibration angles
         for prep_state in self.calib_order:
-            counts = calib_prog_dict[prep_state].collect_counts(
-                angle=angle, threshold=threshold
-            )
+            counts = calib_prog_dict[prep_state].collect_counts(angle=angle, threshold=threshold)
             data["counts_calib"].append(counts)
 
         # Tomography measurements
@@ -619,9 +587,7 @@ class EgGfStateTomographyExperiment(Experiment):
             # from qick.helpers import progs2json
             # print(progs2json([tomo.dump_prog()]))
             # xpts, avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
-            avgi, avgq = tomo.acquire(
-                self.im[self.cfg.aliases.soc], load_pulses=True, progress=False
-            )
+            avgi, avgq = tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
 
             # print(basis)
             adc_chs = self.cfg.hw.soc.adcs.readout.ch
@@ -685,18 +651,14 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
         ZZ_qubit = None
         if "ZZ_qubit" in self.cfg.expt and self.cfg.expt.ZZ_qubit is not None:
             ZZ_qubit = self.cfg.expt.ZZ_qubit
-        super().setup_measure(
-            qubit=self.qubit, basis=basis, ZZ_qubit=ZZ_qubit, play=play
-        )
+        super().setup_measure(qubit=self.qubit, basis=basis, ZZ_qubit=ZZ_qubit, play=play)
 
     def state_prep_pulse(self, **kwargs):
         """
         Plays the pulses to prepare the state we want to do tomography on.
         Pass in kwargs to state_prep_pulse through cfg.expt.state_prep_kwargs
         """
-        raise NotImplementedError(
-            "Inherit this class and implement the state prep method!"
-        )
+        raise NotImplementedError("Inherit this class and implement the state prep method!")
 
     def initialize(self):
         super().initialize()
@@ -713,10 +675,7 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
         self.reset_and_sync()
 
         if "cool_qubits" in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            cool_idle = [
-                self.cfg.device.qubit.pulses.pi_f0g1.idle[q]
-                for q in self.cfg.expt.cool_qubits
-            ]
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
             if "cool_idle" in self.cfg.expt and self.cfg.expt.cool_idle is not None:
                 cool_idle = self.cfg.expt.cool_idle
             self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
@@ -802,9 +761,7 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
     )
     """
 
-    def handle_next_pulse(
-        self, count_us, ch, freq_reg, type, phase, gain, sigma_us, waveform
-    ):
+    def handle_next_pulse(self, count_us, ch, freq_reg, type, phase, gain, sigma_us, waveform):
         if type == "gauss":
             self.setup_and_pulse(
                 ch=ch,
@@ -816,9 +773,7 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
             )
         elif type == "flat_top":
             sigma_ramp_cycles = 3
-            flat_length_cycles = (
-                self.us2cycles(sigma_us, gen_ch=ch) - sigma_ramp_cycles * 4
-            )
+            flat_length_cycles = self.us2cycles(sigma_us, gen_ch=ch) - sigma_ramp_cycles * 4
             self.setup_and_pulse(
                 ch=ch,
                 style="flat_top",
@@ -855,16 +810,12 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
             self.cfg.expt.state_prep_kwargs = None
         self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
         self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-        self.f_EgGf_regs = [
-            self.freq2reg(f, gen_ch=ch)
-            for f, ch in zip(self.cfg.device.qubit.f_EgGf, self.swap_chs)
-        ]
+        self.f_EgGf_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf, self.swap_chs)]
 
         self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
         self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
         self.f_EgGf_Q_regs = [
-            self.freq2reg(f, gen_ch=ch)
-            for f, ch in zip(self.cfg.device.qubit.f_EgGf_Q, self.swap_chs)
+            self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf_Q, self.swap_chs)
         ]
 
         # get aliases for the sigmas we need in clock cycles
@@ -880,9 +831,7 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
         for q in range(4):
             if q != 1:
                 if self.pi_EgGf_types[q] == "gauss":
-                    pi_EgGf_sigma_cycles = self.us2cycles(
-                        self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1]
-                    )
+                    pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
                     self.add_gauss(
                         ch=self.swap_chs[q],
                         name=f"pi_EgGf_swap{q}",
@@ -972,9 +921,7 @@ class StateTomography1QExperiment(Experiment):
             cfg.expt.reps = self.cfg.expt.singleshot_reps
             cfg.expt.state_prep_kwargs = dict(prep_state=prep_state)
             err_tomo = ErrorMitigationStateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
-            err_tomo.acquire(
-                self.im[self.cfg.aliases.soc], load_pulses=True, progress=False
-            )
+            err_tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             calib_prog_dict.update({prep_state: err_tomo})
 
         g_prog = calib_prog_dict["g"]
@@ -996,9 +943,7 @@ class StateTomography1QExperiment(Experiment):
 
         # Process the shots taken for the confusion matrix with the calibration angles
         for prep_state in self.calib_order:
-            counts = calib_prog_dict[prep_state].collect_counts(
-                angle=angle, threshold=threshold
-            )
+            counts = calib_prog_dict[prep_state].collect_counts(angle=angle, threshold=threshold)
             data["counts_calib"].append(counts)
 
         # Tomography measurements
@@ -1006,11 +951,7 @@ class StateTomography1QExperiment(Experiment):
             # print(basis)
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.basis = basis
-            if (
-                "Icontrols" in cfg.expt
-                and "Qcontrols" in cfg.expt
-                and "times_us" in self.cfg.expt
-            ):
+            if "Icontrols" in cfg.expt and "Qcontrols" in cfg.expt and "times_us" in self.cfg.expt:
                 cfg.expt.state_prep_kwargs = dict(
                     I_mhz_vs_us=cfg.expt.Icontrols,
                     Q_mhz_vs_us=cfg.expt.Qcontrols,
@@ -1018,9 +959,7 @@ class StateTomography1QExperiment(Experiment):
                 )
             tomo = StateTomo1QProgram(soccfg=self.soccfg, cfg=cfg)
             # print(tomo)
-            tomo.acquire(
-                self.im[self.cfg.aliases.soc], load_pulses=True, progress=False
-            )
+            tomo.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             counts = tomo.collect_counts(angle=angle, threshold=threshold)
             data["counts_tomo"].append(counts)
             self.pulse_dict.update({basis: tomo.pulse_dict})

@@ -1,16 +1,14 @@
-import matplotlib.pyplot as plt
-import numpy as np
-from qick import *
-from qick.helpers import ch2list
-
-from slab import Experiment, AttrDict
-from tqdm import tqdm_notebook as tqdm
-
-import scipy as sp
+import logging
 
 import experiments.fitting as fitter
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy as sp
+from qick import *
+from qick.helpers import ch2list
+from slab import AttrDict, Experiment
+from tqdm import tqdm_notebook as tqdm
 
-import logging
 logger = logging.getLogger('qick.qick_asm')
 logger.setLevel(logging.ERROR)
 
@@ -160,7 +158,7 @@ class CliffordAveragerProgram(AveragerProgram):
     be sure to set the default value to be None at loading time.
 
     If play is True, registers will automatically be set regardless of set_reg flag.
-    If play is False, registers will be set based on value of set_reg flag, but pulse will not be played.
+    If play is False, registers will b set based on value of set_reg flag, but pulse will not be played.
     """
     def handle_const_pulse(self, name, waveformname=None, ch=None, length=None, freq_MHz=None, phase_deg=None, gain=None, reload=False, play=False, set_reg=False, ro_ch=None, flag=None, phrst=0, sync_after=True):
         """
@@ -388,8 +386,10 @@ class CliffordAveragerProgram(AveragerProgram):
     If play=False, just loads pulse.
     special: adiabatic, pulseiq
     """
-    # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
-    def X_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, play=False, name='X', flag=None, special=None, phrst=0, reload=False, sync_after=True, **kwargs):
+    def X_half_pulse(
+        self, q, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0,
+        play=False, name='X', flag=None, special=None, phrst=0, reload=False,
+        sync_after=True, **kwargs):
         # q: qubit number in config
         if ZZ_qubit is None: ZZ_qubit = q
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
@@ -419,13 +419,14 @@ class CliffordAveragerProgram(AveragerProgram):
                 I_mhz_vs_us = kwargs['I_mhz_vs_us']
                 Q_mhz_vs_us = kwargs['Q_mhz_vs_us']
                 times_us = kwargs['times_us']
-        if pihalf:
-            if divide_len:
-                sigma_cycles = sigma_cycles // 2
-                waveformname += '_half'
-                gain = self.pi_ge_half_gains[q, ZZ_qubit]
-            else: gain = self.pi_ge_half_gain_pi_sigmas[q, ZZ_qubit]
-            name += '_half'
+
+        if divide_len:
+            sigma_cycles = sigma_cycles // 2
+            waveformname += '_half'
+            gain = self.pi_ge_half_gains[q, ZZ_qubit]
+        else: gain = self.pi_ge_half_gain_pi_sigmas[q, ZZ_qubit]
+        name += '_half'
+
         assert f_ge_MHz > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
         assert gain > 0, f'{"pihalf " if pihalf else ""}pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
         assert sigma_cycles > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
@@ -445,6 +446,16 @@ class CliffordAveragerProgram(AveragerProgram):
             flat_length = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge.length[q], gen_ch=self.qubit_chs[q]) - 3*4
             self.handle_flat_top_pulse(name=f'{name}_q{q}', ch=self.qubit_chs[q], waveformname=f'{waveformname}_q{q}', sigma=sigma_cycles, flat_length=flat_length, freq_MHz=f_ge_MHz, phase_deg=phase_deg, gain=gain, play=play, flag=flag, phrst=phrst, reload=reload) 
         else: assert False, f'Pulse type {type} not supported.'
+
+    # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
+    def X_pulse(
+        self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0,
+        play=False, name='X', flag=None, special=None, phrst=0, reload=False,
+        sync_after=True, **kwargs):
+        n_pulse = 1
+        if not pihalf: n_pulse = 2
+        for i in range(n_pulse):
+            self.X_half_pulse(q=q, divide_len=divide_len, ZZ_qubit=ZZ_qubit, neg=neg, extra_phase=extra_phase, play=play, name=name, flag=flag, special=special, phrst=phrst, reload=reload, sync_after=sync_after, **kwargs)
 
     def Y_pulse(self, q, pihalf=False, divide_len=True, ZZ_qubit=None, neg=False, extra_phase=0, adiabatic=False, play=False, flag=None, phrst=0, reload=False, sync_after=True):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
