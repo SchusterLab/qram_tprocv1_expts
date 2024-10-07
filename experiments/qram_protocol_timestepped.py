@@ -370,26 +370,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             pass
 
         elif init_state == "|0>|1>":
+            self.Y_pulse(q=1, play=True)
+            # print("WARNING INITIALIZING 01 WITH 6 PI/2 PULSES")
             # self.Y_pulse(q=1, play=True)
-            print("preparing 01 with 2 pi/2 pulses")
-            self.Y_pulse(q=1, play=True, pihalf=True)
-            self.Y_pulse(q=1, play=True, pihalf=True)
+            # self.Y_pulse(q=1, play=True)
 
         elif init_state == "|0>|0+1>":
-            # self.Y_pulse(q=1, play=True, pihalf=True)
-            print("preparing 0+ with 5 pi/2 pulses")
-            for i in range(5):
-                self.Y_pulse(q=1, play=True, pihalf=True)
+            self.Y_pulse(q=1, play=True, pihalf=True)
 
         elif init_state == "|0>|2>":
             self.Y_pulse(q=1, play=True)
             self.Yef_pulse(q=1, play=True)
 
         elif init_state == "|1>|0>":
-            # self.Y_pulse(q=0, play=True, pihalf=False)
-            print("preparing 10 with 2 pi/2 pulses")
-            self.Y_pulse(q=0, play=True, pihalf=True)
-            self.Y_pulse(q=0, play=True, pihalf=True)
+            self.Y_pulse(q=0, play=True, pihalf=False)
 
         elif init_state == "|1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
@@ -482,6 +476,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.X_pulse(q=3, ZZ_qubit=0, play=True)
             self.Xef_pulse(q=3, ZZ_qubit=0, play=True)
 
+        elif init_state == "|test>":
+            # print("-x/2")
+            # self.X_pulse(q=1, pihalf=True, neg=True, play=True)
+            # print("z/2")
+            # self.Z_pulse(q=1, pihalf=True, play=True)
+            # print("y/2")
+            # self.Y_pulse(q=1, pihalf=True, play=True)
+
+            for i in range(1):
+                print("-x/2")
+                self.X_pulse(q=1, pihalf=True, neg=True, play=True)
+                print("x/2")
+                self.X_pulse(q=1, pihalf=True, neg=False, play=True)
+
         elif (
             "Q" in init_state
         ):  # specify other qubits to prepare. it will always be specified as QaQb_regular_state_name, with regular state name specified as |Qa>|Qb>
@@ -533,13 +541,6 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             elif init_state_other == "|0+1>|1>":
                 self.Y_pulse(q=qb, play=True)  # -> 1
                 self.Y_pulse(q=qa, ZZ_qubit=qb, pihalf=True, play=True)
-
-            elif init_state_other == "|testX>":
-                self.X_pulse(q=0, play=True)
-                self.Y_pulse(q=0, pihalf=True, neg=True, play=True)
-            elif init_state_other == "|testY>":
-                self.X_pulse(q=0, play=True)
-                self.X_pulse(q=0, pihalf=True, play=True)
 
             else:
                 assert False, f"Init state {init_state} not valid"

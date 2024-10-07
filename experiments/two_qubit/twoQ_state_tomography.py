@@ -195,9 +195,11 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 play=play,
                 ZZ_qubit=ZZ_qubit,
                 neg=True,
+                # neg=False,
                 flag=flag,
                 reload=True,
             )  # -Y/2 pulse to get from +X to +Z
+            # print('WARNING, USING A DIFFERENT SIGN ON THE Y PULSE FOR X BASIS MEASUREMENT')
         elif basis == "Y":
             self.X_pulse(
                 qubit,
@@ -317,26 +319,26 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
                 self.Y_pulse(q=1, pihalf=True, play=True)
 
         elif prep_state == "ge":
-            self.X_pulse(q=qubits[1], play=True)
+            self.Y_pulse(q=qubits[1], play=True)
             if apply_q1_pi2:
-                self.X_pulse(q=1, pihalf=True, ZZ_qubit=qubits[1], play=True)
+                self.Y_pulse(q=1, pihalf=True, ZZ_qubit=qubits[1], play=True)
 
         elif prep_state == "gf":
-            self.X_pulse(q=qubits[1], play=True)
-            self.Xef_pulse(q=qubits[1], play=True)
+            self.Y_pulse(q=qubits[1], play=True)
+            self.Yef_pulse(q=qubits[1], play=True)
 
         elif prep_state == "eg":
-            self.X_pulse(q=qubits[0], play=True)
+            self.Y_pulse(q=qubits[0], play=True)
             if apply_q1_pi2:
-                self.X_pulse(q=1, pihalf=True, ZZ_qubit=qubits[0], play=True)
+                self.Y_pulse(q=1, pihalf=True, ZZ_qubit=qubits[0], play=True)
 
         elif prep_state == "fg":
-            self.X_pulse(q=qubits[0], play=True)
-            self.Xef_pulse(q=qubits[0], play=True)
+            self.Y_pulse(q=qubits[0], play=True)
+            self.Yef_pulse(q=qubits[0], play=True)
 
         elif prep_state == "ee" or prep_state == "ef" or prep_state == "fe":
-            self.X_pulse(q=qubits[0], play=True)
-            self.X_pulse(q=qubits[1], ZZ_qubit=qubits[0], play=True)
+            self.Y_pulse(q=qubits[0], play=True)
+            self.Y_pulse(q=qubits[1], ZZ_qubit=qubits[0], play=True)
 
             if apply_q1_pi2:
                 assert 1 not in qubits
@@ -362,9 +364,9 @@ class ErrorMitigationStateTomo2QProgram(AbstractStateTomo2QProgram):
                 self.sync_all()
 
             if prep_state == "ef":
-                self.Xef_pulse(q=qubits[1], ZZ_qubit=qubits[0], play=True)
+                self.Yef_pulse(q=qubits[1], ZZ_qubit=qubits[0], play=True)
             elif prep_state == "fe":
-                self.Xef_pulse(q=qubits[0], ZZ_qubit=qubits[1], play=True)
+                self.Yef_pulse(q=qubits[0], ZZ_qubit=qubits[1], play=True)
 
         else:
             assert False, f"Invalid prep state {prep_state}"
@@ -395,7 +397,7 @@ class EgGfStateTomo2QProgram(AbstractStateTomo2QProgram):
 
         self.Y_ef_pulse(q=2, play=True)
 
-        # self.X_pulse(q=2, play=True, pihalf=False)
+        # self.Y_pulse(q=2, play=True, pihalf=False)
 
     def initialize(self):
 
@@ -732,12 +734,12 @@ class ErrorMitigationStateTomo1QProgram(AbstractStateTomo1QProgram):
         prep_state = kwargs["prep_state"]  # should be gg, ge, eg, or ee
         if prep_state == "e":
             # print('q0: e')
-            self.X_pulse(q=self.qubit, play=True)
+            self.Y_pulse(q=self.qubit, play=True)
             self.sync_all()
         elif prep_state == "f":
             # print('q0: e')
-            self.X_pulse(q=self.qubit, play=True)
-            self.Xef_pulse(q=self.qubit, play=True)
+            self.Y_pulse(q=self.qubit, play=True)
+            self.Yef_pulse(q=self.qubit, play=True)
             self.sync_all()
         else:
             # print('q0: g')
@@ -796,9 +798,9 @@ class StateTomo1QProgram(AbstractStateTomo1QProgram):
     def state_prep_pulse(self, **kwargs):
         cfg = self.cfg
         # pass in kwargs via cfg.expt.state_prep_kwargs
-        # self.X_pulse(q=0, play=True)
-        # self.X_pulse(q=1, play=True)
-        # self.X_pulse(q=1, special='pulseiq', play=True, **kwargs)
+        # self.Y_pulse(q=0, play=True)
+        # self.Y_pulse(q=1, play=True)
+        # self.Y_pulse(q=1, special='pulseiq', play=True, **kwargs)
 
         self.X_pulse(q=0, play=True, pihalf=True)
         self.Z_pulse(q=0, play=True, pihalf=True)

@@ -918,6 +918,7 @@ def adiabatic_iqamp(t, amp_max, mu, beta, period):
 # ====================================================== #
 # Correcting for over/under rotation
 # delta: angle error in degrees
+# See reference: https://journals.aps.org/pra/pdf/10.1103/PhysRevA.93.012301
 
 
 def probg_Xhalf(n, *p):
