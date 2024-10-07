@@ -63,7 +63,7 @@ class LengthRabiProgram(AveragerProgram):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -480,10 +480,11 @@ class LengthRabiProgram(AveragerProgram):
                     num_test_pulses = 1
                     if self.use_pi2_for_pi:
                         num_test_pulses = 2
+
+                    self.safe_regwi(
+                        self.q_rps[qTest], self.qTest_rphase, self.deg2reg(phase, gen_ch=self.qubit_chs[qTest])
+                    )
                     for j in range(num_test_pulses):
-                        self.safe_regwi(
-                            self.q_rps[qTest], self.qTest_rphase, self.deg2reg(phase, gen_ch=self.qubit_chs[qTest])
-                        )
                         # print("phase", phase)
                         self.pulse(ch=self.qubit_chs[qTest])
                         self.sync_all()
@@ -718,7 +719,7 @@ class LengthRabiExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -801,7 +802,7 @@ class LengthRabiExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -815,14 +816,16 @@ class LengthRabiExperiment(Experiment):
         gain = self.cfg.expt.gain
         title = f"Length Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Gain {gain}){(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}"
 
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(8, 5))
         plt.subplot(111, title=title, xlabel="Length [ns]", ylabel="Amplitude [ADC units]")
         plt.plot(xpts_ns[:-1], data["amps"][:-1], ".-")
         if fit:
             p = data["fit_amps"]
             plt.plot(xpts_ns[:-1], fit_func(data["xpts"][:-1], *p))
+        plt.tight_layout()
+        plt.show()
 
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(8, 9))
         plt.subplot(211, title=title, ylabel="I [adc level]")
         plt.plot(xpts_ns[1:-1], data["avgi"][1:-1], ".-")
         if fit:
@@ -1112,7 +1115,7 @@ class NPulseExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -1141,7 +1144,7 @@ class NPulseExperiment(Experiment):
 
         current_gain = self.cfg.expt.gain
 
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(8, 5))
         label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{2n}$)"
         plt.subplot(
             111,
@@ -1166,9 +1169,10 @@ class NPulseExperiment(Experiment):
                 amp_ratio = (180 - p[1]) / 180
             print(f"From amps: adjust amplitude to {current_gain} / {amp_ratio} = {current_gain/amp_ratio}")
         plt.ylim(-0.1, 1.1)
+        plt.tight_layout()
         plt.show()
 
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(8, 9))
         plt.subplot(211, title=title, ylabel="I (scaled)")
         plot_data = data["avgi"]
         if scale is not None:
@@ -1501,7 +1505,7 @@ class PiMinusPiExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -1847,7 +1851,7 @@ class CDistortPiMinusPiExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -2189,7 +2193,7 @@ class IDistortDelayExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
