@@ -96,7 +96,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None: self.checkZZ = True
+        if qZZ is not None and qZZ != qTest: self.checkZZ = True
         else: qZZ = qTest
         self.checkEF = self.cfg.expt.checkEF
         if self.checkEF:
@@ -271,11 +271,11 @@ class AmplitudeRabiProgram(RAveragerProgram):
         if self.checkEF:
             self.add_gauss(ch=self.qubit_chs[qTest], name="pi_qubit_ge", sigma=self.pisigma_ge, length=self.pisigma_ge*4)
 
-        self.use_gf_readout = False
-        if 'use_gf_readout' in self.cfg.expt and self.cfg.expt.use_gf_readout:
+        self.use_gf_readout = None
+        if 'use_gf_readout' in self.cfg.expt and self.cfg.expt.use_gf_readout is not None:
             self.use_gf_readout = self.cfg.expt.use_gf_readout
-        if self.use_gf_readout or self.cool_qubits:
-            if not self.use_gf_readout: add_ef_qubits = self.cfg.expt.cool_qubits
+        if self.use_gf_readout is not None or self.cool_qubits:
+            if self.use_gf_readout is not None: add_ef_qubits = self.cfg.expt.cool_qubits
             else: add_ef_qubits = range(self.num_qubits_sample) 
             for q in add_ef_qubits:
                 self.pisigma_ef = self.us2cycles(self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]) # default pi_ef value
@@ -369,7 +369,7 @@ class AmplitudeRabiProgram(RAveragerProgram):
                     else: syncdelay = extended_readout_delay_cycles # only sync to the next readout in the same trigger stack
                     print('sync delay us', self.cycles2us(syncdelay))
                     # Note that by default the mux channel will play the pulse for all frequencies for the max of the pulse times on all channels - but the acquistion may not be happening the entire time.
-                    if self.use_gf_readout: self.gf_readout_init()
+                    if self.use_gf_readout is not None: self.gf_readout_init(qubits=self.use_gf_readout)
                     self.measure(
                         pulse_ch=self.measure_chs, 
                         adcs=self.adc_chs,
@@ -444,8 +444,8 @@ class AmplitudeRabiProgram(RAveragerProgram):
 
         # align channels and measure
         self.sync_all()
-        if self.use_gf_readout:
-            self.gf_readout_init()
+        if self.use_gf_readout is not None:
+            self.gf_readout_init(qubits=self.use_gf_readout)
             print('WARNING: are you sure you want to be doing gf_readout_init before final measurement in this experiment?')
         self.measure(
             pulse_ch=self.measure_chs, 
@@ -559,8 +559,8 @@ class AmplitudeRabiExperiment(Experiment):
         if 'readout_cool' in self.cfg.expt:
             readout_cool = self.cfg.expt.readout_cool
 
-            self.use_gf_readout = False
-            if 'use_gf_readout' in self.cfg.expt and self.cfg.expt.use_gf_readout:
+            self.use_gf_readout = None
+            if 'use_gf_readout' in self.cfg.expt and self.cfg.expt.use_gf_readout is not None:
                 self.use_gf_readout = self.cfg.expt.use_gf_readout
                 self.cfg.expt.n_trig *= 2
         # if self.use_gf_readout:
@@ -722,7 +722,7 @@ class AmplitudeRabiExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None: self.checkZZ = True
+        if qZZ is not None and qZZ != qTest: self.checkZZ = True
         else: qZZ = qTest
 
         plt.figure(figsize=(10, 6))
