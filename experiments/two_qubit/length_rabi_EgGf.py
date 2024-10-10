@@ -60,7 +60,9 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             mixer_freqs = self.cfg.hw.soc.dacs.swap_Q.mixer_freq
             self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=self.swap_chs[qSort])
 
-        self.swap_rps = [self.ch_page(ch) if ch != -1 else -1 for ch in self.swap_chs]  # get register page for qubit_ch
+        self.swap_rps = [
+            self.ch_page(ch) if ch != -1 else -1 for ch in self.swap_chs
+        ]  # get register page for qubit_ch
 
         mixer_freq = None
         if self.swap_ch_types[qSort] == "int4":
@@ -146,8 +148,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     length=self.pi_half_sigma_test * 4,
                 )
             # for flat top, use the same ramp gauss pulse for the pihalf pulse
-            self.swap_rphase = self.sreg(self.swap_chs[qSort], "phase")
 
+        self.swap_rphase = self.sreg(self.swap_chs[qSort], "phase")
         self.sync_all(200)
 
     def body(self):
@@ -323,42 +325,43 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             if "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None:
                 n_pulses = self.cfg.expt.n_pulses
 
-                # play the pihalf initialization for the error amplification
-                pulse_type = cfg.expt.pulse_type.lower()
-                if pulse_type == "gauss":
-                    self.setup_and_pulse(
-                        ch=self.swap_chs[qSort],
-                        style="arb",
-                        freq=self.f_EgGf_reg,
-                        phase=0,
-                        gain=cfg.expt.gain,
-                        waveform="pi_EgGf_swap_half",
-                    )
-                elif pulse_type == "flat_top":
-                    sigma_ramp_cycles = 3
-                    if "sigma_ramp_cycles" in self.cfg.expt:
-                        sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                    flat_length_cycles = self.sigma_test // 2 - sigma_ramp_cycles * 4
-                    if flat_length_cycles >= 3:
+                if not self.pi_minuspi:
+                    # play the pihalf initialization for the error amplification
+                    pulse_type = cfg.expt.pulse_type.lower()
+                    if pulse_type == "gauss":
                         self.setup_and_pulse(
                             ch=self.swap_chs[qSort],
-                            style="flat_top",
+                            style="arb",
                             freq=self.f_EgGf_reg,
                             phase=0,
                             gain=cfg.expt.gain,
-                            length=flat_length_cycles,
-                            waveform="pi_EgGf_swap",
+                            waveform="pi_EgGf_swap_half",
                         )
-                else:  # const
-                    self.setup_and_pulse(
-                        ch=self.swap_chs[qSort],
-                        style="const",
-                        freq=self.f_EgGf_reg,
-                        phase=0,
-                        gain=cfg.expt.gain,
-                        length=self.sigma_test // 2,
-                    )  # , phrst=1)
-                self.sync_all()
+                    elif pulse_type == "flat_top":
+                        sigma_ramp_cycles = 3
+                        if "sigma_ramp_cycles" in self.cfg.expt:
+                            sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
+                        flat_length_cycles = self.sigma_test // 2 - sigma_ramp_cycles * 4
+                        if flat_length_cycles >= 3:
+                            self.setup_and_pulse(
+                                ch=self.swap_chs[qSort],
+                                style="flat_top",
+                                freq=self.f_EgGf_reg,
+                                phase=0,
+                                gain=cfg.expt.gain,
+                                length=flat_length_cycles,
+                                waveform="pi_EgGf_swap",
+                            )
+                    else:  # const
+                        self.setup_and_pulse(
+                            ch=self.swap_chs[qSort],
+                            style="const",
+                            freq=self.f_EgGf_reg,
+                            phase=0,
+                            gain=cfg.expt.gain,
+                            length=self.sigma_test // 2,
+                        )  # , phrst=1)
+                    self.sync_all()
             else:
                 n_pulses = 0.5
             if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
@@ -380,7 +383,11 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 if "sigma_ramp_cycles" in self.cfg.expt:
                     sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
                 flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
-                # print(cfg.expt.gain, flat_length, self.f_EgGf_reg)
+                # print(
+                #     cfg.expt.gain,
+                #     self.cycles2us(flat_length_cycles, gen_ch=self.swap_chs[qSort]),
+                #     self.freq2reg(self.f_EgGf_reg, gen_ch=self.swap_chs[qSort]),
+                # )
                 if flat_length_cycles >= 3:
                     self.set_pulse_registers(
                         ch=self.swap_chs[qSort],
@@ -403,6 +410,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 )  # , phrst=1)
 
             # loop over error amplification (if no amplification we just loop 1x)
+            # print("n_pulses", n_pulses)
             for i in range(int(2 * n_pulses)):
 
                 # do the simultaneous 2q swap
@@ -453,11 +461,18 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 # apply Eg -> Gf pulse on qDrive: expect to end in Gf
                 pulse_type = cfg.expt.pulse_type.lower()
                 play_pulse = True
-                if pulse_type == "flat_top" and flat_length_cycles >= 3:
+                # print('pulse type', pulse_type, flat_length_cycles)
+                sigma_ramp_cycles = 3
+                if "sigma_ramp_cycles" in self.cfg.expt:
+                    sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
+                flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
+                if pulse_type == "flat_top" and flat_length_cycles <= 3:
                     play_pulse = False
                 num_test_pulses = 1
                 # if self.use_pi2_for_pi:
                 #     num_test_pulses = 2
+
+                # print('play pulses', play_pulse, num_test_pulses)
 
                 self.safe_regwi(
                     self.swap_rps[self.qSort], self.swap_rphase, self.deg2reg(phase, gen_ch=self.swap_chs[qSort])
@@ -465,7 +480,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 for j in range(num_test_pulses):
                     if play_pulse:
                         self.pulse(ch=self.swap_chs[qSort])
-                    self.sync_all()
+                        # print("playing pulse with phase", phase)
+                        self.sync_all()
 
         setup_measure = None
         if "setup_measure" in self.cfg.expt:
@@ -1488,7 +1504,7 @@ class LengthRabiEgGfExperiment(Experiment):
         rows = 3
         cols = len(self.cfg.expt.measure_qubits)
         index = rows * 100 + cols * 10
-        plt.figure(figsize=(7 * cols, 11))
+        plt.figure(figsize=(10, rows * 3))
 
         plt.suptitle(f"Length Rabi (Drive Gain {self.cfg.expt.gain})")
         this_idx = index + 1
@@ -1869,7 +1885,8 @@ class EgGfFreqLenChevronExperiment(Experiment):
         rows = 1
         cols = len(self.cfg.expt.measure_qubits)
         index = rows * 100 + cols * 10
-        plt.figure(figsize=(7 * cols, 6))
+        # plt.figure(figsize=(7 * cols, 6))
+        plt.figure(figsize=(10, rows * 5))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length (Gain {self.cfg.expt.gain})")
 
         # ------------------------------ #
@@ -1954,7 +1971,8 @@ class EgGfFreqLenChevronExperiment(Experiment):
             return
         if saveplot:
             plt.style.use("dark_background")
-        plt.figure(figsize=(7 * cols, 6))
+        # plt.figure(figsize=(7 * cols, 6))
+        plt.figure(figsize=(10, rows * 3))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length Fit (Gain {self.cfg.expt.gain})")
 
         # ------------------------------ #
@@ -2581,12 +2599,13 @@ class PiMinusPiEgGfExperiment(Experiment):
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
         self.cfg.expt.sigma_test = float(self.cfg.expt.length)
+        self.cfg.expt.pi_minuspi = True
 
         if "loops" not in self.cfg.expt:
             self.cfg.expt.loops = 1
         cfg = deepcopy(self.cfg)
-        for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
-            for i_cycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress or self.cfg.expt.loops > 1)):
+        for loop in tqdm(range(self.cfg.expt.loops), disable=(self.cfg.expt.loops == 1)):
+            for i_cycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress)):
                 for ifreq, freq in enumerate(freq_sweep):
                     assert not cfg.expt.measure_f, "measure f not implemented currently"
                     if cfg.expt.post_process is not None and len(cfg.expt.measure_qubits) != 2:
@@ -2643,20 +2662,29 @@ class PiMinusPiEgGfExperiment(Experiment):
         qDrive = self.cfg.expt.qDrive
 
         # Amps shape: (measure_qubits, cycles, freqs)
-        prods = np.sqrt(np.prod(1 - data["amps"], axis=1))  # product over g population in all cycles
+        prods = np.zeros((len(self.cfg.expt.measure_qubits), len(data["freq_sweep"])))
+        for iq, q in enumerate(self.cfg.expt.measure_qubits):
+            if q == qDrive:
+                prods[iq] = np.sqrt(
+                    np.prod(np.abs(1 - data["amps"][iq]), axis=0)
+                )  # product over g population in all cycles
+            else:
+                prods[iq] = np.sqrt(
+                    np.prod(np.abs(data["amps"][iq]), axis=0)
+                )  # expect to end in e, so we compare relative to e
 
         title = f"Frequency Error Q{qA} Q{qB}"
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(8, 9))
         plt.suptitle(title)
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
         plt.plot(data["freq_sweep"], prods[0], ".-")
-        plt.xlabel("Frequency [MHz]")
         plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
         plt.plot(data["freq_sweep"], prods[1], ".-")
         plt.xlabel("Frequency [MHz]")
+        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
 
         axs = [ax_qA, ax_qB]
         if fit:
@@ -2707,27 +2735,26 @@ class PiMinusPiEgGfExperiment(Experiment):
         y_sweep = outer_sweep
         x_sweep = inner_sweep
 
-        rows = 1
-        cols = 2
-        index = rows * 100 + cols * 10
-        plt.figure(figsize=(7 * cols, 6))
+        plt.figure(figsize=(8, 9))
         plt.suptitle(title)
         data_name = "amps"
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
         ax_qA.set_ylabel(f"N {label}", fontsize=18)
-        ax_qA.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
         ax_qA.tick_params(axis="both", which="major", labelsize=16)
         plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][0], cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
+        plt.colorbar()
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
+        ax_qA.set_ylabel(f"N {label}", fontsize=18)
         ax_qB.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
         ax_qB.tick_params(axis="both", which="major", labelsize=16)
         plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][1], cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
+        plt.colorbar()
 
         plt.tight_layout()
         plt.show()

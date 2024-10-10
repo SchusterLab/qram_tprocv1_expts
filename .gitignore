@@ -4,3 +4,4 @@ Thumbs.db
 qram-control/
 .ipynb_checkpoints/
 *.jpg
+*.history
