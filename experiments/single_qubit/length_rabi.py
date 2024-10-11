@@ -21,8 +21,6 @@ Measures Rabi oscillations by sweeping over the duration of the qubit drive puls
 
 class LengthRabiProgram(QutritAveragerProgram):
     def initialize(self):
-        super().initialize()
-
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
@@ -31,6 +29,22 @@ class LengthRabiProgram(QutritAveragerProgram):
         else:
             qZZ = qTest
         self.checkEF = self.cfg.expt.checkEF
+
+        # Override the default length parameters before initializing the clifford averager program
+        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
+        sigma_test_cycles = self.us2cycles(self.cfg.expt.sigma_test, gen_ch=self.qubit_chs[qTest])
+        if "sigma_test" in self.cfg.expt and sigma_test_cycles > 3:
+            self.num_qubits_sample = len(self.cfg.device.readout.frequency)
+            if self.checkZZ:
+                self.cfg.device.qubit.pulses.pi_ef.sigma[
+                    qTest * self.num_qubits_sample + qZZ
+                ] = self.cfg.expt.sigma_test
+            else:
+                self.cfg.device.qubit.pulses.pi_ge.sigma[
+                    qTest * self.num_qubits_sample + qZZ
+                ] = self.cfg.expt.sigma_test
+
+        super().initialize()
 
         # calibrate the pi/2 pulse instead of the pi pulse by taking half the sigma and calibrating the gain
         self.test_pi_half = False
@@ -48,8 +62,6 @@ class LengthRabiProgram(QutritAveragerProgram):
 
         self.error_amp = "error_amp" in self.cfg.expt and self.cfg.expt.error_amp
         self.qTest_rphase = self.sreg(self.qubit_chs[qTest], "phase")
-
-
 
     def body(self):
         cfg = AttrDict(self.cfg)
@@ -86,7 +98,9 @@ class LengthRabiProgram(QutritAveragerProgram):
 
         # play pi pulse that we want to calibrate
         play_pulse = True
-        if 'sigma_test' in self.cfg.expt and self.cfg.expt.sigma_test == 0: play_pulse = False
+        if "sigma_test" in self.cfg.expt and self.cfg.expt.sigma_test == 0:
+            play_pulse = False
+        self.cfg.expt.gain = 0
         if play_pulse:
             if self.error_amp:
                 assert "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None
@@ -111,6 +125,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                         play=False,
                         set_reg=True,
                     )
+                    name = "X_ef"
                 else:
                     self.X_pulse(
                         q=qTest,
@@ -120,6 +135,12 @@ class LengthRabiProgram(QutritAveragerProgram):
                         play=False,
                         set_reg=True,
                     )
+                    name = "X"
+                if self.checkZZ:
+                    name += f"_ZZ{qZZ}"
+                if self.test_pi_half:
+                    name += "_half"
+                self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
                 # print("n_pulses", n_pulses)
                 for i in range(int(2 * n_pulses)):  # n_pulses is the number of cycle sets
@@ -170,7 +191,9 @@ class LengthRabiProgram(QutritAveragerProgram):
                             q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
                         )
                     else:
-                        self.Y_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True)
+                        self.Y_pulse(
+                            q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
+                        )
 
             else:
                 n_pulses = 1
@@ -181,8 +204,17 @@ class LengthRabiProgram(QutritAveragerProgram):
                         self.Xef_pulse(
                             q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
                         )
+                        name = "X_ef"
                     else:
-                        self.X_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True)
+                        self.X_pulse(
+                            q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
+                        )
+                        name = "X"
+                if self.checkZZ:
+                    name += f"_ZZ{qZZ}"
+                if self.test_pi_half:
+                    name += "_half"
+                self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
         if self.checkEF:  # map excited back to qubit ground state for measurement
             self.X_pulse(q=qTest, ZZ_qubit=qZZ, play=True)
@@ -196,6 +228,7 @@ class LengthRabiProgram(QutritAveragerProgram):
             wait=True,
             syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(4)])),
         )
+
 
 # ====================================================== #
 
@@ -252,8 +285,10 @@ class LengthRabiExperiment(Experiment):
         )
 
         lengths = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
-        if 'gain' in self.cfg.expt:
-            assert False, 'WARNING: gain is no longer supported as a parameter in cfg.expt, set it directly to the cfg parameter'
+        if "gain" in self.cfg.expt:
+            assert (
+                False
+            ), "WARNING: gain is no longer supported as a parameter in cfg.expt, set it directly to the cfg parameter"
 
         data = {"xpts": [], "avgi": [], "avgq": [], "amps": [], "phases": []}
 
@@ -266,12 +301,8 @@ class LengthRabiExperiment(Experiment):
             # from qick.helpers import progs2json
             # print(progs2json([self.prog.dump_prog()]))
 
-            avgi, avgq = lengthrabi.acquire(
-                self.im[self.cfg.aliases.soc],
-                threshold=None,
-                load_pulses=True,
-                progress=False,
-            )
+            avgi, avgq = lengthrabi.acquire(self.im[self.cfg.aliases.soc])
+            self.cfg.expt.gain = lengthrabi.cfg.expt.gain
             avgi = avgi[qTest][0]
             avgq = avgq[qTest][0]
             amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -336,8 +367,8 @@ class LengthRabiExperiment(Experiment):
         elif fit_func == "sin":
             fit_func = fitter.sinfunc
 
-        # gain = self.cfg.expt.gain
-        title = f"Length Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} {(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}"
+        gain = self.cfg.expt.gain
+        title = f"Length Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Gain {gain}) {(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}"
 
         plt.figure(figsize=(8, 5))
         plt.subplot(111, title=title, xlabel="Length [ns]", ylabel="Amplitude [ADC units]")
@@ -571,7 +602,7 @@ class NPulseExperiment(Experiment):
                     progress=False,
                     verbose=False,
                 )
-                # self.cfg.expt.gain = self.prog.gain_pi_test
+                self.cfg.expt.gain = self.prog.cfg.expt.gain
                 avgi = avgi[qTest]
                 avgq = avgq[qTest]
                 amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -665,7 +696,7 @@ class NPulseExperiment(Experiment):
                 (np.abs(Ig + 1j * Qg), np.abs(Ie + 1j * Qe)),
             ]
 
-        # current_gain = self.cfg.expt.gain
+        current_gain = self.cfg.expt.gain
 
         plt.figure(figsize=(8, 5))
         label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{2n}$)"
@@ -820,6 +851,7 @@ class PiMinusPiExperiment(Experiment):
         thresholds_q = ge_avgs_q = angles_q = fids_q = None
         if "post_process" not in self.cfg.expt.keys():  # threshold or scale
             self.cfg.expt.post_process = None
+            assert False, "you probably want to be doing this experiment with post processing or the fit will be weird"
 
         if self.cfg.expt.post_process is not None:
             if (
@@ -950,7 +982,7 @@ class PiMinusPiExperiment(Experiment):
                         progress=False,
                         verbose=False,
                     )
-                    # self.cfg.expt.gain = self.prog.gain_pi_test
+                    self.cfg.expt.gain = self.prog.cfg.expt.gain
                     avgi = avgi[qTest]
                     avgq = avgq[qTest]
                     amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -994,7 +1026,7 @@ class PiMinusPiExperiment(Experiment):
 
         prods = []
         for col in range(len(data["freq_sweep"])):
-            col_data = data["amps"][:, col]
+            col_data = data["avgi"][:, col]
             prod = np.prod(1 - col_data)
             prods.append(np.sqrt(prod))
 
@@ -1058,7 +1090,7 @@ class PiMinusPiExperiment(Experiment):
         plt.figure(figsize=(7 * cols, 6))
         plt.suptitle(title)
 
-        data_name = "amps"
+        data_name = "avgi"
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
         else:
@@ -1293,7 +1325,7 @@ class CDistortPiMinusPiExperiment(Experiment):
                         progress=False,
                         verbose=False,
                     )
-                    # self.cfg.expt.gain = self.prog.gain_pi_test
+                    self.cfg.expt.gain = self.prog.cfg.expt.gain
                     avgi = avgi[qTest]
                     avgq = avgq[qTest]
                     amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -1403,7 +1435,7 @@ class CDistortPiMinusPiExperiment(Experiment):
         plt.figure(figsize=(7 * cols, 6))
         plt.suptitle(title)
 
-        data_name = "amps"
+        data_name = "avgi"
 
         ax = plt.gca()
         ax.set_ylabel(f"N {label}", fontsize=18)
@@ -1635,7 +1667,7 @@ class IDistortDelayExperiment(Experiment):
                         progress=False,
                         verbose=False,
                     )
-                    # self.cfg.expt.gain = self.prog.gain_pi_test
+                    self.cfg.expt.gain = self.prog.cfg.expt.gain
                     avgi = avgi[qTest]
                     avgq = avgq[qTest]
                     amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -1679,7 +1711,7 @@ class IDistortDelayExperiment(Experiment):
 
         prods = []
         for col in range(len(data["time_sweep"])):
-            col_data = data["amps"][:, col]
+            col_data = data["avgi"][:, col]
             prod = np.prod(1 - col_data)
             prods.append(np.sqrt(prod))
 
@@ -1745,7 +1777,7 @@ class IDistortDelayExperiment(Experiment):
         plt.figure(figsize=(7 * cols, 6))
         plt.suptitle(title)
 
-        data_name = "amps"
+        data_name = "avgi"
 
         ax = plt.gca()
         ax.set_ylabel(f"N for {label}", fontsize=18)

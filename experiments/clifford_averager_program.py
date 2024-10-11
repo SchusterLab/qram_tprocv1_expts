@@ -293,6 +293,7 @@ class CliffordAveragerProgram(AveragerProgram):
     ):
         """
         Load/play a gaussian pulse of length 4 sigma on channel ch
+        If either play, registers are always set, or can just set the regs and not play with set_reg=True, play=False
         """
         if name not in self.pulse_dict.keys() or reload:
             assert None not in [ch, sigma]
@@ -685,6 +686,7 @@ class CliffordAveragerProgram(AveragerProgram):
         neg=False,
         extra_phase=0,
         play=False,
+        set_reg=False,
         name="X",
         flag=None,
         special=None,
@@ -698,7 +700,7 @@ class CliffordAveragerProgram(AveragerProgram):
             ZZ_qubit = q
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
         f_ge_MHz = self.f_ges[q, ZZ_qubit]
-        gain = self.pi_ge_gains[q, ZZ_qubit]
+        # gain = self.pi_ge_gains[q, ZZ_qubit]
         correction_phase = self.cfg.device.qubit.pulses.pi_ge.half_correction_phase[
             q * self.num_qubits_sample + ZZ_qubit
         ]
@@ -754,6 +756,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -769,6 +772,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -788,6 +792,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -806,6 +811,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -826,6 +832,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -843,6 +850,7 @@ class CliffordAveragerProgram(AveragerProgram):
         neg=False,
         extra_phase=0,
         play=False,
+        set_reg=False,
         name="X",
         flag=None,
         special=None,
@@ -862,6 +870,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 neg=neg,
                 extra_phase=extra_phase,
                 play=play,
+                set_reg=set_reg,
                 name=name,
                 flag=flag,
                 special=special,
@@ -881,6 +890,7 @@ class CliffordAveragerProgram(AveragerProgram):
         extra_phase=0,
         adiabatic=False,
         play=False,
+        set_reg=False,
         flag=None,
         phrst=0,
         reload=False,
@@ -895,6 +905,7 @@ class CliffordAveragerProgram(AveragerProgram):
             neg=not neg,
             extra_phase=90 + extra_phase,
             play=play,
+            set_reg=set_reg,
             name="Y",
             flag=flag,
             adiabatic=adiabatic,
@@ -1303,16 +1314,16 @@ Take care of extra clifford pulses for qutrits.
 
 
 class QutritAveragerProgram(CliffordAveragerProgram):
-    def Xef_pulse(
+    def Xef_half_pulse(
         self,
         q,
-        pihalf=False,
         divide_len=True,
         name="X_ef",
         ZZ_qubit=None,
         neg=False,
         extra_phase=0,
         play=False,
+        set_reg=False,
         flag=None,
         phrst=0,
         reload=True,
@@ -1322,7 +1333,7 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         if ZZ_qubit is None:
             ZZ_qubit = q
         f_ef_MHz = self.f_efs[q, ZZ_qubit]
-        gain = self.pi_ef_gains[q, ZZ_qubit]
+        # gain = self.pi_ef_gains[q, ZZ_qubit]
         phase_deg = self.overall_phase_ef[q] + extra_phase
         sigma_cycles = self.us2cycles(self.pi_ef_sigmas[q, ZZ_qubit], gen_ch=ch)
         type = self.cfg.device.qubit.pulses.pi_ef.type[q]
@@ -1330,21 +1341,20 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         if ZZ_qubit != q:
             waveformname += f"_ZZ{ZZ_qubit}"
             name += f"_ZZ{ZZ_qubit}"
-        if pihalf:
-            if divide_len:
-                sigma_cycles = sigma_cycles // 2
-                waveformname += "_half"
-                gain = self.pi_ef_half_gains[q, ZZ_qubit]
-            else:
-                gain = self.pi_ef_half_gain_pi_sigmas[q, ZZ_qubit]
-            name += "_half"
+        if divide_len:
+            sigma_cycles = sigma_cycles // 2
+            waveformname += "_half"
+            gain = self.pi_ef_half_gains[q, ZZ_qubit]
+        else:
+            gain = self.pi_ef_half_gain_pi_sigmas[q, ZZ_qubit]
+        name += "_half"
         assert f_ef_MHz > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
         assert (
             gain > 0
-        ), f'{"pihalf " if pihalf else ""}EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        ), f'pihalf EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
         assert (
             sigma_cycles > 0
-        ), f'EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        ), f'pihalf EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
         if neg:
             phase_deg -= 180
         if type == "const":
@@ -1357,6 +1367,7 @@ class QutritAveragerProgram(CliffordAveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -1372,6 +1383,7 @@ class QutritAveragerProgram(CliffordAveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -1390,6 +1402,7 @@ class QutritAveragerProgram(CliffordAveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
                 phrst=phrst,
                 reload=reload,
@@ -1397,6 +1410,41 @@ class QutritAveragerProgram(CliffordAveragerProgram):
             )
         else:
             assert False, f"Pulse type {type} not supported."
+
+    def Xef_pulse(
+        self,
+        q,
+        pihalf=False,
+        divide_len=True,
+        name="X_ef",
+        ZZ_qubit=None,
+        neg=False,
+        extra_phase=0,
+        play=False,
+        set_reg=False,
+        flag=None,
+        phrst=0,
+        reload=True,
+        sync_after=True,
+    ):
+        n_pulse = 1
+        if not pihalf:
+            n_pulse = 2
+        for i in range(n_pulse):
+            self.Xef_half_pulse(
+                q=q,
+                divide_len=divide_len,
+                name=name,
+                ZZ_qubit=ZZ_qubit,
+                neg=neg,
+                extra_phase=extra_phase,
+                play=play,
+                set_reg=set_reg,
+                flag=flag,
+                phrst=phrst,
+                reload=reload,
+                sync_after=sync_after,
+            )
 
     def Yef_pulse(
         self,
@@ -1407,6 +1455,7 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         neg=False,
         extra_phase=0,
         play=False,
+        set_reg=False,
         flag=None,
         phrst=0,
         reload=True,
@@ -1421,6 +1470,7 @@ class QutritAveragerProgram(CliffordAveragerProgram):
             neg=not neg,
             extra_phase=90 + extra_phase,
             play=play,
+            set_reg=set_reg,
             name="Y_ef",
             flag=flag,
             phrst=phrst,
