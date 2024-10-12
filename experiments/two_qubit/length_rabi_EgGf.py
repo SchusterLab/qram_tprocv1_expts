@@ -1473,23 +1473,15 @@ class LengthRabiEgGfExperiment(Experiment):
 
             for i_q, q in enumerate(self.cfg.expt.measure_qubits):
                 q_name = q_names[i_q]
-                try:
-                    p_avgi, pCov_avgi = fitter.fitdecaysin(data["xpts"], data["avgi"][i_q], fitparams=fitparams)
-                    data[f"fit{q_name}_avgi"] = p_avgi
-                except Exception as e:
-                    print("Exception:", e)
-                try:
-                    p_avgq, pCov_avgq = fitter.fitdecaysin(data["xpts"], data["avgq"][i_q], fitparams=fitparams)
-                    data[f"fit{q_name}_avgq"] = p_avgq
-                except Exception as e:
-                    print("Exception:", e)
-                # p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'], data["amps"][0], fitparams=None)
+                for data_name in ["avgi", "avgq", "amps"]:
+                    try:
+                        p, pCov = fitter.fitdecaysin(data["xpts"], data[data_name][i_q], fitparams=fitparams)
+                        data[f"fit{q_name}_{data_name}"] = p
+                    except Exception as e:
+                        print("Exception:", e)
 
-                if not self.cfg.expt.measure_f:
-                    # data[f'fit{q_name}_amps'] = p_amps
-                    data[f"fit{q_name}_err_avgi"] = pCov_avgi
-                    data[f"fit{q_name}_err_avgq"] = pCov_avgq
-                    # data[f'fit{q_name}_err_amps'] = pCov_amps
+                    if not self.cfg.expt.measure_f:
+                        data[f"fit{q_name}_err_{data_name}"] = pCov
 
         return data
 
@@ -1886,7 +1878,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
         cols = len(self.cfg.expt.measure_qubits)
         index = rows * 100 + cols * 10
         # plt.figure(figsize=(7 * cols, 6))
-        plt.figure(figsize=(10, rows * 5))
+        plt.figure(figsize=(9, rows * 5))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length (Gain {self.cfg.expt.gain})")
 
         # ------------------------------ #
@@ -1895,9 +1887,9 @@ class EgGfFreqLenChevronExperiment(Experiment):
         this_idx = index + 1
         plt.subplot(this_idx, title=f"Qubit A ({self.cfg.expt.measure_qubits[0]})")
         ax = plt.gca()
-        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
-        ax.set_xlabel("Length [ns]", fontsize=18)
-        ax.tick_params(axis="both", which="major", labelsize=16)
+        ax.set_ylabel("Pulse Frequency [MHz]")  # , fontsize=18)
+        ax.set_xlabel("Length [ns]")  # , fontsize=18)
+        ax.tick_params(axis="both", which="major")  # , labelsize=16)
         data_name = "amps"
         plot_freq, plot_len = self.plot_rabi_chevron(
             data=data,
@@ -1917,8 +1909,8 @@ class EgGfFreqLenChevronExperiment(Experiment):
         this_idx = index + 2
         plt.subplot(this_idx, title=f"Qubit B ({self.cfg.expt.measure_qubits[1]})")
         ax = plt.gca()
-        ax.tick_params(axis="both", which="major", labelsize=16)
-        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.tick_params(axis="both", which="major")  # , labelsize=16)
+        ax.set_xlabel("Length [ns]")  # , fontsize=18)
         data_name = "amps"
         plot_freq, plot_len = self.plot_rabi_chevron(
             data=data,
@@ -1972,7 +1964,7 @@ class EgGfFreqLenChevronExperiment(Experiment):
         if saveplot:
             plt.style.use("dark_background")
         # plt.figure(figsize=(7 * cols, 6))
-        plt.figure(figsize=(10, rows * 3))
+        plt.figure(figsize=(9, rows * 5))
         plt.suptitle(f"Eg-Gf Chevron Frequency vs. Length Fit (Gain {self.cfg.expt.gain})")
 
         # ------------------------------ #
@@ -1981,9 +1973,9 @@ class EgGfFreqLenChevronExperiment(Experiment):
         this_idx = index + 1
         plt.subplot(this_idx, title=f"Qubit A ({self.cfg.expt.measure_qubits[0]})")
         ax = plt.gca()
-        ax.set_ylabel("Pulse Frequency [MHz]", fontsize=18)
-        ax.tick_params(axis="both", which="major", labelsize=16)
-        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.set_ylabel("Pulse Frequency [MHz]")  # , fontsize=18)
+        ax.tick_params(axis="both", which="major")  # , labelsize=16)
+        ax.set_xlabel("Length [ns]")  # , fontsize=18)
         data_name = "data_fitamps"
         plot_freq, plot_len = self.plot_rabi_chevron(
             data=data,
@@ -2004,8 +1996,8 @@ class EgGfFreqLenChevronExperiment(Experiment):
         this_idx = index + 2
         plt.subplot(this_idx, title=f"Qubit B ({self.cfg.expt.measure_qubits[1]})")
         ax = plt.gca()
-        ax.tick_params(axis="both", which="major", labelsize=16)
-        ax.set_xlabel("Length [ns]", fontsize=18)
+        ax.tick_params(axis="both", which="major")  # , labelsize=16)
+        ax.set_xlabel("Length [ns]")  # , fontsize=18)
         data_name = "data_fitamps"
         plot_freq, plot_len = self.plot_rabi_chevron(
             data=data,
@@ -2673,8 +2665,8 @@ class PiMinusPiEgGfExperiment(Experiment):
                     np.prod(np.abs(data["amps"][iq]), axis=0)
                 )  # expect to end in e, so we compare relative to e
 
-        title = f"Frequency Error Q{qA} Q{qB}"
-        plt.figure(figsize=(8, 9))
+        title = f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length})"
+        plt.figure(figsize=(8, 8))
         plt.suptitle(title)
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
@@ -2726,7 +2718,7 @@ class PiMinusPiEgGfExperiment(Experiment):
         else:
             old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
 
-        title = f"Frequency Error Q{qA} Q{qB}"
+        title = f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length})"
         label = "($X_{\pi}, X_{-\pi})^N$"
 
         inner_sweep = data["freq_sweep"]
@@ -2740,17 +2732,17 @@ class PiMinusPiEgGfExperiment(Experiment):
         data_name = "amps"
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        ax_qA.set_ylabel(f"N {label}", fontsize=18)
-        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        ax_qA.set_ylabel(f"N {label}")  # , fontsize=18)
+        ax_qA.tick_params(axis="both", which="major")  # , labelsize=16)
         plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][0], cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
         plt.colorbar()
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
-        ax_qA.set_ylabel(f"N {label}", fontsize=18)
-        ax_qB.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
-        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qA.set_ylabel(f"N {label}")  # , fontsize=18)
+        ax_qB.set_xlabel("$f-f_0$ [MHz]")  # , fontsize=18)
+        ax_qB.tick_params(axis="both", which="major")  # , labelsize=16)
         plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][1], cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
