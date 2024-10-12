@@ -150,7 +150,7 @@ class Monitoring():
                  qubits = [0,1,2,3],
                  ip_address='10.108.30.56',
                  config_file='config_q3diamond_full688and638_reset.yml', 
-                 save_path='data_240617',
+                 save_path='data_241007',
                  debug=False,
                  using_LO=False, 
                  live_plot=True):

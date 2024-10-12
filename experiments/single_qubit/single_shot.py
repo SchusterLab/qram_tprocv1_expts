@@ -1,18 +1,17 @@
-import matplotlib.pyplot as plt
-import numpy as np
-from qick import *
-from qick.helpers import gauss
 from copy import deepcopy
 from itertools import cycle
 
-from slab import Experiment, dsfit, AttrDict
-from tqdm import tqdm_notebook as tqdm
 import experiments.fitting as fitter
-
+import matplotlib.pyplot as plt
+import numpy as np
 from experiments.clifford_averager_program import (
     QutritAveragerProgram,
     ps_threshold_adjust,
 )
+from qick import *
+from qick.helpers import gauss
+from slab import AttrDict, Experiment, dsfit
+from tqdm import tqdm_notebook as tqdm
 
 default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 linestyle_cycle = ["solid", "dashed", "dotted", "dashdot"]
@@ -80,10 +79,10 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
 
     numbins = 200
 
-    xg, yg = np.median(Ig), np.median(Qg)
-    xe, ye = np.median(Ie), np.median(Qe)
+    xg, yg = np.average(Ig), np.average(Qg)
+    xe, ye = np.average(Ie), np.average(Qe)
     if plot_f:
-        xf, yf = np.median(If), np.median(Qf)
+        xf, yf = np.average(If), np.average(Qf)
 
     if verbose:
         print("Unrotated:")
@@ -147,23 +146,6 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
     if plot_f:
         theta = -np.arctan2((yf - yg), (xf - xg))
 
-    """
-    Fine re-adjustment of rotation angle from g, e only
-    """
-    Ig_new = Ig * np.cos(theta) - Qg * np.sin(theta)
-    Qg_new = Ig * np.sin(theta) + Qg * np.cos(theta)
-    xg, yg = np.median(Ig_new), np.median(Qg_new)
-    if not plot_f:
-        Ie_new = Ie * np.cos(theta) - Qe * np.sin(theta)
-        Qe_new = Ie * np.sin(theta) + Qe * np.cos(theta)
-        xe, ye = np.median(Ie_new), np.median(Qe_new)
-        theta += -np.arctan2((ye - yg), (xe - xg))
-    else:
-        If_new = If * np.cos(theta) - Qf * np.sin(theta)
-        Qf_new = If * np.sin(theta) + Qf * np.cos(theta)
-        xf, yf = np.median(If_new), np.median(Qf_new)
-        theta += -np.arctan2((yf - yg), (xf - xg))
-
     """Rotate the IQ data"""
     Ig_new = Ig * np.cos(theta) - Qg * np.sin(theta)
     Qg_new = Ig * np.sin(theta) + Qg * np.cos(theta)
@@ -176,10 +158,10 @@ def hist(data, plot=True, span=None, verbose=True, title=None, fid_avg=False):
         Qf_new = If * np.sin(theta) + Qf * np.cos(theta)
 
     """New means of each blob"""
-    xg, yg = np.median(Ig_new), np.median(Qg_new)
-    xe, ye = np.median(Ie_new), np.median(Qe_new)
+    xg, yg = np.average(Ig_new), np.average(Qg_new)
+    xe, ye = np.average(Ie_new), np.average(Qe_new)
     if plot_f:
-        xf, yf = np.median(If_new), np.median(Qf_new)
+        xf, yf = np.average(If_new), np.average(Qf_new)
     if verbose:
         print("Rotated:")
         print(
@@ -408,22 +390,11 @@ def multihist(
 
     """Compute the rotation angle"""
     if theta is None:
-        xg, yg = np.median(Ig_tot), np.median(Qg_tot)
-        xe, ye = np.median(Ie_tot), np.median(Qe_tot)
+        xg, yg = np.average(Ig_tot), np.average(Qg_tot)
+        xe, ye = np.average(Ie_tot), np.average(Qe_tot)
         theta = -np.arctan2((ye - yg), (xe - xg))
     else:
         theta *= np.pi / 180
-
-    """
-    Fine re-adjustment of rotation angle from g, e only
-    """
-    Ig_new = Ig_tot * np.cos(theta) - Qg_tot * np.sin(theta)
-    Qg_new = Ig_tot * np.sin(theta) + Qg_tot * np.cos(theta)
-    Ie_new = Ie_tot * np.cos(theta) - Qe_tot * np.sin(theta)
-    Qe_new = Ie_tot * np.sin(theta) + Qe_tot * np.cos(theta)
-    xg, yg = np.median(Ig_new), np.median(Qg_new)
-    xe, ye = np.median(Ie_new), np.median(Qe_new)
-    theta += -np.arctan2((ye - yg), (xe - xg))
 
     Ig_tot_tot_new = Ig_tot_tot * np.cos(theta) - Qg_tot_tot * np.sin(theta)
     Qg_tot_tot_new = Ig_tot_tot * np.sin(theta) + Qg_tot_tot * np.cos(theta)
@@ -464,22 +435,22 @@ def multihist(
         I = I[check_qubit]
         Q = Q[check_qubit]
 
-        xmed, ymed = np.median(I), np.median(Q)
+        xavg, yavg = np.average(I), np.average(Q)
 
         if verbose:
-            print(check_state, "play_pulses", play_pulses, "unrotated medians:")
-            print(f"I {xmed} +/- {np.std(I)} \t Q {ymed} +/- {np.std(Q)} \t Amp {np.abs(xmed+1j*ymed)}")
+            print(check_state, "play_pulses", play_pulses, "unrotated averages:")
+            print(f"I {xavg} +/- {np.std(I)} \t Q {yavg} +/- {np.std(Q)} \t Amp {np.abs(xavg+1j*yavg)}")
 
         """Rotate the IQ data"""
         I_new = I * np.cos(theta) - Q * np.sin(theta)
         Q_new = I * np.sin(theta) + Q * np.cos(theta)
 
         """New means of each blob"""
-        xmed_new, ymed_new = np.median(I_new), np.median(Q_new)
+        xavg_new, yavg_new = np.average(I_new), np.average(Q_new)
         if verbose:
             print(f"Rotated (theta={theta}):")
             print(
-                f"I {xmed_new} +/- {np.std(I_new)} \t Q {ymed_new} +/- {np.std(Q_new)} \t Amp {np.abs(xmed_new+1j*ymed_new)}"
+                f"I {xavg_new} +/- {np.std(I_new)} \t Q {yavg_new} +/- {np.std(Q_new)} \t Amp {np.abs(xavg_new+1j*yavg_new)}"
             )
 
         if plot:
@@ -497,8 +468,8 @@ def multihist(
                 alpha=0.3,
             )
             axs[0, 0].plot(
-                [xmed],
-                [ymed],
+                [xavg],
+                [yavg],
                 color="k",
                 linestyle=":",
                 marker="o",
@@ -516,8 +487,8 @@ def multihist(
                 alpha=0.3,
             )
             axs[0, 1].plot(
-                [xmed_new],
-                [ymed_new],
+                [xavg_new],
+                [yavg_new],
                 color="k",
                 linestyle=":",
                 marker="o",
@@ -581,11 +552,11 @@ def multihist(
             I = I[check_qubit]
             Q = Q[check_qubit]
 
-            xmed, ymed = np.median(I), np.median(Q)
+            xavg, yavg = np.average(I), np.average(Q)
 
             if verbose:
-                print(check_state, "play_pulses", play_pulses, "unrotated medians:")
-                print(f"I {xmed} +/- {np.std(I)} \t Q {ymed} +/- {np.std(Q)} \t Amp {np.abs(xmed+1j*ymed)}")
+                print(check_state, "play_pulses", play_pulses, "unrotated averages:")
+                print(f"I {xavg} +/- {np.std(I)} \t Q {yavg} +/- {np.std(Q)} \t Amp {np.abs(xavg+1j*yavg)}")
 
             """Rotate the IQ data"""
             I_new = I * np.cos(theta) - Q * np.sin(theta)

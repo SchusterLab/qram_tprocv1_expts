@@ -136,7 +136,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 pulse_cfg = self.cfg.device.qubit.pulses.pulse_1p
                 pulse_name = "pulse_1p"
             pulse_filename = pulse_cfg.filename[0]
-            pulse_gains = pulse_cfg.gain  # one entry for each qubit
+            pulse_gains = pulse_cfg.gain  # one entry for each qubit for each pulse
 
             # pulse_filepath = os.path.join(os.getcwd(), pulse_filename + '.npz')
             pulse_filepath = os.path.join("S:\\QRAM\\qram_4QR2\\optctrl_pulses", pulse_filename + ".npz")
@@ -327,23 +327,27 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         return count_us
 
     def q2_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
-        if ZZ_qubit is None:
-            ZZ_qubit = 2
-        phase_deg = self.overall_phase[2]
-        phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[2])
-        count_us = self.handle_next_pulse(
-            count_us=count_us,
-            ch=self.qubit_chs[2],
-            freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]),
-            type=self.pi_ef_types[2],
-            phase=phase,
-            gain=self.pi_ef_gains[2, ZZ_qubit],
-            sigma_us=self.pi_ef_sigmas[2, ZZ_qubit],
-            waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}_q2',
-        )
-        if sync_after:
-            self.sync_all()
-        return count_us
+        self.Xef_pulse(q=2, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
+        if self.timestep_us < np.inf:
+            assert False, "no time stepping on the ef pulse right now"
+        return 0
+        # if ZZ_qubit is None:
+        #     ZZ_qubit = 2
+        # phase_deg = self.overall_phase[2]
+        # phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[2])
+        # count_us = self.handle_next_pulse(
+        #     count_us=count_us,
+        #     ch=self.qubit_chs[2],
+        #     freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]),
+        #     type=self.pi_ef_types[2],
+        #     phase=phase,
+        #     gain=self.pi_ef_gains[2, ZZ_qubit],
+        #     sigma_us=self.pi_ef_sigmas[2, ZZ_qubit],
+        #     waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}_q2',
+        # )
+        # if sync_after:
+        #     self.sync_all()
+        # return count_us
 
     def q3_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
         self.Xef_pulse(q=3, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
@@ -370,26 +374,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             pass
 
         elif init_state == "|0>|1>":
+            self.Y_pulse(q=1, play=True)
+            # print("WARNING INITIALIZING 01 WITH 6 PI/2 PULSES")
             # self.Y_pulse(q=1, play=True)
-            print("preparing 01 with 2 pi/2 pulses")
-            self.Y_pulse(q=1, play=True, pihalf=True)
-            self.Y_pulse(q=1, play=True, pihalf=True)
+            # self.Y_pulse(q=1, play=True)
 
         elif init_state == "|0>|0+1>":
-            # self.Y_pulse(q=1, play=True, pihalf=True)
-            print("preparing 0+ with 5 pi/2 pulses")
-            for i in range(5):
-                self.Y_pulse(q=1, play=True, pihalf=True)
+            self.Y_pulse(q=1, play=True, pihalf=True)
 
         elif init_state == "|0>|2>":
             self.Y_pulse(q=1, play=True)
             self.Yef_pulse(q=1, play=True)
 
         elif init_state == "|1>|0>":
-            # self.Y_pulse(q=0, play=True, pihalf=False)
-            print("preparing 10 with 2 pi/2 pulses")
-            self.Y_pulse(q=0, play=True, pihalf=True)
-            self.Y_pulse(q=0, play=True, pihalf=True)
+            self.Y_pulse(q=0, play=True, pihalf=False)
 
         elif init_state == "|1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
@@ -482,6 +480,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.X_pulse(q=3, ZZ_qubit=0, play=True)
             self.Xef_pulse(q=3, ZZ_qubit=0, play=True)
 
+        elif init_state == "|test>":
+            # print("-x/2")
+            # self.X_pulse(q=1, pihalf=True, neg=True, play=True)
+            # print("z/2")
+            # self.Z_pulse(q=1, pihalf=True, play=True)
+            # print("y/2")
+            # self.Y_pulse(q=1, pihalf=True, play=True)
+
+            for i in range(1):
+                print("-x/2")
+                self.X_pulse(q=1, pihalf=True, neg=True, play=True)
+                print("x/2")
+                self.X_pulse(q=1, pihalf=True, neg=False, play=True)
+
         elif (
             "Q" in init_state
         ):  # specify other qubits to prepare. it will always be specified as QaQb_regular_state_name, with regular state name specified as |Qa>|Qb>
@@ -533,13 +545,6 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             elif init_state_other == "|0+1>|1>":
                 self.Y_pulse(q=qb, play=True)  # -> 1
                 self.Y_pulse(q=qa, ZZ_qubit=qb, pihalf=True, play=True)
-
-            elif init_state_other == "|testX>":
-                self.X_pulse(q=0, play=True)
-                self.Y_pulse(q=0, pihalf=True, neg=True, play=True)
-            elif init_state_other == "|testY>":
-                self.X_pulse(q=0, play=True)
-                self.X_pulse(q=0, pihalf=True, play=True)
 
             else:
                 assert False, f"Init state {init_state} not valid"
