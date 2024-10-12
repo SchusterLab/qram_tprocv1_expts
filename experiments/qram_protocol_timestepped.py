@@ -136,7 +136,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 pulse_cfg = self.cfg.device.qubit.pulses.pulse_1p
                 pulse_name = "pulse_1p"
             pulse_filename = pulse_cfg.filename[0]
-            pulse_gains = pulse_cfg.gain  # one entry for each qubit
+            pulse_gains = pulse_cfg.gain  # one entry for each qubit for each pulse
 
             # pulse_filepath = os.path.join(os.getcwd(), pulse_filename + '.npz')
             pulse_filepath = os.path.join("S:\\QRAM\\qram_4QR2\\optctrl_pulses", pulse_filename + ".npz")
@@ -327,23 +327,27 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         return count_us
 
     def q2_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
-        if ZZ_qubit is None:
-            ZZ_qubit = 2
-        phase_deg = self.overall_phase[2]
-        phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[2])
-        count_us = self.handle_next_pulse(
-            count_us=count_us,
-            ch=self.qubit_chs[2],
-            freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]),
-            type=self.pi_ef_types[2],
-            phase=phase,
-            gain=self.pi_ef_gains[2, ZZ_qubit],
-            sigma_us=self.pi_ef_sigmas[2, ZZ_qubit],
-            waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}_q2',
-        )
-        if sync_after:
-            self.sync_all()
-        return count_us
+        self.Xef_pulse(q=2, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
+        if self.timestep_us < np.inf:
+            assert False, "no time stepping on the ef pulse right now"
+        return 0
+        # if ZZ_qubit is None:
+        #     ZZ_qubit = 2
+        # phase_deg = self.overall_phase[2]
+        # phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[2])
+        # count_us = self.handle_next_pulse(
+        #     count_us=count_us,
+        #     ch=self.qubit_chs[2],
+        #     freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]),
+        #     type=self.pi_ef_types[2],
+        #     phase=phase,
+        #     gain=self.pi_ef_gains[2, ZZ_qubit],
+        #     sigma_us=self.pi_ef_sigmas[2, ZZ_qubit],
+        #     waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}_q2',
+        # )
+        # if sync_after:
+        #     self.sync_all()
+        # return count_us
 
     def q3_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
         self.Xef_pulse(q=3, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
