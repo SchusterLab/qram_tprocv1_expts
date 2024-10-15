@@ -439,9 +439,11 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.pulse(ch=params["ch"])
                 self.sync_all()
 
-    # I_mhz_vs_us, Q_mhz_vs_us = functions of time in us, in units of MHz
-    # times_us = times at which I_mhz_vs_us and Q_mhz_vs_us are defined
     def add_IQ(self, ch, name, I_mhz_vs_us, Q_mhz_vs_us, times_us, plot_IQ=True):
+        """
+        I_mhz_vs_us, Q_mhz_vs_us = functions of time in us, in units of MHz
+        times_us = times at which I_mhz_vs_us and Q_mhz_vs_us are defined
+        """
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
         samps_per_clk = gencfg["samps_per_clk"]
@@ -516,6 +518,7 @@ class CliffordAveragerProgram(AveragerProgram):
         phase_deg=None,
         gain=None,
         reload=False,
+        ro_ch=None,
         play=False,
         set_reg=False,
         flag=None,
@@ -545,6 +548,7 @@ class CliffordAveragerProgram(AveragerProgram):
                         phase_deg=phase_deg,
                         gain=gain,
                         flag=flag,
+                        ro_ch=ro_ch,
                     )
                 }
             )
@@ -577,10 +581,12 @@ class CliffordAveragerProgram(AveragerProgram):
                 params["phase_deg"] = phase_deg
             if gain is not None:
                 params["gain"] = gain
+            if ro_ch is not None:
+                params["ro_ch"] = ro_ch
             self.set_pulse_registers(
                 ch=params["ch"],
                 style="arb",
-                freq=self.freq2reg(params["freq_MHz"], gen_ch=params["ch"]),
+                freq=self.freq2reg(params["freq_MHz"], gen_ch=params["ch"], ro_ch=params["ro_ch"]),
                 phase=self.deg2reg(params["phase_deg"], gen_ch=params["ch"]),
                 gain=params["gain"],
                 waveform=params["waveformname"],
@@ -637,8 +643,8 @@ class CliffordAveragerProgram(AveragerProgram):
                 plot_IQ=self.cfg.expt.plot_IQ,
             )
 
-    # mu, beta are dimensionless
     def add_adiabatic(self, ch, name, mu, beta, period_us):
+        """mu, beta are dimensionless"""
         period = self.us2cycles(period_us, gen_ch=ch)
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"]
@@ -717,10 +723,149 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.pulse(ch=params["ch"])
                 self.sync_all()
 
+    def setup_full_mux_pulse(
+        self,
+        name,
+        ch,
+        mask,
+        mux_freqs,
+        lengths,
+        relative_amps=None,
+        pulse_I_shapes=None,
+        pulse_Q_shapes=None,
+        plot_IQ=True,
+        dt_us=0.01e-3,
+    ):
+        """
+        Generates the I/Q modulated pulse on 1 full ch which generates each of the mux_freqs on top of a mixer_freq
+        that allows for pulse shaping on each of the frequencies.
+
+        mask: list of which indices in lengths, mux_freqs, pulse_I_shapes, pulse_Q_shapes to play
+        mux_freqs: list of frequencies to play in MHz
+        mixer_freq: carrier frequency in MHz
+        lengths: length of each frequency to play in us; for indices that don't use the max length, nothing is played for that frequency for the rest of the time
+        pulse_I_shapes, pulse_Q_shapes: intended pulse shaping on each frequency as if they were generated individually. Just need the I/Q to have right relative amplitude vs us; amplitude will be rescaled to 1 and then by the DAC gain.
+        relative_amps: additional scaling factor applied on top of the IQ pulse waveforms to scale the amplitude of each frequency component individually
+
+        returns: tot_I_vs_us, tot_Q_vs_us, the total I/Q waveforms to be played and times_us the times at which these waveforms are sampled
+        """
+        assert len(mask) == len(mux_freqs) == len(lengths)
+        if pulse_I_shapes is None:
+            pulse_I_shape = [None] * len(mux_freqs)
+        if pulse_Q_shapes is None:
+            pulse_Q_shape = [None] * len(mux_freqs)
+
+        tot_length_us = max(lengths)
+        times_us = np.linspace(0, tot_length_us, tot_length_us // dt_us)
+        tot_I_vs_us = np.zeros_like(times_us)
+        tot_Q_vs_us = np.zeros_like(times_us)
+        modulated_Is = np.zeros((len(mux_freqs), len(times_us)))
+        modulated_Qs = np.zeros((len(mux_freqs), len(times_us)))
+        if relative_amps is None:
+            relative_amps = np.ones(len(mux_freqs))
+        for q in mask:
+            mask_func = relative_amps[q] * np.heaviside(lengths[q] - times_us, 0)
+            mask_func[0] = 0
+            mask_func[-1] = 0
+
+            pulse_I_shape = pulse_I_shapes[q]
+            pulse_Q_shape = pulse_Q_shapes[q]
+            if pulse_I_shape is None and pulse_Q_shape is None:
+                pulse_I_shape = mask_func * np.ones_like(times_us)
+                pulse_Q_shape = np.zeros_like(times_us)
+
+            check_I_Q_either_both_defined_or_undefined = (pulse_I_shape is None and pulse_Q_shape is None) or (
+                pulse_I_shape is not None and pulse_Q_shape is not None
+            )
+            assert (
+                check_I_Q_either_both_defined_or_undefined
+            ), f"Either both I and Q shapes for q {q} must be defined or both must be None"
+
+            modulated_I = pulse_I_shape * np.cos(mux_freqs[q] * 2 * np.pi * times_us) - pulse_Q_shape * np.sin(
+                mux_freqs[q] * 2 * np.pi * times_us
+            )
+            modulated_Is[q] = modulated_I
+            tot_I_vs_us += modulated_I
+
+            modulated_Q = pulse_I_shape * np.sin(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.cos(
+                mux_freqs[q] * 2 * np.pi * times_us
+            )
+            modulated_Qs[q] = modulated_Q
+            tot_Q_vs_us += modulated_Q
+
+        if plot_IQ:
+            plt.figure()
+            plt.title(f"Assembling Modulated MUX Pulse on ch{ch}, waveform {name}")
+            for q in mask:
+                plt.plot(times_us, modulated_Is[q], label=f"I_{q}")
+                plt.plot(times_us, modulated_Qs[q], label=f"Q_{q}")
+            plt.ylabel("Amplitude [a.u.]")
+            plt.xlabel("Time [us]")
+            plt.legend()
+            plt.show()
+
+        return tot_I_vs_us, tot_Q_vs_us, times_us
+
+    def handle_full_mux_pulse(
+        self,
+        name,
+        ch,
+        mask=None,
+        mux_freqs=None,
+        mixer_freq=None,
+        lengths=None,
+        relative_amps=None,
+        pulse_I_shapes=None,
+        pulse_Q_shapes=None,
+        phase_deg=None,
+        gain=None,
+        plot_IQ=True,
+        dt_us=0.01e-3,
+        ro_ch=None,
+        reload=False,
+        play=False,
+        set_reg=False,
+        sync_after=True,
+        flag=None,
+    ):
+        tot_I_vs_us, tot_Q_vs_us, times_us = [None] * 2
+        if name not in self.pulse_dict.keys() or reload:
+            assert None not in [ch, mask, mux_freqs, mixer_freq, lengths]
+            tot_I_vs_us, tot_Q_vs_us = self.setup_full_mux_pulse(
+                name=name,
+                ch=ch,
+                mask=mask,
+                mux_freqs=mux_freqs,
+                lengths=lengths,
+                relative_amps=relative_amps,
+                pulse_I_shapes=pulse_I_shapes,
+                pulse_Q_shapes=pulse_Q_shapes,
+                plot_IQ=plot_IQ,
+                dt_us=dt_us,
+            )
+
+        self.handle_IQ_pulse(
+            name=name,
+            ch=ch,
+            I_mhz_vs_us=tot_I_vs_us,
+            Q_mhz_vs_us=tot_Q_vs_us,
+            times_us=times_us,
+            freq_MHz=mixer_freq,
+            ro_ch=ro_ch,
+            phase_deg=phase_deg,
+            gain=gain,
+            reload=reload,
+            play=play,
+            set_reg=set_reg,
+            flag=flag,
+            sync_after=sync_after,
+        )
+
     """
     Clifford pulse defns. extra_phase is given in deg. flag can be used to identify certain pulses.
     If play=False, just loads pulse.
     special: adiabatic, pulseiq
+    General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
     """
 
     def X_half_pulse(
@@ -786,9 +931,13 @@ class CliffordAveragerProgram(AveragerProgram):
             gain = self.pi_ge_half_gain_pi_sigmas[q, ZZ_qubit]
         name += "_half"
 
-        assert f_ge_MHz > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
-        assert gain > 0, f'pihalf pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
-        assert sigma_cycles > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}may not be calibrated'
+        assert f_ge_MHz > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}freq may not be calibrated'
+        assert (
+            gain > 0
+        ), f'pihalf pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}gain may not be calibrated'
+        assert (
+            sigma_cycles > 0
+        ), f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}sigma may not be calibrated'
         if neg:
             phase_deg -= 180
         if type == "const":
@@ -885,7 +1034,6 @@ class CliffordAveragerProgram(AveragerProgram):
         else:
             assert False, f"Pulse type {type} not supported."
 
-    # General drive: Omega cos((wt+phi)X) -> Delta/2 Z + Omega/2 (cos(phi) X + sin(phi) Y)
     def X_pulse(
         self,
         q,
@@ -1204,12 +1352,11 @@ class CliffordAveragerProgram(AveragerProgram):
                     syncdelay=syncdelay,
                 )
 
-    """
-    Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
-    Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
-    """
-
     def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False):
+        """
+        Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
+        Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
+        """
 
         idata, qdata = self.get_multireadout_shots(angle=angle, threshold_final=threshold)
 
@@ -1220,13 +1367,12 @@ class CliffordAveragerProgram(AveragerProgram):
             qdata = np.average(qdata, axis=1)
         return idata, qdata
 
-    """
-    For all readouts, angle is applied if None; threshold_final is applied only to the last readout
-    threshold_final should be specified for all qubits
-    if avg_trigs is False, return as if each trig is a separate readout
-    """
-
     def get_multireadout_shots(self, angle=None, threshold_final=None, avg_trigs=True):
+        """
+        For all readouts, angle is applied if None; threshold_final is applied only to the last readout
+        threshold_final should be specified for all qubits
+        if avg_trigs is False, return as if each trig is a separate readout
+        """
         n_init_readout = self.cfg.expt.n_init_readout
         n_trig = self.cfg.expt.n_trig
         # print('n_init_readout', n_init_readout, 'n_trig', n_trig)
@@ -1312,15 +1458,14 @@ class CliffordAveragerProgram(AveragerProgram):
             save_experiments=save_experiments,
         )
 
-    """
-    If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
-    If post_process == 'scale': uses angle + ge_avgs to scale the average of all shots on a scale of 0 to 1. ge_avgs should be of shape (num_total_qubits, 4) and should represent the pre-rotation Ig, Qg, Ie, Qe
-    If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
-    """
-
     def acquire_rotated(
         self, soc, progress, angle=None, threshold=None, ge_avgs=None, post_process=None, verbose=False
     ):
+        """
+        If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
+        If post_process == 'scale': uses angle + ge_avgs to scale the average of all shots on a scale of 0 to 1. ge_avgs should be of shape (num_total_qubits, 4) and should represent the pre-rotation Ig, Qg, Ie, Qe
+        If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
+        """
         avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
         if post_process == None:
             avgi_rot, avgq_rot = self.get_shots(angle=angle, avg_shots=True, verbose=verbose)
@@ -1401,13 +1546,15 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         else:
             gain = self.pi_ef_half_gain_pi_sigmas[q, ZZ_qubit]
         name += "_half"
-        assert f_ef_MHz > 0, f'EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        assert (
+            f_ef_MHz > 0
+        ), f'EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}freq may not be calibrated'
         assert (
             gain > 0
-        ), f'pihalf EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        ), f'pihalf EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}gain may not be calibrated'
         assert (
             sigma_cycles > 0
-        ), f'pihalf EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}may not be calibrated'
+        ), f'pihalf EF pulse on {q} {"ZZ "+str(ZZ_qubit)+" " if ZZ_qubit != q else ""}sigma may not be calibrated'
         if neg:
             phase_deg -= 180
         if type == "const":
@@ -1542,11 +1689,10 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         if play:
             self.overall_phase_ef[q] += phase_adjust + extra_phase
 
-    """
-    cool_idle should be the same length as cool_qubits
-    """
-
     def active_cool(self, cool_qubits, cool_idle):
+        """
+        cool_idle should be the same length as cool_qubits
+        """
         # print('cooling qubits', cool_qubits, 'with idle times', cool_idle)
         assert len(cool_idle) == len(cool_qubits)
 
