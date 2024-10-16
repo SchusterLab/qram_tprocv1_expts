@@ -979,8 +979,9 @@ class MultiReadoutProgram(QutritAveragerProgram):
         if self.cfg.expt.pulse_f:
             self.Xef_pulse(q=qTest, ZZ_qubit=qZZ, play=True)
 
-        init_read_wait_us = self.cfg.expt.init_read_wait_us
-        n_trig = self.cfg.expt.n_trig
+        if self.cfg.expt.n_init_readout > 0:
+            init_read_wait_us = self.cfg.expt.init_read_wait_us
+            n_trig = self.cfg.expt.n_trig
 
         self.use_gf_readout = False
         if "use_gf_readout" in self.cfg.expt and self.cfg.expt.use_gf_readout:
@@ -1020,24 +1021,6 @@ class MultiReadoutProgram(QutritAveragerProgram):
             syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in self.qubits])),
         )
 
-    # def get_shots(self):
-    #     n_init_readout = self.cfg.expt.n_init_readout
-    #     n_trig = self.cfg.expt.n_trig
-
-    #     if 'expts' not in self.cfg.expt: self.cfg.expt.expts = 1
-    #     print(n_init_readout, n_trig, self.cfg.expt.reps)
-
-    #     shots_i0 = np.array([self.di_buf[i].reshape((self.cfg.expt.expts, n_init_readout*n_trig*self.cfg.expt.reps)) / self.readout_lengths_adc[i] for i in range(len(self.ro_chs))])
-    #     shots_q0 = np.array([self.dq_buf[i].reshape((self.cfg.expt.expts, n_init_readout*n_trig*self.cfg.expt.reps)) / self.readout_lengths_adc[i] for i in range(len(self.ro_chs))])
-
-    #     shots_i0_reshaped = np.zeros((len(self.ro_chs), self.cfg.expt.expts, n_init_readout, self.cfg.expt.reps))
-    #     shots_q0_reshaped = np.zeros((len(self.ro_chs), self.cfg.expt.expts, n_init_readout, self.cfg.expt.reps))
-    #     for i in range(len(self.ro_chs)):
-    #         for expt in range(self.cfg.expt.expts):
-    #             shots_i0_reshaped[i, expt, :, :] = np.average(shots_i0[i, expt].reshape(self.cfg.expt.reps, n_init_readout, n_trig), axis=2).T
-    #             shots_q0_reshaped[i, expt, :, :] = np.average(shots_q0[i, expt].reshape(self.cfg.expt.reps, n_init_readout, n_trig), axis=2).T
-    #     return shots_i0_reshaped, shots_q0_reshaped
-
 
 class MultiReadoutExperiment(Experiment):
     """
@@ -1050,6 +1033,17 @@ class MultiReadoutExperiment(Experiment):
         n_init_readout: number of times to do readout
         init_read_wait_us: wait time between the initialization readouts and start of next init readout/start of experiment
         n_trig: the acquisition length can't be changed within 1 experiment, so to extend the readout, repeat the standard readout length acquistiion n times
+
+        full_mux_expt: whether to use the full_mux to do the readout or standard mux setup
+        If True, specify:
+        full_mux_ch
+        mask: list of qubits to play the readout
+        Specify either (see setup_full_mux_pulse for more details):
+        lengths
+        OR
+        pulse_I_shapes
+        pulse_Q_shapes
+        times_us
     )
     """
 
@@ -1090,9 +1084,14 @@ class MultiReadoutExperiment(Experiment):
         #     self.use_gf_readout = self.cfg.expt.use_gf_readout
         # if self.use_gf_readout:
         #     self.cfg.device.readout.readout_length = 2*np.array(self.cfg.device.readout.readout_length)
-        #     print('readout params', self.cfg.device.readout)
+        # print("readout params", self.cfg.device.readout)
+
         if "avg_trigs" not in self.cfg.expt:
             self.cfg.expt.avg_trigs = True
+
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
 
         # ================= #
         # Baseline single shot
@@ -1105,7 +1104,10 @@ class MultiReadoutExperiment(Experiment):
         cfg.expt.n_trig = 1
         cfg.expt.pulse_e = False
         cfg.expt.pulse_f = False
-        histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
+        if full_mux_expt:
+            histpro = MultiReadoutFullMuxProgram(soccfg=self.soccfg, cfg=cfg)
+        else:
+            histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
         avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], progress=progress)
         self.prog = histpro
         data["Ig_baseline"], data["Qg_baseline"] = histpro.get_multireadout_shots(avg_trigs=self.cfg.expt.avg_trigs)
@@ -1122,7 +1124,10 @@ class MultiReadoutExperiment(Experiment):
             cfg.expt.n_trig = 1
             cfg.expt.pulse_e = True
             cfg.expt.pulse_f = False
-            histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
+            if full_mux_expt:
+                histpro = MultiReadoutFullMuxProgram(soccfg=self.soccfg, cfg=cfg)
+            else:
+                histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], progress=progress)
             data["Ie_baseline"], data["Qe_baseline"] = histpro.get_multireadout_shots(
                 avg_trigs=self.cfg.expt.avg_trigs
@@ -1137,7 +1142,10 @@ class MultiReadoutExperiment(Experiment):
             cfg.expt.n_trig = 1
             cfg.expt.pulse_e = True
             cfg.expt.pulse_f = True
-            histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
+            if full_mux_expt:
+                histpro = MultiReadoutFullMuxProgram(soccfg=self.soccfg, cfg=cfg)
+            else:
+                histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], progress=progress)
             data["If_baseline"], data["Qf_baseline"] = histpro.get_multireadout_shots(
                 avg_trigs=self.cfg.expt.avg_trigs
@@ -1151,7 +1159,10 @@ class MultiReadoutExperiment(Experiment):
         cfg = AttrDict(deepcopy(self.cfg))
         cfg.expt.pulse_e = False
         cfg.expt.pulse_f = False
-        histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
+        if full_mux_expt:
+            histpro = MultiReadoutFullMuxProgram(soccfg=self.soccfg, cfg=cfg)
+        else:
+            histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
         avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], progress=progress)
         self.prog = histpro
         data["Ig"], data["Qg"] = histpro.get_multireadout_shots(avg_trigs=self.cfg.expt.avg_trigs)
@@ -1165,7 +1176,10 @@ class MultiReadoutExperiment(Experiment):
             cfg = AttrDict(deepcopy(self.cfg))
             cfg.expt.pulse_e = True
             cfg.expt.pulse_f = False
-            histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
+            if full_mux_expt:
+                histpro = MultiReadoutFullMuxProgram(soccfg=self.soccfg, cfg=cfg)
+            else:
+                histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], progress=progress)
             data["Ie"], data["Qe"] = histpro.get_multireadout_shots(avg_trigs=self.cfg.expt.avg_trigs)
 
@@ -1177,7 +1191,10 @@ class MultiReadoutExperiment(Experiment):
             # cfg.expt.pulse_e = False
             # print('WARNING TURNED OFF PULSE E FOR CHECK F')
             cfg.expt.pulse_f = True
-            histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
+            if full_mux_expt:
+                histpro = MultiReadoutFullMuxProgram(soccfg=self.soccfg, cfg=cfg)
+            else:
+                histpro = MultiReadoutProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = histpro.acquire(self.im[self.cfg.aliases.soc], progress=progress)
             data["If"], data["Qf"] = histpro.get_multireadout_shots(avg_trigs=self.cfg.expt.avg_trigs)
 
@@ -1229,7 +1246,10 @@ class MultiReadoutExperiment(Experiment):
                     np.average(data["Qf_baseline"][qTest, 0, :]),
                 ]
 
-        n_trig = self.cfg.expt.n_trig
+        if "n_trig" not in self.cfg.expt:
+            n_trig = 1
+        else:
+            n_trig = self.cfg.expt.n_trig
         if self.cfg.expt.avg_trigs:
             n_trig = 1
 
@@ -1595,3 +1615,79 @@ class MultiReadoutExperiment(Experiment):
         print(f"Saving {self.fname}")
         super().save_data(data=data)
         return self.fname
+
+
+# ====================================================== #
+
+
+class MultiReadoutFullMuxProgram(MultiReadoutProgram, QutritAveragerProgram):
+    def setup_readout(self):
+        """
+        Override default readout setup by playing an arbitrary waveform on the readout pulse
+        using a full gen to mux
+        To calculate the "gains" of each frequency component, plays gain at max voltage and then adjusts
+        relative to this using readout.gain
+        Requires config parameters:
+        full_mux_ch
+        mask: list of qubits to play the readout
+
+        See setup_full_mux_pulse for more details
+        Specify either:
+        lengths
+
+        OR
+        pulse_I_shapes
+        pulse_Q_shapes
+        times_us
+        """
+        self.full_mux_ch = self.cfg.expt.full_mux_ch
+        mux_nqz = 2
+        assert "mask" in self.cfg.expt and self.cfg.expt.mask is not None
+        mask = self.cfg.expt.mask
+        self.declare_gen(ch=self.full_mux_ch, nqz=mux_nqz, ro_ch=self.adc_chs[0])
+
+        gencfg = self.soccfg["gens"][self.full_mux_ch]
+        gain = gencfg["maxv"] * gencfg["maxv_scale"] - 1
+
+        lengths = self.cfg.expt.lengths if "lengths" in self.cfg.expt else None
+        pulse_I_shapes = self.cfg.expt.pulse_I_shapes if "pulse_I_shapes" in self.cfg.expt else None
+        pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes if "pulse_Q_shapes" in self.cfg.expt else None
+        times_us = self.cfg.expt.times_us if "times_us" in self.cfg.expt else None
+
+        mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[self.cfg.expt.qTest]
+        print("mixer_freq", mixer_freq)
+        self.handle_full_mux_pulse(
+            name=f"measure",
+            ch=self.full_mux_ch,
+            mask=mask,
+            mux_freqs=self.cfg.device.readout.frequency,
+            mixer_freq=mixer_freq,
+            # mixer_freq=0,
+            relative_amps=self.cfg.device.readout.gain,
+            lengths=lengths,
+            pulse_I_shapes=pulse_I_shapes,
+            pulse_Q_shapes=pulse_Q_shapes,
+            times_us=times_us,
+            phase_deg=0,
+            gain=gain,
+            plot_IQ=False,
+            ro_ch=self.adc_chs[0],
+            reload=True,
+            play=False,
+            set_reg=True,
+        )
+        self.measure_chs.append(self.full_mux_ch)
+        self.meas_ch_types.append("full")
+        for q in mask:
+            self.meas_ch_qs.append(q)
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if self.adc_chs[q] not in self.ro_chs:
+                print("actual readout freq q", q, self.cfg.device.readout.frequency[q] + mixer_freq)
+                self.declare_readout(
+                    ch=self.adc_chs[q],
+                    length=self.readout_lengths_adc[q],
+                    freq=self.cfg.device.readout.frequency[q] + mixer_freq,
+                    gen_ch=self.full_mux_ch,
+                )

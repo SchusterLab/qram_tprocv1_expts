@@ -447,14 +447,17 @@ class CliffordAveragerProgram(AveragerProgram):
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
         samps_per_clk = gencfg["samps_per_clk"]
-        times_cycles = np.linspace(0, self.us2cycles(times_us[-1], gen_ch=ch), len(times_us))
-        times_samps = samps_per_clk * times_cycles
+
+        num_samps_tot = samps_per_clk * self.us2cycles(times_us[-1], gen_ch=ch)
+        times_samps = np.arange(0, int(num_samps_tot))
+        times_samps_interp = np.linspace(0, num_samps_tot, len(times_us))
+        # print("num samps", num_samps_tot, times_us[-1])
+
         IQ_scale = max((np.max(np.abs(I_mhz_vs_us)), np.max(np.abs(Q_mhz_vs_us))))
-        I_func = sp.interpolate.interp1d(times_samps, I_mhz_vs_us / IQ_scale, kind="linear", fill_value=0)
-        Q_func = sp.interpolate.interp1d(times_samps, -Q_mhz_vs_us / IQ_scale, kind="linear", fill_value=0)
-        t = np.arange(0, np.round(times_samps[-1]))
-        iamps = I_func(t)
-        qamps = Q_func(t)
+        I_func = sp.interpolate.interp1d(times_samps_interp, I_mhz_vs_us / IQ_scale, kind="linear", fill_value=0)
+        Q_func = sp.interpolate.interp1d(times_samps_interp, -Q_mhz_vs_us / IQ_scale, kind="linear", fill_value=0)
+        iamps = I_func(times_samps)
+        qamps = Q_func(times_samps)
 
         if plot_IQ:
             plt.figure()
@@ -463,6 +466,7 @@ class CliffordAveragerProgram(AveragerProgram):
             plt.plot(times_samps, I_func(times_samps), ".-", label="I")
             # plt.plot(qamps, '.-')
             plt.plot(times_samps, Q_func(times_samps), ".-", label="Q")
+            print(times_samps.shape, I_func(times_samps).shape)
             plt.ylabel("Amplitude [a.u.]")
             plt.xlabel("Sample Index")
             plt.legend()
@@ -588,7 +592,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 style="arb",
                 freq=self.freq2reg(params["freq_MHz"], gen_ch=params["ch"], ro_ch=params["ro_ch"]),
                 phase=self.deg2reg(params["phase_deg"], gen_ch=params["ch"]),
-                gain=params["gain"],
+                gain=int(params["gain"]),
                 waveform=params["waveformname"],
                 phrst=phrst,
             )
@@ -725,14 +729,13 @@ class CliffordAveragerProgram(AveragerProgram):
 
     def setup_full_mux_pulse(
         self,
-        name,
-        ch,
         mask,
         mux_freqs,
-        lengths,
         relative_amps=None,
+        lengths=None,
         pulse_I_shapes=None,
         pulse_Q_shapes=None,
+        times_us=None,
         plot_IQ=True,
         dt_us=0.01e-3,
     ):
@@ -743,20 +746,28 @@ class CliffordAveragerProgram(AveragerProgram):
         mask: list of which indices in lengths, mux_freqs, pulse_I_shapes, pulse_Q_shapes to play
         mux_freqs: list of frequencies to play in MHz
         mixer_freq: carrier frequency in MHz
-        lengths: length of each frequency to play in us; for indices that don't use the max length, nothing is played for that frequency for the rest of the time
-        pulse_I_shapes, pulse_Q_shapes: intended pulse shaping on each frequency as if they were generated individually. Just need the I/Q to have right relative amplitude vs us; amplitude will be rescaled to 1 and then by the DAC gain.
         relative_amps: additional scaling factor applied on top of the IQ pulse waveforms to scale the amplitude of each frequency component individually
+
+        Specify either:
+        lengths: length of each frequency to play in us; for indices that don't use the max length, nothing is played for that frequency for the rest of the time. If this is specified, a constant pulse is played.
+
+        Or:
+        pulse_I_shapes, pulse_Q_shapes: intended pulse shaping on each frequency as if they were generated individually. Just need the I/Q to have right relative amplitude vs us; amplitude will be rescaled to 1 and then by the DAC gain. If pulse shapes are specified, they must be lists of shape (len(mux_freqs), num_time_steps) where num_time_steps is determined by times_us
 
         returns: tot_I_vs_us, tot_Q_vs_us, the total I/Q waveforms to be played and times_us the times at which these waveforms are sampled
         """
-        assert len(mask) == len(mux_freqs) == len(lengths)
-        if pulse_I_shapes is None:
-            pulse_I_shape = [None] * len(mux_freqs)
-        if pulse_Q_shapes is None:
-            pulse_Q_shape = [None] * len(mux_freqs)
+        use_const_lengths = lengths is not None
+        use_pulse_shapes = pulse_I_shapes is not None and pulse_Q_shapes is not None and times_us is not None
+        assert use_const_lengths or use_pulse_shapes
+        assert not (use_const_lengths and use_pulse_shapes), "Specify either const lengths or pulse shapes, not both"
 
-        tot_length_us = max(lengths)
-        times_us = np.linspace(0, tot_length_us, tot_length_us // dt_us)
+        if use_const_lengths:
+            assert len(lengths) == len(mux_freqs)
+            tot_length_us = max(lengths)
+            times_us = np.linspace(0, tot_length_us, int(tot_length_us / dt_us))
+            pulse_I_shapes = np.ones((len(mux_freqs), len(times_us)))
+            pulse_Q_shapes = np.zeros((len(mux_freqs), len(times_us)))
+
         tot_I_vs_us = np.zeros_like(times_us)
         tot_Q_vs_us = np.zeros_like(times_us)
         modulated_Is = np.zeros((len(mux_freqs), len(times_us)))
@@ -764,44 +775,41 @@ class CliffordAveragerProgram(AveragerProgram):
         if relative_amps is None:
             relative_amps = np.ones(len(mux_freqs))
         for q in mask:
-            mask_func = relative_amps[q] * np.heaviside(lengths[q] - times_us, 0)
+            if use_const_lengths:
+                mask_func = relative_amps[q] * np.heaviside(lengths[q] - times_us, 0)
+            else:
+                mask_func = relative_amps[q] * np.ones_like(times_us)
+            pulse_I_shape = pulse_I_shapes[q]
+            pulse_Q_shape = pulse_Q_shapes[q]
             mask_func[0] = 0
             mask_func[-1] = 0
 
-            pulse_I_shape = pulse_I_shapes[q]
-            pulse_Q_shape = pulse_Q_shapes[q]
-            if pulse_I_shape is None and pulse_Q_shape is None:
-                pulse_I_shape = mask_func * np.ones_like(times_us)
-                pulse_Q_shape = np.zeros_like(times_us)
-
-            check_I_Q_either_both_defined_or_undefined = (pulse_I_shape is None and pulse_Q_shape is None) or (
-                pulse_I_shape is not None and pulse_Q_shape is not None
-            )
-            assert (
-                check_I_Q_either_both_defined_or_undefined
-            ), f"Either both I and Q shapes for q {q} must be defined or both must be None"
-
-            modulated_I = pulse_I_shape * np.cos(mux_freqs[q] * 2 * np.pi * times_us) - pulse_Q_shape * np.sin(
+            modulated_I = pulse_I_shape * np.cos(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.sin(
                 mux_freqs[q] * 2 * np.pi * times_us
             )
             modulated_Is[q] = modulated_I
             tot_I_vs_us += modulated_I
 
-            modulated_Q = pulse_I_shape * np.sin(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.cos(
+            modulated_Q = -pulse_I_shape * np.sin(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.cos(
                 mux_freqs[q] * 2 * np.pi * times_us
             )
             modulated_Qs[q] = modulated_Q
             tot_Q_vs_us += modulated_Q
 
+        # plot_IQ = True
         if plot_IQ:
             plt.figure()
-            plt.title(f"Assembling Modulated MUX Pulse on ch{ch}, waveform {name}")
+            xpts = times_us
             for q in mask:
-                plt.plot(times_us, modulated_Is[q], label=f"I_{q}")
-                plt.plot(times_us, modulated_Qs[q], label=f"Q_{q}")
-            plt.ylabel("Amplitude [a.u.]")
-            plt.xlabel("Time [us]")
+                fourier = np.fft.fftshift(np.abs(np.fft.fft(modulated_Is[q])))
+                freqs = np.fft.fftshift(np.fft.fftfreq(len(fourier), d=(xpts[1] - xpts[0])))
+                # print("fourier shape", fourier.shape, freqs.shape)
+                plt.plot(freqs, fourier, label=f"Q{q}")
+            plt.xlabel("Frequency [MHz]")
+            plt.xlim(0, 1000)
+            # plt.ylim(0, 30000)
             plt.legend()
+            plt.title(f"Fourier Transform of Modulated Pulse")
             plt.show()
 
         return tot_I_vs_us, tot_Q_vs_us, times_us
@@ -813,10 +821,11 @@ class CliffordAveragerProgram(AveragerProgram):
         mask=None,
         mux_freqs=None,
         mixer_freq=None,
-        lengths=None,
         relative_amps=None,
+        lengths=None,
         pulse_I_shapes=None,
         pulse_Q_shapes=None,
+        times_us=None,
         phase_deg=None,
         gain=None,
         plot_IQ=True,
@@ -828,21 +837,21 @@ class CliffordAveragerProgram(AveragerProgram):
         sync_after=True,
         flag=None,
     ):
-        tot_I_vs_us, tot_Q_vs_us, times_us = [None] * 2
         if name not in self.pulse_dict.keys() or reload:
             assert None not in [ch, mask, mux_freqs, mixer_freq, lengths]
-            tot_I_vs_us, tot_Q_vs_us = self.setup_full_mux_pulse(
-                name=name,
-                ch=ch,
+            tot_I_vs_us, tot_Q_vs_us, times_us = self.setup_full_mux_pulse(
                 mask=mask,
                 mux_freqs=mux_freqs,
                 lengths=lengths,
                 relative_amps=relative_amps,
                 pulse_I_shapes=pulse_I_shapes,
                 pulse_Q_shapes=pulse_Q_shapes,
+                times_us=times_us,
                 plot_IQ=plot_IQ,
                 dt_us=dt_us,
             )
+        else:
+            tot_I_vs_us, tot_Q_vs_us, times_us = [None] * 3
 
         self.handle_IQ_pulse(
             name=name,
@@ -859,6 +868,7 @@ class CliffordAveragerProgram(AveragerProgram):
             set_reg=set_reg,
             flag=flag,
             sync_after=sync_after,
+            plot_IQ=plot_IQ,
         )
 
     """
@@ -1200,11 +1210,60 @@ class CliffordAveragerProgram(AveragerProgram):
             for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)
         ]
 
-        # declare res dacs, add readout pulses
+        # declare qubit dacs, add qubit pi_ge pulses
+        for q in range(self.num_qubits_sample):
+            mixer_freq = None
+            if self.qubit_ch_types[q] == "int4":
+                mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
+            if self.qubit_chs[q] not in self.gen_chs:
+                self.declare_gen(
+                    ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq
+                )
+            self.X_pulse(q=q, play=False, reload=True)
+
+        # add IQ pulses
+        self.use_robust_pulses = False
+        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulse:
+            self.use_robust_pulses = True
+        if self.use_robust_pulses:
+            for q in range(self.num_qubits_sample):
+                self.setup_robust_pulse(q)
+
+        if self.cool_qubits:
+            mixer_freq = None
+            for q in self.cfg.expt.cool_qubits:
+                if self.swap_f0g1_ch_types[q] == "int4":
+                    mixer_freq = mixer_freqs[q]
+                if self.swap_f0g1_chs[q] not in self.gen_chs:
+                    self.declare_gen(
+                        ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq
+                    )
+
+                self.pisigma_ef = self.us2cycles(
+                    self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]
+                )  # default pi_ef value
+                self.add_gauss(
+                    ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef * 4
+                )
+                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == "flat_top":
+                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3 * 4)
+                else:
+                    assert False, "not implemented"
+
+        # declare res dacs, add readout pulses, declare ADCs
         self.measure_chs = []
         self.meas_ch_types = []
         self.meas_ch_qs = []
         self.mask = []  # indices of mux_freqs, mux_gains list to play
+        self.setup_readout()
+
+        self.set_gen_delays()
+        self.sync_all(200)
+
+    def setup_readout(self):
+        """
+        Declare resonator generators, declare ADCs, add readout pulses
+        """
         mux_mixer_freq = None
         mux_freqs = [0] * 4  # MHz
         mux_gains = [0] * 4
@@ -1252,53 +1311,15 @@ class CliffordAveragerProgram(AveragerProgram):
                     self.measure_chs.append(self.res_chs[q])
                     self.meas_ch_types.append("mux4")
                     self.meas_ch_qs.append(-1)
-        if "mux4" in self.res_ch_types:  # declare mux4 channel
+
+        # declare mux4 channel
+        if "mux4" in self.res_ch_types:
             self.declare_gen(
                 ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch
             )
             self.handle_mux4_pulse(
                 name=f"measure", ch=6, length=max(self.readout_lengths_dac), mask=self.mask, play=False, set_reg=True
             )
-
-        # declare qubit dacs, add qubit pi_ge pulses
-        for q in range(self.num_qubits_sample):
-            mixer_freq = None
-            if self.qubit_ch_types[q] == "int4":
-                mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            if self.qubit_chs[q] not in self.gen_chs:
-                self.declare_gen(
-                    ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq
-                )
-            self.X_pulse(q=q, play=False, reload=True)
-
-        # add IQ pulses
-        self.use_robust_pulses = False
-        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulse:
-            self.use_robust_pulses = True
-        if self.use_robust_pulses:
-            for q in range(self.num_qubits_sample):
-                self.setup_robust_pulse(q)
-
-        if self.cool_qubits:
-            mixer_freq = None
-            for q in self.cfg.expt.cool_qubits:
-                if self.swap_f0g1_ch_types[q] == "int4":
-                    mixer_freq = mixer_freqs[q]
-                if self.swap_f0g1_chs[q] not in self.gen_chs:
-                    self.declare_gen(
-                        ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq
-                    )
-
-                self.pisigma_ef = self.us2cycles(
-                    self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]
-                )  # default pi_ef value
-                self.add_gauss(
-                    ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef * 4
-                )
-                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == "flat_top":
-                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3 * 4)
-                else:
-                    assert False, "not implemented"
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
@@ -1310,12 +1331,12 @@ class CliffordAveragerProgram(AveragerProgram):
                     gen_ch=self.res_chs[q],
                 )
 
-        self.set_gen_delays()
-        self.sync_all(200)
-
     def measure_readout_cool(
         self, n_init_readout=None, n_trig=None, init_read_wait_us=None, extended_readout_delay_cycles=3
     ):
+        """
+        Pulse and acquire the initial readout pulse for pre-selection
+        """
         if n_init_readout is None:
             assert "n_init_readout" in self.cfg.expt
             n_init_readout = self.cfg.expt.n_init_readout
