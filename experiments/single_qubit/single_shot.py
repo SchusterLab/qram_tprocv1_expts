@@ -347,6 +347,7 @@ def multihist(
     title=None,
     export=False,
     check_qnd=False,
+    amplitude_mode=False,
 ):
     """
     span: histogram limit is the mean +/- span
@@ -387,163 +388,61 @@ def multihist(
         elif check_i in e_states:
             Ie_tot = np.concatenate((Ig_tot, I))
             Qe_tot = np.concatenate((Qg_tot, Q))
+            
+            
+    if not amplitude_mode:
 
-    """Compute the rotation angle"""
-    if theta is None:
-        xg, yg = np.average(Ig_tot), np.average(Qg_tot)
-        xe, ye = np.average(Ie_tot), np.average(Qe_tot)
-        theta = -np.arctan2((ye - yg), (xe - xg))
+        """Compute the rotation angle"""
+        if theta is None:
+            xg, yg = np.average(Ig_tot), np.average(Qg_tot)
+            xe, ye = np.average(Ie_tot), np.average(Qe_tot)
+            theta = -np.arctan2((ye - yg), (xe - xg))
+        else:
+            theta *= np.pi / 180
+
+        Ig_tot_tot_new = Ig_tot_tot * np.cos(theta) - Qg_tot_tot * np.sin(theta)
+        Qg_tot_tot_new = Ig_tot_tot * np.sin(theta) + Qg_tot_tot * np.cos(theta)
+        Ie_tot_tot_new = Ie_tot_tot * np.cos(theta) - Qe_tot_tot * np.sin(theta)
+        Qe_tot_tot_new = Ie_tot_tot * np.sin(theta) + Qe_tot_tot * np.cos(theta)
+        I_tot_tot_new = np.concatenate((Ie_tot_tot_new, Ig_tot_tot_new))
+        span = (np.max(I_tot_tot_new) - np.min(I_tot_tot_new)) / 2
+        midpoint = (np.max(I_tot_tot_new) + np.min(I_tot_tot_new)) / 2
+        xlims = [midpoint - span, midpoint + span]
+
+        if plot:
+            fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(9, 6))
+            if title is None:
+                title = f"Readout on $|Q{qubits[0]}\\rangle |Q{qubits[1]}\\rangle$, check Q{check_qubit}"
+            fig.suptitle(title)
+            fig.tight_layout()
+            axs[0, 0].set_ylabel("Q [ADC levels]", fontsize=12)
+            axs[0, 0].set_title("Unrotated", fontsize=12)
+            axs[0, 0].axis("equal")
+            axs[0, 0].tick_params(axis="both", which="major", labelsize=10)
+
+            axs[0, 1].axis("equal")
+
+            plt.subplots_adjust(hspace=0.25, wspace=0.15)
+            
     else:
-        theta *= np.pi / 180
-
-    Ig_tot_tot_new = Ig_tot_tot * np.cos(theta) - Qg_tot_tot * np.sin(theta)
-    Qg_tot_tot_new = Ig_tot_tot * np.sin(theta) + Qg_tot_tot * np.cos(theta)
-    Ie_tot_tot_new = Ie_tot_tot * np.cos(theta) - Qe_tot_tot * np.sin(theta)
-    Qe_tot_tot_new = Ie_tot_tot * np.sin(theta) + Qe_tot_tot * np.cos(theta)
-    I_tot_tot_new = np.concatenate((Ie_tot_tot_new, Ig_tot_tot_new))
-    span = (np.max(I_tot_tot_new) - np.min(I_tot_tot_new)) / 2
-    midpoint = (np.max(I_tot_tot_new) + np.min(I_tot_tot_new)) / 2
-    xlims = [midpoint - span, midpoint + span]
+        amp_g_tot_tot = np.abs(Ig_tot_tot + 1j * Qg_tot_tot)
+        amp_e_tot_tot = np.abs(Ie_tot_tot + 1j * Qe_tot_tot)
+        amp_tot_tot = np.concatenate((amp_g_tot_tot, amp_e_tot_tot))
+        span = (np.max(amp_tot_tot) - np.min(amp_tot_tot)) / 2
+        midpoint = (np.max(amp_tot_tot) + np.min(amp_tot_tot)) / 2
+        xlims = [midpoint - span, midpoint + span]
+                    
+        
     y_max = 0
-
     n_tot_g = [0] * numbins
     n_tot_e = [0] * numbins
     if fit:
         popts = [None] * len(check_states)
         pcovs = [None] * len(check_states)
-
-    if plot:
-        fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(9, 6))
-        if title is None:
-            title = f"Readout on $|Q{qubits[0]}\\rangle |Q{qubits[1]}\\rangle$, check Q{check_qubit}"
-        fig.suptitle(title)
-        fig.tight_layout()
-        axs[0, 0].set_ylabel("Q [ADC levels]", fontsize=12)
-        axs[0, 0].set_title("Unrotated", fontsize=12)
-        axs[0, 0].axis("equal")
-        axs[0, 0].tick_params(axis="both", which="major", labelsize=10)
-
-        axs[0, 1].axis("equal")
-
-        plt.subplots_adjust(hspace=0.25, wspace=0.15)
-
-    for check_i, data_check in enumerate(iqshots):
-        check_state = check_states[check_i]
-        play_pulses = play_pulses_list[check_i]
-
-        I, Q = data_check
-        I = I[check_qubit]
-        Q = Q[check_qubit]
-
-        xavg, yavg = np.average(I), np.average(Q)
-
-        if verbose:
-            print(check_state, "play_pulses", play_pulses, "unrotated averages:")
-            print(f"I {xavg} +/- {np.std(I)} \t Q {yavg} +/- {np.std(Q)} \t Amp {np.abs(xavg+1j*yavg)}")
-
-        """Rotate the IQ data"""
-        I_new = I * np.cos(theta) - Q * np.sin(theta)
-        Q_new = I * np.sin(theta) + Q * np.cos(theta)
-
-        """New means of each blob"""
-        xavg_new, yavg_new = np.average(I_new), np.average(Q_new)
-        if verbose:
-            print(f"Rotated (theta={theta}):")
-            print(
-                f"I {xavg_new} +/- {np.std(I_new)} \t Q {yavg_new} +/- {np.std(Q_new)} \t Amp {np.abs(xavg_new+1j*yavg_new)}"
-            )
-
-        if plot:
-            label = f"{check_state}"
-            # print('check state', check_state)
-            if len(play_pulses) > 1 or play_pulses[0] != 0:
-                label += f" play {play_pulses}"
-            axs[0, 0].scatter(
-                I,
-                Q,
-                label=label,
-                color=default_colors[check_i % len(default_colors)],
-                marker=".",
-                edgecolor="None",
-                alpha=0.3,
-            )
-            axs[0, 0].plot(
-                [xavg],
-                [yavg],
-                color="k",
-                linestyle=":",
-                marker="o",
-                markerfacecolor=default_colors[check_i % len(default_colors)],
-                markersize=5,
-            )
-
-            axs[0, 1].scatter(
-                I_new,
-                Q_new,
-                label=label,
-                color=default_colors[check_i % len(default_colors)],
-                marker=".",
-                edgecolor="None",
-                alpha=0.3,
-            )
-            axs[0, 1].plot(
-                [xavg_new],
-                [yavg_new],
-                color="k",
-                linestyle=":",
-                marker="o",
-                markerfacecolor=default_colors[check_i % len(default_colors)],
-                markersize=5,
-            )
-
-            if check_i in g_states or check_i in e_states:
-                linestyle = linestyle_cycle[0]
-            else:
-                linestyle = linestyle_cycle[1]
-
-            # n, bins, p = axs[1,0].hist(I_new, bins=numbins, range=xlims, color=default_colors[check_i % len(default_colors)], label=label, histtype='step', linestyle=linestyle)
-            n, bins = plot_hist(
-                I_new,
-                bins=numbins,
-                ax=axs[1, 0],
-                xlims=xlims,
-                color=default_colors[check_i % len(default_colors)],
-                label=label,
-                linestyle=linestyle,
-                normalize=normalize,
-            )
-            # n, bins = np.histogram(I_new, bins=numbins, range=xlims)
-            # axs[1,0].plot(bins[:-1], n/n.sum(), color=default_colors[check_i % len(default_colors)], linestyle=linestyle)
-
-            axs[1, 1].plot(
-                bins[:-1],
-                np.cumsum(n) / n.sum(),
-                color=default_colors[check_i % len(default_colors)],
-                linestyle=linestyle,
-            )
-
-        else:  # just getting the n, bins for data processing
-            n, bins = np.histogram(I_new, bins=numbins, range=xlims)
-
-        if check_i in g_states:
-            n_tot_g += n
-            bins_g = bins
-        elif check_i in e_states:
-            n_tot_e += n
-            bins_e = bins
-
-        if check_qnd:
-            if check_state == "g_0":
-                n_g_0 = n
-            if check_state == "g_1":
-                n_g_1 = n
-
-    if check_qnd:
-        n_diff = np.abs((n_g_0 - n_g_1))
-        data["n_diff_qnd"] = np.sum(n_diff) / 2 / np.sum(n_g_0)
-
-    if fit:
-        # a bit stupid but we need to know what the g and e states are to fit the gaussians
+        
+    
+    if not amplitude_mode:
+        
         for check_i, data_check in enumerate(iqshots):
             check_state = check_states[check_i]
             play_pulses = play_pulses_list[check_i]
@@ -562,83 +461,272 @@ def multihist(
             I_new = I * np.cos(theta) - Q * np.sin(theta)
             Q_new = I * np.sin(theta) + Q * np.cos(theta)
 
-            n, bins = np.histogram(I_new, bins=numbins, range=xlims)
-
-            xmax_g = bins_g[np.argmax(n_tot_g)]
-            xmax_e = bins_e[np.argmax(n_tot_e)]
-            idx_g = np.argmin(np.abs(bins[:-1] - xmax_g))
-            idx_e = np.argmin(np.abs(bins[:-1] - xmax_e))
-            ymax_g = n[idx_g]
-            ymax_e = n[idx_e]
-            fitparams = [ymax_g, xmax_g, 100, ymax_e, xmax_e, 100]
-
-            popt, pcov = fitter.fit_doublegauss(xdata=bins[:-1], ydata=n, fitparams=fitparams)
+            """New means of each blob"""
+            xavg_new, yavg_new = np.average(I_new), np.average(Q_new)
+            if verbose:
+                print(f"Rotated (theta={theta}):")
+                print(
+                    f"I {xavg_new} +/- {np.std(I_new)} \t Q {yavg_new} +/- {np.std(Q_new)} \t Amp {np.abs(xavg_new+1j*yavg_new)}"
+                )
 
             if plot:
-                y = fitter.double_gaussian(bins[:-1], *popt)
-                y_norm = y / y.sum()
-
-                axs[1, 0].plot(
-                    bins[:-1],
-                    y_norm,
-                    "-",
+                label = f"{check_state}"
+                # print('check state', check_state)
+                if len(play_pulses) > 1 or play_pulses[0] != 0:
+                    label += f" play {play_pulses}"
+                axs[0, 0].scatter(
+                    I,
+                    Q,
+                    label=label,
                     color=default_colors[check_i % len(default_colors)],
+                    marker=".",
+                    edgecolor="None",
+                    alpha=0.3,
                 )
-                if y_norm.max() > y_max:
-                    y_max = y_norm.max()
-                    print(y_max)
-                    print(y_norm.max())
+                axs[0, 0].plot(
+                    [xavg],
+                    [yavg],
+                    color="k",
+                    linestyle=":",
+                    marker="o",
+                    markerfacecolor=default_colors[check_i % len(default_colors)],
+                    markersize=5,
+                )
 
-                axs[1, 0].set_ylim((0, y_max * 1.1))
+                axs[0, 1].scatter(
+                    I_new,
+                    Q_new,
+                    label=label,
+                    color=default_colors[check_i % len(default_colors)],
+                    marker=".",
+                    edgecolor="None",
+                    alpha=0.3,
+                )
+                axs[0, 1].plot(
+                    [xavg_new],
+                    [yavg_new],
+                    color="k",
+                    linestyle=":",
+                    marker="o",
+                    markerfacecolor=default_colors[check_i % len(default_colors)],
+                    markersize=5,
+                )
 
-            popts[check_i] = popt
-            pcovs[check_i] = pcov
+                if check_i in g_states or check_i in e_states:
+                    linestyle = linestyle_cycle[0]
+                else:
+                    linestyle = linestyle_cycle[1]
 
-    """Compute the fidelity using overlap of the histograms"""
+                # n, bins, p = axs[1,0].hist(I_new, bins=numbins, range=xlims, color=default_colors[check_i % len(default_colors)], label=label, histtype='step', linestyle=linestyle)
+                n, bins = plot_hist(
+                    I_new,
+                    bins=numbins,
+                    ax=axs[1, 0],
+                    xlims=xlims,
+                    color=default_colors[check_i % len(default_colors)],
+                    label=label,
+                    linestyle=linestyle,
+                    normalize=normalize,
+                )
+                # n, bins = np.histogram(I_new, bins=numbins, range=xlims)
+                # axs[1,0].plot(bins[:-1], n/n.sum(), color=default_colors[check_i % len(default_colors)], linestyle=linestyle)
+
+                axs[1, 1].plot(
+                    bins[:-1],
+                    np.cumsum(n) / n.sum(),
+                    color=default_colors[check_i % len(default_colors)],
+                    linestyle=linestyle,
+                )
+
+            else:  # just getting the n, bins for data processing
+                n, bins = np.histogram(I_new, bins=numbins, range=xlims)
+
+            if check_i in g_states:
+                n_tot_g += n
+                bins_g = bins
+            elif check_i in e_states:
+                n_tot_e += n
+                bins_e = bins
+
+            if check_qnd:
+                if check_state == "g_0":
+                    n_g_0 = n
+                if check_state == "g_1":
+                    n_g_1 = n
+
+        if check_qnd:
+            n_diff = np.abs((n_g_0 - n_g_1))
+            data["n_diff_qnd"] = np.sum(n_diff) / 2 / np.sum(n_g_0)
+
+        if fit:
+            # a bit stupid but we need to know what the g and e states are to fit the gaussians
+            for check_i, data_check in enumerate(iqshots):
+                check_state = check_states[check_i]
+                play_pulses = play_pulses_list[check_i]
+
+                I, Q = data_check
+                I = I[check_qubit]
+                Q = Q[check_qubit]
+
+                xavg, yavg = np.average(I), np.average(Q)
+
+                if verbose:
+                    print(check_state, "play_pulses", play_pulses, "unrotated averages:")
+                    print(f"I {xavg} +/- {np.std(I)} \t Q {yavg} +/- {np.std(Q)} \t Amp {np.abs(xavg+1j*yavg)}")
+
+                """Rotate the IQ data"""
+                I_new = I * np.cos(theta) - Q * np.sin(theta)
+                Q_new = I * np.sin(theta) + Q * np.cos(theta)
+
+                n, bins = np.histogram(I_new, bins=numbins, range=xlims)
+
+                xmax_g = bins_g[np.argmax(n_tot_g)]
+                xmax_e = bins_e[np.argmax(n_tot_e)]
+                idx_g = np.argmin(np.abs(bins[:-1] - xmax_g))
+                idx_e = np.argmin(np.abs(bins[:-1] - xmax_e))
+                ymax_g = n[idx_g]
+                ymax_e = n[idx_e]
+                fitparams = [ymax_g, xmax_g, 100, ymax_e, xmax_e, 100]
+
+                popt, pcov = fitter.fit_doublegauss(xdata=bins[:-1], ydata=n, fitparams=fitparams)
+
+                if plot:
+                    y = fitter.double_gaussian(bins[:-1], *popt)
+                    y_norm = y / y.sum()
+
+                    axs[1, 0].plot(
+                        bins[:-1],
+                        y_norm,
+                        "-",
+                        color=default_colors[check_i % len(default_colors)],
+                    )
+                    if y_norm.max() > y_max:
+                        y_max = y_norm.max()
+                        print(y_max)
+                        print(y_norm.max())
+
+                    axs[1, 0].set_ylim((0, y_max * 1.1))
+
+                popts[check_i] = popt
+                pcovs[check_i] = pcov
+
+        """Compute the fidelity using overlap of the histograms"""
+        fids = []
+        thresholds = []
+        contrast = np.abs(np.cumsum(n_tot_g) / n_tot_g.sum() - np.cumsum(n_tot_e) / n_tot_e.sum())
+        tind = contrast.argmax()
+        thresholds.append(bins[tind])
+        # thresholds.append(np.average([bins_e[idx_e], bins_g[idx_g]]))
+        fids.append(contrast[tind])
+
+        if plot:
+            axs[0, 1].set_title(f"Rotated ($\\theta={theta*180/np.pi:.5}^\\circ$)", fontsize=12)
+            axs[0, 1].tick_params(axis="both", which="major", labelsize=10)
+
+            axs[1, 0].axvline(thresholds[0], color="0.2", linestyle="--")
+            axs[1, 0].set_title(f"Fidelity g-e: {100*fids[0]:.3}%", fontsize=12)
+            axs[1, 0].set_ylabel("Counts", fontsize=12)
+            axs[1, 0].set_xlabel("I [ADC levels]", fontsize=12)
+            axs[1, 0].tick_params(axis="both", which="major", labelsize=10)
+            if ps_threshold is not None:
+                axs[1, 0].axvline(ps_threshold, color="0.2", linestyle="-.")
+
+            axs[1, 1].set_title("Cumulative Sum", fontsize=12)
+            axs[1, 1].plot(bins[:-1], np.cumsum(n_tot_g) / n_tot_g.sum(), "b", label="g")
+            axs[1, 1].plot(bins[:-1], np.cumsum(n_tot_e) / n_tot_e.sum(), "r", label="e")
+            axs[1, 1].axvline(thresholds[0], color="0.2", linestyle="--")
+            axs[1, 1].set_xlabel("I [ADC levels]", fontsize=12)
+            axs[1, 1].tick_params(axis="both", which="major", labelsize=10)
+
+            prop = {"size": 8}
+            axs[0, 0].legend(loc="upper right", prop=prop)
+            axs[0, 1].legend(loc="upper right", prop=prop)
+            axs[1, 0].legend(loc="upper left", prop=prop)
+            axs[1, 1].legend(prop=prop)
+
+            if export:
+                plt.savefig("multihist.jpg", dpi=1000)
+                print("exported multihist.jpg")
+                plt.close()
+            else:
+                print("wheres my plot")
+                plt.show()
+            
+        if not fit:
+            return fids, thresholds, theta * 180 / np.pi  # fids: ge, gf, ef
+        return fids, thresholds, theta * 180 / np.pi, popts, pcovs
+    
+    else: 
+        if plot:
+            figs, axs = plt.subplots(figsize=(4, 3))   
+        
+        for check_i, data_check in enumerate(iqshots):
+            check_state = check_states[check_i]
+            play_pulses = play_pulses_list[check_i]
+            I, Q = data_check
+            I = I[check_qubit]
+            Q = Q[check_qubit]
+            
+            if plot: 
+                amp = np.abs(I + 1j * Q)
+                n, bins = plot_hist(
+                    amp,
+                    bins=numbins,
+                    ax=axs,
+                    xlims=xlims,
+                    color=default_colors[check_i % len(default_colors)],
+                    label=check_state,
+                    linestyle=linestyle_cycle[check_i % len(linestyle_cycle)],
+                    normalize=normalize,
+                )
+             
+                
+                
+            else:
+                amp = np.abs(I + 1j * Q)
+                n, bins = np.histogram(amp, bins=numbins, range=xlims)
+                
+            if check_i in g_states:
+                n_tot_g += n
+                bins_g = bins
+            elif check_i in e_states:
+                n_tot_e += n
+                bins_e = bins
+            
+            if check_qnd:
+                if check_state == "g_0":
+                    n_g_0 = n
+                if check_state == "g_1":
+                    n_g_1 = n
+            
+        if check_qnd:
+            n_diff = np.abs((n_g_0 - n_g_1))
+            data["n_diff_qnd"] = np.sum(n_diff) / 2 / np.sum(n_g_0)
+            
+            
+        if fit: 
+            raise NotImplementedError("Fitting not implemented for amplitude mode")
+        
     fids = []
     thresholds = []
     contrast = np.abs(np.cumsum(n_tot_g) / n_tot_g.sum() - np.cumsum(n_tot_e) / n_tot_e.sum())
     tind = contrast.argmax()
     thresholds.append(bins[tind])
-    # thresholds.append(np.average([bins_e[idx_e], bins_g[idx_g]]))
     fids.append(contrast[tind])
-
+    angle = np.nan
+    
     if plot:
-        axs[0, 1].set_title(f"Rotated ($\\theta={theta*180/np.pi:.5}^\\circ$)", fontsize=12)
-        axs[0, 1].tick_params(axis="both", which="major", labelsize=10)
-
-        axs[1, 0].axvline(thresholds[0], color="0.2", linestyle="--")
-        axs[1, 0].set_title(f"Fidelity g-e: {100*fids[0]:.3}%", fontsize=12)
-        axs[1, 0].set_ylabel("Counts", fontsize=12)
-        axs[1, 0].set_xlabel("I [ADC levels]", fontsize=12)
-        axs[1, 0].tick_params(axis="both", which="major", labelsize=10)
+        axs.set_title(f"Fidelity g-e: {100*fids[0]:.3}%", fontsize=12)
+        axs.set_ylabel("Counts", fontsize=12)
+        axs.set_xlabel("Amplitude [ADC levels]", fontsize=12)
+        axs.tick_params(axis="both", which="major", labelsize=10)
         if ps_threshold is not None:
-            axs[1, 0].axvline(ps_threshold, color="0.2", linestyle="-.")
-
-        axs[1, 1].set_title("Cumulative Sum", fontsize=12)
-        axs[1, 1].plot(bins[:-1], np.cumsum(n_tot_g) / n_tot_g.sum(), "b", label="g")
-        axs[1, 1].plot(bins[:-1], np.cumsum(n_tot_e) / n_tot_e.sum(), "r", label="e")
-        axs[1, 1].axvline(thresholds[0], color="0.2", linestyle="--")
-        axs[1, 1].set_xlabel("I [ADC levels]", fontsize=12)
-        axs[1, 1].tick_params(axis="both", which="major", labelsize=10)
-
-        prop = {"size": 8}
-        axs[0, 0].legend(loc="upper right", prop=prop)
-        axs[0, 1].legend(loc="upper right", prop=prop)
-        axs[1, 0].legend(loc="upper left", prop=prop)
-        axs[1, 1].legend(prop=prop)
-
-        if export:
-            plt.savefig("multihist.jpg", dpi=1000)
-            print("exported multihist.jpg")
-            plt.close()
-        else:
-            print("wheres my plot")
-            plt.show()
-
-    if not fit:
-        return fids, thresholds, theta * 180 / np.pi  # fids: ge, gf, ef
-    return fids, thresholds, theta * 180 / np.pi, popts, pcovs
+            axs.axvline(ps_threshold, color="0.2", linestyle="-.")
+        axs.axvline(thresholds[0], color="0.2", linestyle="--")
+        
+        axs.legend(loc="upper right", prop={"size": 8})
+    
+    return fids, thresholds, angle # fids: ge, gf, ef
 
 
 # ------------------------------------------------------- #
@@ -849,9 +937,6 @@ class SingleShotOptExperiment(Experiment):
         fpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"] * np.arange(self.cfg.expt["expts_f"])
         gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"] * np.arange(self.cfg.expt["expts_gain"])
         lenpts = self.cfg.expt["start_len"] + self.cfg.expt["step_len"] * np.arange(self.cfg.expt["expts_len"])
-        print(fpts)
-        print(gainpts)
-        print(lenpts)
 
         fid = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
         threshold = np.zeros(shape=(len(fpts), len(gainpts), len(lenpts)))
@@ -1002,8 +1087,7 @@ class MultiReadoutProgram(QutritAveragerProgram):
                         extended_readout_delay_cycles  # only sync to the next readout in the same trigger stack
                     )
                     # trig_offset = 0
-                print("sync delay us", self.cycles2us(syncdelay))
-                # Note that by default the mux channel will play the pulse for all frequencies for the max of the pulse times on all channels - but the acquistion may not be happening the entire time.
+                 # Note that by default the mux channel will play the pulse for all frequencies for the max of the pulse times on all channels - but the acquistion may not be happening the entire time.
                 self.measure(
                     pulse_ch=self.measure_chs,
                     adcs=self.adc_chs,
@@ -1187,6 +1271,7 @@ class MultiReadoutExperiment(Experiment):
         self,
         check_readouts,
         fit=True,
+        amplitude_mode=False,
         post_select=False,
         ps_adjust=None,
         data=None,
@@ -1234,8 +1319,7 @@ class MultiReadoutExperiment(Experiment):
             n_trig = self.cfg.expt.n_trig
         if self.cfg.expt.avg_trigs:
             n_trig = 1
-
-        print(data.keys())
+            
         for i_check, i_readout in enumerate(check_readouts):
             for i_trig in range(n_trig):
                 if i_readout == self.cfg.expt.n_init_readout and i_trig > 0:
@@ -1294,12 +1378,21 @@ class MultiReadoutExperiment(Experiment):
             verbose=verbose,
             plot=plot,
             check_qnd=check_qnd,
+            amplitude_mode=amplitude_mode,
         )
+
+
 
         if not fit:
             fids, thresholds, angle = multihist_results
+            data["fids"] = fids
+            data["angle"] = angle
+            data["thresholds"] = thresholds
         else:
             fids, thresholds, angle, popts, pcovs = multihist_results
+            data["fids"] = fids
+            data["angle"] = angle
+            data["thresholds"] = thresholds
             data["popts"] = popts
             data["pcovs"] = pcovs
 
@@ -1598,3 +1691,150 @@ class MultiReadoutExperiment(Experiment):
         super().save_data(data=data)
         return self.fname
 
+class MultiReadoutOptExperiment(Experiment):
+    
+    
+    """
+    Multireadout optimization experiment over readout parameters
+    expt = dict(
+        reps: number of shots per expt
+        start_f: start frequency (MHz)
+        step_f: frequency step (MHz)
+        expts_f: number of experiments in frequency
+
+        start_gain: start gain (dac units)
+        step_gain: gain step (dac units)
+        expts_gain: number of experiments in gain sweep
+
+        start_len: start readout len (dac units)
+        step_len: length step (dac units)
+        expts_len: number of experiments in length sweep
+    
+        check_f: optimize fidelity for g/f (as opposed to g/e)
+    )
+    """
+    
+    def __init__(self, soccfg=None, path="", prefix="MultireadoutOpt", config_file=None, progress=None):
+        super().__init__(
+            soccfg=soccfg,
+            path=path,
+            prefix=prefix,
+            config_file=config_file,
+            progress=progress,
+        )
+        
+    def acquire(self, progress=False):
+        fpts = self.cfg.expt["start_f"] + self.cfg.expt["step_f"] * np.arange(self.cfg.expt["expts_f"])
+        gainpts = self.cfg.expt["start_gain"] + self.cfg.expt["step_gain"] * np.arange(self.cfg.expt["expts_gain"])
+        lenpts = self.cfg.expt["start_len"] + self.cfg.expt["step_len"] * np.arange(self.cfg.expt["expts_len"])
+
+        
+        fid = np.zeros((len(fpts), len(gainpts), len(lenpts)))
+        threshold = np.zeros((len(fpts), len(gainpts), len(lenpts)))
+        angle = np.zeros((len(fpts), len(gainpts), len(lenpts)))
+        
+        qTest = self.cfg.expt.qTest
+        
+        for i_f, f in enumerate(tqdm(fpts, disable=not progress)):
+            for i_g, g in enumerate(gainpts):
+                for i_l, l in enumerate(lenpts):
+                    multihist = MultiReadoutExperiment(soccfg=self.soccfg, config_file=self.config_file)
+                    multihist.cfg = deepcopy(self.cfg)
+                    multihist.cfg.device.readout.frequency[qTest] = f
+                    multihist.cfg.device.readout.gain[qTest] = g
+                    
+                    
+                    check_e = True 
+                    if "check_f" in self.cfg.expt:
+                        check_f = False 
+                    else:
+                        check_f = self.cfg.expt.check_f
+                        check_e = not check_f
+                        
+                    multihist.cfg.expt = dict(
+                        reps=self.cfg.expt.reps,
+                        check_e=check_e,
+                        check_f=check_f,
+                        qTest=qTest,
+                        readout_cool=True,
+                        n_init_readout=self.cfg.expt.n_init_readout,
+                        init_read_wait_us=self.cfg.expt.init_read_wait_us,
+                        n_trig=self.cfg.expt.n_trig,
+                        avg_trigs=self.cfg.expt.avg_trigs,
+                        full_mux_expt = self.cfg.expt.full_mux_expt,
+                        full_mux_ch=self.cfg.expt.full_mux_ch,
+                        mask = self.cfg.expt.mask, 
+                        lengths = [l]*self.cfg.expt.full_mux_ch, 
+                        )
+                    
+                    amplitude_mode = self.cfg.expt.amplitude_mode
+                    
+                    multihist.go(analyze=False, display=False, progress=False,
+                                 save=False)
+                    result = multihist.analyze(check_readouts=[-1], fit=False, post_select=False, data=multihist.data, verbose=False, amplitude_mode=amplitude_mode)
+                    
+                    
+                    
+                    fid[i_f, i_g, i_l] = (result["fids"][0]
+                    if not check_f else result["fids"][1])
+                    threshold[i_f, i_g, i_l] = (result["thresholds"][0] if not check_f else result["thresholds"][1])
+                    angle[i_f, i_g, i_l] = result["angle"]
+                    
+                    if progress:
+                        print(f"Finished {i_f}/{len(fpts)} {i_g}/{len(gainpts)} {i_l}/{len(lenpts)}")
+                        print(f'freq: {f} gain: {g} length: {l}')
+                        print(f"Fidelity: {fid[i_f, i_g, i_l]}")
+                    
+                    
+        data = dict()
+        data["fpts"] = fpts
+        data["gainpts"] = gainpts
+        data["lenpts"] = lenpts
+        data["fid"] = fid
+        data["threshold"] = threshold
+        data["angle"] = angle
+        
+        self.data = data
+        
+        return data
+    
+    def analyze(self, data=None, **kwargs):
+        if data == None:
+            data = self.data
+        fpts = data["fpts"]
+        gainpts = data["gainpts"]
+        lenpts = data["lenpts"]
+        fid = data["fid"]
+        threshold = data["threshold"]
+        angle = data["angle"]
+        
+        imax = np.unravel_index(np.argmax(fid), fid.shape)
+        
+        return imax
+    
+    
+    def display(self, data=None, **kwargs):
+        
+        if data is None: 
+            data = self.data
+            
+        fpts = data["fpts"]
+        gainpts = data["gainpts"]
+        lenpts = data["lenpts"]
+        fid = data["fid"]
+        
+        for i, length in enumerate(lenpts):
+            fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+            ax.imshow(fid[:, ::-1, i].T, aspect='auto', extent=[fpts[0], fpts[-1], gainpts[0], gainpts[-1]])
+            ax.set_xlabel('Frequency [MHz]')
+            ax.set_ylabel('Gain [ua]')
+            ax.set_title(f'Readout length {length:.2f} us')
+            # add colorbar
+            ax.figure.colorbar(ax.images[0], ax=ax)
+            fig.tight_layout()  
+                            
+
+    def save_data(self, data=None):
+        print(f"Saving {self.fname}")
+        super().save_data(data=data)
+        return self.fname
