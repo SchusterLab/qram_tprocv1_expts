@@ -14,12 +14,12 @@ from slab import AttrDict, Experiment, dsfit
 from TomoAnalysis import TomoAnalysis
 from tqdm import tqdm_notebook as tqdm
 
-"""
-Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
-"""
-
 
 class LengthRabiProgram(QutritAveragerProgram):
+    """
+    Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
+    """
+
     def initialize(self):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
@@ -59,6 +59,10 @@ class LengthRabiProgram(QutritAveragerProgram):
                 self.pulse_ge = True
             else:
                 self.pulse_ge = self.cfg.expt.pulse_ge
+            if "readout_ge" not in self.cfg.expt:
+                self.readout_ge = True
+            else:
+                self.readout_ge = self.cfg.expt.readout_ge
 
         self.error_amp = "error_amp" in self.cfg.expt and self.cfg.expt.error_amp
         self.qTest_rphase = self.sreg(self.qubit_chs[qTest], "phase")
@@ -216,7 +220,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                     name += "_half"
                 self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
-        if self.checkEF:  # map excited back to qubit ground state for measurement
+        if self.checkEF and self.readout_ge:  # map excited back to qubit ground state for measurement
             self.X_pulse(q=qTest, ZZ_qubit=qZZ, play=True)
 
         # align channels and measure
@@ -246,6 +250,8 @@ class LengthRabiExperiment(Experiment):
         checkEF: does ramsey on the EF transition instead of ge
         qTest: qubit on which to do the test pulse
         qZZ: None if not checkZZ, else specify other qubit to pi pulse
+        pulse_ge: whether to pulse ge before the test pulse
+        readout_ge: whether to readout at the g/e set point or e/f set point
     )
     """
 
@@ -292,8 +298,13 @@ class LengthRabiExperiment(Experiment):
 
         data = {"xpts": [], "avgi": [], "avgq": [], "amps": [], "phases": []}
 
+        if "readout_ge" not in self.cfg.expt:
+            self.cfg.expt.readout_ge = True
         for length in tqdm(lengths, disable=not progress):
             self.cfg.expt.sigma_test = float(length)
+            if not self.cfg.expt.readout_ge:
+                self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
+                self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length_ef
             lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
             self.prog = lengthrabi
 
@@ -449,6 +460,7 @@ class NPulseExperiment(Experiment):
         checkEF: does ramsey on the EF transition instead of ge
         qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
         test_pi_half: calibrate the pi/2 instead of pi pulse by dividing length cycles // 2
+        readout_ge: whether to readout at the g/e set point or e/f set point
     )
     """
 
@@ -491,6 +503,12 @@ class NPulseExperiment(Experiment):
         if qZZ is None:
             qZZ = qTest
 
+        if "readout_ge" not in self.cfg.expt:
+            self.cfg.expt.readout_ge = True
+        if not self.cfg.expt.readout_ge:
+            self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
+            self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length_ef
+
         # ================= #
         # Get single shot calibration for 1 qubit
         # ================= #
@@ -527,7 +545,7 @@ class NPulseExperiment(Experiment):
                 sscfg.expt.qubit = qTest
 
                 calib_prog_dict = dict()
-                calib_order = ["g", "e"]
+                calib_order = ["g", "e" if self.cfg.expt.readout_ge else "f"]
                 for prep_state in tqdm(calib_order):
                     # print(prep_state)
                     sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
@@ -539,7 +557,7 @@ class NPulseExperiment(Experiment):
                 Ig, Qg = g_prog.get_shots(verbose=False)
 
                 # Get readout angle + threshold for qubits
-                e_prog = calib_prog_dict["e"]
+                e_prog = calib_prog_dict["e" if self.cfg.expt.readout_ge else "f"]
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
@@ -796,6 +814,7 @@ class PiMinusPiExperiment(Experiment):
         checkZZ: True/False for putting another qubit in e (specify as qZZ)
         checkEF: does ramsey on the EF transition instead of ge
         qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
+        readout_ge: whether to readout at the g/e set point or e/f set point
     )
 
     See https://arxiv.org/pdf/2406.08295 Appendix E
@@ -840,6 +859,12 @@ class PiMinusPiExperiment(Experiment):
 
         data = dict()
 
+        if "readout_ge" not in self.cfg.expt:
+            self.cfg.expt.readout_ge = True
+        if not self.cfg.expt.readout_ge:
+            self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
+            self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length_ef
+
         # ================= #
         # Get single shot calibration for 1 qubit
         # ================= #
@@ -881,7 +906,7 @@ class PiMinusPiExperiment(Experiment):
                 sscfg.expt.qubit = qTest
 
                 calib_prog_dict = dict()
-                calib_order = ["g", "e"]
+                calib_order = ["g", "e" if self.cfg.expt.readout_ge else "f"]
                 for prep_state in tqdm(calib_order):
                     # print(prep_state)
                     sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
@@ -893,7 +918,7 @@ class PiMinusPiExperiment(Experiment):
                 Ig, Qg = g_prog.get_shots(verbose=False)
 
                 # Get readout angle + threshold for qubits
-                e_prog = calib_prog_dict["e"]
+                e_prog = calib_prog_dict["e" if self.cfg.expt.readout_ge else "f"]
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
