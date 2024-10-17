@@ -774,15 +774,19 @@ class CliffordAveragerProgram(AveragerProgram):
         modulated_Qs = np.zeros((len(mux_freqs), len(times_us)))
         if relative_amps is None:
             relative_amps = np.ones(len(mux_freqs))
+        relative_amps = np.array(relative_amps)
+        bool_mask = np.array([q in mask for q in range(len(relative_amps))], dtype=int)
+        relative_amps *= bool_mask
         for q in mask:
             if use_const_lengths:
                 mask_func = relative_amps[q] * np.heaviside(lengths[q] - times_us, 0)
+                # print(relative_amps[q])
             else:
                 mask_func = relative_amps[q] * np.ones_like(times_us)
-            pulse_I_shape = pulse_I_shapes[q]
-            pulse_Q_shape = pulse_Q_shapes[q]
             mask_func[0] = 0
             mask_func[-1] = 0
+            pulse_I_shape = mask_func * pulse_I_shapes[q]
+            pulse_Q_shape = mask_func * pulse_Q_shapes[q]
 
             modulated_I = pulse_I_shape * np.cos(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.sin(
                 mux_freqs[q] * 2 * np.pi * times_us
@@ -806,7 +810,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 # print("fourier shape", fourier.shape, freqs.shape)
                 plt.plot(freqs, fourier, label=f"Q{q}")
             plt.xlabel("Frequency [MHz]")
-            plt.xlim(0, 1000)
+            plt.xlim(0, 2000)
             # plt.ylim(0, 30000)
             plt.legend()
             plt.title(f"Fourier Transform of Modulated Pulse")
@@ -818,16 +822,15 @@ class CliffordAveragerProgram(AveragerProgram):
         self,
         name,
         ch,
+        relative_amps,
         mask=None,
         mux_freqs=None,
         mixer_freq=None,
-        relative_amps=None,
         lengths=None,
         pulse_I_shapes=None,
         pulse_Q_shapes=None,
         times_us=None,
         phase_deg=None,
-        gain=None,
         plot_IQ=True,
         dt_us=0.01e-3,
         ro_ch=None,
@@ -837,6 +840,11 @@ class CliffordAveragerProgram(AveragerProgram):
         sync_after=True,
         flag=None,
     ):
+        relative_amps = np.array(relative_amps)
+        bool_mask = np.array([q in mask for q in range(len(relative_amps))], dtype=int)
+        relative_amps *= bool_mask
+        assert np.all((relative_amps <= 1) & (relative_amps >= 0)), "Relative amplitudes must be between 0 and 1"
+
         if name not in self.pulse_dict.keys() or reload:
             assert ch is not None
             assert mask is not None
@@ -856,6 +864,11 @@ class CliffordAveragerProgram(AveragerProgram):
             )
         else:
             tot_I_vs_us, tot_Q_vs_us, times_us = [None] * 3
+
+        # scale so the same relative amp always gives the same amount of power regardless of what the other amplitudes are specified as
+        gencfg = self.soccfg["gens"][ch]
+        maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
+        gain = max(relative_amps) * maxv * np.sum(relative_amps) / len(mux_freqs)
 
         self.handle_IQ_pulse(
             name=name,
@@ -1151,123 +1164,58 @@ class CliffordAveragerProgram(AveragerProgram):
     def sync_all(self, t=0):
         super().sync_all(t=t, gen_t0=self.gen_delays)
 
-    def initialize(self):
-        self.cfg = AttrDict(self.cfg)
-        self.cfg.update(self.cfg.expt)
-        if "qubits" in self.cfg.expt:
-            self.qubits = self.cfg.expt.qubits
-        else:
-            self.qubits = range(4)
-        self.pulse_dict = dict()
-        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
-
-        # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
-        self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
-        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
-        self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
-        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
-        self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
-
-        self.cool_qubits = False
-        if "cool_qubits" in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
-            self.cool_qubits = self.cfg.expt.cool_qubits
-            self.swap_f0g1_chs = self.cfg.hw.soc.dacs.swap_f0g1.ch
-            self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
-            mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
-
-        self.readout_cool = False
-        if "readout_cool" in self.cfg.expt and self.cfg.expt.readout_cool:
-            self.readout_cool = self.cfg.expt.readout_cool
-
-        self.overall_phase = [0] * self.num_qubits_sample
-
-        self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs]  # get register page for qubit_ch
-
-        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4, 4))
-        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4, 4))
-        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4, 4))
-        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4, 4))
-        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4, 4))
-        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4, 4))
-        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4, 4))
-        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4, 4))
-        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4, 4))
-        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4, 4))
-        self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
-        self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
-
-        self.f_res_regs = [
-            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
-            for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)
-        ]
-        if self.cool_qubits:
-            self.f_f0g1_regs = [
-                self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_f0g1, self.qubit_chs)
-            ]
-
-        self.readout_lengths_dac = [
-            self.us2cycles(length, gen_ch=gen_ch)
-            for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)
-        ]
-        self.readout_lengths_adc = [
-            self.us2cycles(length, ro_ch=ro_ch)
-            for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)
-        ]
-
-        # declare qubit dacs, add qubit pi_ge pulses
-        for q in range(self.num_qubits_sample):
-            mixer_freq = None
-            if self.qubit_ch_types[q] == "int4":
-                mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
-            if self.qubit_chs[q] not in self.gen_chs:
-                self.declare_gen(
-                    ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq
-                )
-            self.X_pulse(q=q, play=False, reload=True)
-
-        # add IQ pulses
-        self.use_robust_pulses = False
-        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulse:
-            self.use_robust_pulses = True
-        if self.use_robust_pulses:
-            for q in range(self.num_qubits_sample):
-                self.setup_robust_pulse(q)
-
-        if self.cool_qubits:
-            mixer_freq = None
-            for q in self.cfg.expt.cool_qubits:
-                if self.swap_f0g1_ch_types[q] == "int4":
-                    mixer_freq = mixer_freqs[q]
-                if self.swap_f0g1_chs[q] not in self.gen_chs:
-                    self.declare_gen(
-                        ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq
-                    )
-
-                self.pisigma_ef = self.us2cycles(
-                    self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]
-                )  # default pi_ef value
-                self.add_gauss(
-                    ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef * 4
-                )
-                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == "flat_top":
-                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3 * 4)
-                else:
-                    assert False, "not implemented"
-
-        # declare res dacs, add readout pulses, declare ADCs
-        self.measure_chs = []
-        self.meas_ch_types = []
-        self.meas_ch_qs = []
-        self.mask = []  # indices of mux_freqs, mux_gains list to play
-        self.setup_readout()
-
-        self.set_gen_delays()
-        self.sync_all(200)
-
     def setup_readout(self):
         """
         Declare resonator generators, declare ADCs, add readout pulses
+
+        For a fullmux expt:
+        full_mux_expt: whether to use the full_mux to do the readout or standard mux setup
+        If True, specify:
+        full_mux_ch
+        mask: list of qubits to play the readout
+        Specify either (see setup_full_mux_pulse for more details):
+        lengths
+        OR
+        pulse_I_shapes
+        pulse_Q_shapes
+        times_us
         """
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
+        if not full_mux_expt:
+            self.setup_mux_gen_readout()
+        else:
+            assert "full_mux_ch" in self.cfg.expt and self.cfg.expt.full_mux_ch is not None
+            full_mux_ch = self.cfg.expt.full_mux_ch
+            assert "mask" in self.cfg.expt and self.cfg.expt.mask is not None
+            mask = self.cfg.expt.mask
+
+            lengths = self.cfg.expt.lengths if "lengths" in self.cfg.expt else None
+            pulse_I_shapes = self.cfg.expt.pulse_I_shapes if "pulse_I_shapes" in self.cfg.expt else None
+            pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes if "pulse_Q_shapes" in self.cfg.expt else None
+            times_us = self.cfg.expt.times_us if "times_us" in self.cfg.expt else None
+
+            mixer_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq)
+            assert np.all(mixer_freqs == mixer_freqs[0])
+            mixer_freq = mixer_freqs[0]
+
+            self.setup_fullmux_readout(
+                full_mux_ch=full_mux_ch,
+                adc_chs=self.adc_chs,
+                mask=mask,
+                mixer_freq=mixer_freq,
+                mux_freqs=self.cfg.device.readout.frequency,
+                mux_gains=self.cfg.device.readout.gain,
+                lengths=lengths,
+                pulse_I_shapes=pulse_I_shapes,
+                pulse_Q_shapes=pulse_Q_shapes,
+                times_us=times_us,
+                plot_IQ=False,
+            )
+
+    def setup_mux_gen_readout(self):
         mux_mixer_freq = None
         mux_freqs = [0] * 4  # MHz
         mux_gains = [0] * 4
@@ -1333,6 +1281,67 @@ class CliffordAveragerProgram(AveragerProgram):
                     length=self.readout_lengths_adc[q],
                     freq=self.cfg.device.readout.frequency[q],
                     gen_ch=self.res_chs[q],
+                )
+
+    def setup_fullmux_readout(
+        self,
+        full_mux_ch,
+        adc_chs,
+        mask,
+        mixer_freq,
+        mux_freqs,
+        mux_gains,
+        mux_nqz=2,
+        lengths=None,
+        pulse_I_shapes=None,
+        pulse_Q_shapes=None,
+        times_us=None,
+        plot_IQ=False,
+    ):
+        self.declare_gen(ch=full_mux_ch, nqz=mux_nqz, ro_ch=adc_chs[0])
+
+        # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
+        real_freqs = mixer_freq + np.array(mux_freqs)
+        orig_mixer_freq = mixer_freq
+        chs_to_round = [self.soccfg["gens"][full_mux_ch]]
+        for ch in adc_chs:
+            chs_to_round.append(self.soccfg["readouts"][ch])
+        rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
+        rounded_mux_freqs = np.array([self.roundfreq(f, chs_to_round) for f in mux_freqs])
+        rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
+
+        self.handle_full_mux_pulse(
+            name=f"measure",
+            ch=full_mux_ch,
+            mask=mask,
+            mux_freqs=rounded_mux_freqs,
+            mixer_freq=rounded_mixer_freq,
+            # mixer_freq=0,
+            relative_amps=mux_gains,
+            lengths=lengths,
+            pulse_I_shapes=pulse_I_shapes,
+            pulse_Q_shapes=pulse_Q_shapes,
+            times_us=times_us,
+            phase_deg=0,
+            plot_IQ=plot_IQ,
+            # ro_ch=self.adc_chs[0], # don't need this since we already rounded the freq I guess
+            reload=True,
+            play=False,
+            set_reg=True,
+        )
+        self.measure_chs.append(full_mux_ch)
+        self.meas_ch_types.append("full")
+        for q in mask:
+            self.meas_ch_qs.append(q)
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if adc_chs[q] not in self.ro_chs:
+                self.declare_readout(
+                    ch=adc_chs[q],
+                    length=self.readout_lengths_adc[q],
+                    freq=rounded_freqs[q],
+                    # gen_ch=self.full_mux_ch,
                 )
 
     def measure_readout_cool(
@@ -1527,6 +1536,119 @@ class CliffordAveragerProgram(AveragerProgram):
             return avgi_rot, avgq_rot
         else:
             assert False, "Undefined post processing flag, options are None, threshold, scale"
+
+    def initialize(self):
+        self.cfg = AttrDict(self.cfg)
+        self.cfg.update(self.cfg.expt)
+        if "qubits" in self.cfg.expt:
+            self.qubits = self.cfg.expt.qubits
+        else:
+            self.qubits = range(4)
+        self.pulse_dict = dict()
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
+
+        # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
+        self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
+        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
+        self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
+        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
+        self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
+
+        self.cool_qubits = False
+        if "cool_qubits" in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            self.cool_qubits = self.cfg.expt.cool_qubits
+            self.swap_f0g1_chs = self.cfg.hw.soc.dacs.swap_f0g1.ch
+            self.swap_f0g1_ch_types = self.cfg.hw.soc.dacs.swap_f0g1.type
+            mixer_freqs = self.cfg.hw.soc.dacs.swap_f0g1.mixer_freq
+
+        self.readout_cool = False
+        if "readout_cool" in self.cfg.expt and self.cfg.expt.readout_cool:
+            self.readout_cool = self.cfg.expt.readout_cool
+
+        self.overall_phase = [0] * self.num_qubits_sample
+
+        self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs]  # get register page for qubit_ch
+
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4, 4))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4, 4))
+        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4, 4))
+        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4, 4))
+        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4, 4))
+        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4, 4))
+        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4, 4))
+        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4, 4))
+        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4, 4))
+        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4, 4))
+        self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
+        self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
+
+        self.f_res_regs = [
+            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
+            for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)
+        ]
+        if self.cool_qubits:
+            self.f_f0g1_regs = [
+                self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_f0g1, self.qubit_chs)
+            ]
+
+        self.readout_lengths_dac = [
+            self.us2cycles(length, gen_ch=gen_ch)
+            for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)
+        ]
+        self.readout_lengths_adc = [
+            self.us2cycles(length, ro_ch=ro_ch)
+            for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)
+        ]
+
+        # declare qubit dacs, add qubit pi_ge pulses
+        for q in range(self.num_qubits_sample):
+            mixer_freq = None
+            if self.qubit_ch_types[q] == "int4":
+                mixer_freq = self.cfg.hw.soc.dacs.qubit.mixer_freq[q]
+            if self.qubit_chs[q] not in self.gen_chs:
+                self.declare_gen(
+                    ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq
+                )
+            self.X_pulse(q=q, play=False, reload=True)
+
+        # add IQ pulses
+        self.use_robust_pulses = False
+        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulse:
+            self.use_robust_pulses = True
+        if self.use_robust_pulses:
+            for q in range(self.num_qubits_sample):
+                self.setup_robust_pulse(q)
+
+        if self.cool_qubits:
+            mixer_freq = None
+            for q in self.cfg.expt.cool_qubits:
+                if self.swap_f0g1_ch_types[q] == "int4":
+                    mixer_freq = mixer_freqs[q]
+                if self.swap_f0g1_chs[q] not in self.gen_chs:
+                    self.declare_gen(
+                        ch=self.swap_f0g1_chs[q], nqz=self.cfg.hw.soc.dacs.swap_f0g1.nyquist[q], mixer_freq=mixer_freq
+                    )
+
+                self.pisigma_ef = self.us2cycles(
+                    self.pi_ef_sigmas[q, q], gen_ch=self.qubit_chs[q]
+                )  # default pi_ef value
+                self.add_gauss(
+                    ch=self.qubit_chs[q], name=f"pi_ef_qubit{q}", sigma=self.pisigma_ef, length=self.pisigma_ef * 4
+                )
+                if self.cfg.device.qubit.pulses.pi_f0g1.type[q] == "flat_top":
+                    self.add_gauss(ch=self.swap_f0g1_chs[q], name=f"pi_f0g1_{q}", sigma=3, length=3 * 4)
+                else:
+                    assert False, "not implemented"
+
+        # declare res dacs, add readout pulses, declare ADCs
+        self.measure_chs = []
+        self.meas_ch_types = []
+        self.meas_ch_qs = []
+        self.mask = []  # indices of mux_freqs, mux_gains list to play
+        self.setup_readout()
+
+        self.set_gen_delays()
+        self.sync_all(200)
 
 
 # ===================================================================== #
