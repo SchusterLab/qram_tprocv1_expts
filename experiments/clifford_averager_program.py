@@ -838,7 +838,11 @@ class CliffordAveragerProgram(AveragerProgram):
         flag=None,
     ):
         if name not in self.pulse_dict.keys() or reload:
-            assert None not in [ch, mask, mux_freqs, mixer_freq, lengths]
+            assert ch is not None
+            assert mask is not None
+            assert mux_freqs is not None
+            assert mixer_freq is not None
+            assert lengths is not None
             tot_I_vs_us, tot_Q_vs_us, times_us = self.setup_full_mux_pulse(
                 mask=mask,
                 mux_freqs=mux_freqs,

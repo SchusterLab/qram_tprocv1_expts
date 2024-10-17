@@ -1654,14 +1654,32 @@ class MultiReadoutFullMuxProgram(MultiReadoutProgram, QutritAveragerProgram):
         pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes if "pulse_Q_shapes" in self.cfg.expt else None
         times_us = self.cfg.expt.times_us if "times_us" in self.cfg.expt else None
 
-        mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[self.cfg.expt.qTest]
-        print("mixer_freq", mixer_freq)
+        # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
+        real_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq) + np.array(self.cfg.device.readout.frequency)
+        orig_mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[self.cfg.expt.qTest]
+        print("orig mixer_freq", orig_mixer_freq)
+
+        # mux_ch = 6
+        # chs_to_round = [self.gen_chs[self.full_mux_ch], self.gen_chs[mux_ch]]
+        chs_to_round = [self.soccfg["gens"][self.full_mux_ch]]
+        for ch in self.adc_chs:
+            chs_to_round.append(self.soccfg["readouts"][ch])
+
+        rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
+        print("rounded mixer", rounded_mixer_freq)
+        rounded_mux_freqs = np.array([self.roundfreq(f, chs_to_round) for f in self.cfg.device.readout.frequency])
+        rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
+
+        print("requested freqs", real_freqs)
+        print("rounded mux freqs", rounded_mux_freqs)
+        print("rounded freqs", rounded_freqs)
+
         self.handle_full_mux_pulse(
             name=f"measure",
             ch=self.full_mux_ch,
             mask=mask,
-            mux_freqs=self.cfg.device.readout.frequency,
-            mixer_freq=mixer_freq,
+            mux_freqs=rounded_mux_freqs,
+            mixer_freq=rounded_mixer_freq,
             # mixer_freq=0,
             relative_amps=self.cfg.device.readout.gain,
             lengths=lengths,
@@ -1671,7 +1689,7 @@ class MultiReadoutFullMuxProgram(MultiReadoutProgram, QutritAveragerProgram):
             phase_deg=0,
             gain=gain,
             plot_IQ=False,
-            ro_ch=self.adc_chs[0],
+            # ro_ch=self.adc_chs[0], # don't need this since we already rounded the freq I guess
             reload=True,
             play=False,
             set_reg=True,
@@ -1684,10 +1702,9 @@ class MultiReadoutFullMuxProgram(MultiReadoutProgram, QutritAveragerProgram):
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
             if self.adc_chs[q] not in self.ro_chs:
-                print("actual readout freq q", q, self.cfg.device.readout.frequency[q] + mixer_freq)
                 self.declare_readout(
                     ch=self.adc_chs[q],
                     length=self.readout_lengths_adc[q],
-                    freq=self.cfg.device.readout.frequency[q] + mixer_freq,
-                    gen_ch=self.full_mux_ch,
+                    freq=rounded_freqs[q],
+                    # gen_ch=self.full_mux_ch,
                 )
