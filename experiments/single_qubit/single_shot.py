@@ -1761,7 +1761,8 @@ class MultiReadoutOptExperiment(Experiment):
                     multihist.cfg = deepcopy(self.cfg)
                     multihist.cfg.device.readout.frequency[qTest] = f
                     multihist.cfg.device.readout.gain[qTest] = g
-                    multihist.cfg.device.readout.readout_length[qTest] = l
+                    
+                    
                     check_e = True 
                     if "check_f" in self.cfg.expt:
                         check_f = False 
@@ -1778,8 +1779,13 @@ class MultiReadoutOptExperiment(Experiment):
                         n_init_readout=self.cfg.expt.n_init_readout,
                         init_read_wait_us=self.cfg.expt.init_read_wait_us,
                         n_trig=self.cfg.expt.n_trig,
-                        avg_trigs=self.cfg.expt.avg_trigs
-                    )
+                        avg_trigs=self.cfg.expt.avg_trigs,
+                        full_mux_expt = self.cfg.expt.full_mux_expt,
+                        full_mux_ch=self.cfg.expt.full_mux_ch,
+                        mask = self.cfg.expt.mask, 
+                        lengths = [l]*self.cfg.expt.full_mux_ch, 
+                        )
+                    
                     amplitude_mode = self.cfg.expt.amplitude_mode
                     
                     multihist.go(analyze=False, display=False, progress=False,
@@ -1795,6 +1801,7 @@ class MultiReadoutOptExperiment(Experiment):
                     
                     if progress:
                         print(f"Finished {i_f}/{len(fpts)} {i_g}/{len(gainpts)} {i_l}/{len(lenpts)}")
+                        print(f'freq: {f} gain: {g} length: {l}')
                         print(f"Fidelity: {fid[i_f, i_g, i_l]}")
                     
                     
@@ -1894,7 +1901,7 @@ class MultiReadoutFullMuxProgram(MultiReadoutProgram, QutritAveragerProgram):
         # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
         real_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq) + np.array(self.cfg.device.readout.frequency)
         orig_mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq[self.cfg.expt.qTest]
-        print("orig mixer_freq", orig_mixer_freq)
+        # print("orig mixer_freq", orig_mixer_freq)
 
         # mux_ch = 6
         # chs_to_round = [self.gen_chs[self.full_mux_ch], self.gen_chs[mux_ch]]
@@ -1903,10 +1910,11 @@ class MultiReadoutFullMuxProgram(MultiReadoutProgram, QutritAveragerProgram):
             chs_to_round.append(self.soccfg["readouts"][ch])
 
         rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
-        print("rounded mixer", rounded_mixer_freq)
+        # print("rounded mixer", rounded_mixer_freq)
         rounded_mux_freqs = np.array([self.roundfreq(f, chs_to_round) for f in self.cfg.device.readout.frequency])
         rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
 
+    
         print("requested freqs", real_freqs)
         print("rounded mux freqs", rounded_mux_freqs)
         print("rounded freqs", rounded_freqs)
