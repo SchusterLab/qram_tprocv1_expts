@@ -1051,10 +1051,6 @@ class MultiReadoutProgram(QutritAveragerProgram):
             self.checkZZ = True
         if qZZ is None:
             qZZ = qTest
-            
-            
-        
-
 
         self.reset_and_sync()
 
@@ -1698,8 +1694,6 @@ class MultiReadoutExperiment(Experiment):
         return self.fname
 
 class MultiReadoutOptExperiment(Experiment):
-    
-    
     """
     Multireadout optimization experiment over readout parameters
     expt = dict(

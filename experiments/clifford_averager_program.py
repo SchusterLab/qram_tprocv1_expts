@@ -1216,6 +1216,11 @@ class CliffordAveragerProgram(AveragerProgram):
             )
 
     def setup_mux_gen_readout(self):
+        self.f_res_regs = [
+            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
+            for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)
+        ]
+
         mux_mixer_freq = None
         mux_freqs = [0] * 4  # MHz
         mux_gains = [0] * 4
@@ -1309,6 +1314,12 @@ class CliffordAveragerProgram(AveragerProgram):
         rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
         rounded_mux_freqs = np.array([self.roundfreq(f, chs_to_round) for f in mux_freqs])
         rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
+
+        self.res_chs = [full_mux_ch] * self.num_qubits_sample
+        self.f_res_regs = [
+            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
+            for f, gen_ch, adc_ch in zip(rounded_mux_freqs, self.res_chs, self.adc_chs)
+        ]
 
         self.handle_full_mux_pulse(
             name=f"measure",
@@ -1582,10 +1593,6 @@ class CliffordAveragerProgram(AveragerProgram):
         self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
         self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
 
-        self.f_res_regs = [
-            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
-            for f, gen_ch, adc_ch in zip(self.cfg.device.readout.frequency, self.res_chs, self.adc_chs)
-        ]
         if self.cool_qubits:
             self.f_f0g1_regs = [
                 self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_f0g1, self.qubit_chs)
