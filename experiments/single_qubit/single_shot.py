@@ -1051,6 +1051,10 @@ class MultiReadoutProgram(QutritAveragerProgram):
             self.checkZZ = True
         if qZZ is None:
             qZZ = qTest
+            
+            
+        
+
 
         self.reset_and_sync()
 
@@ -1071,7 +1075,7 @@ class MultiReadoutProgram(QutritAveragerProgram):
         self.use_gf_readout = False
         if "use_gf_readout" in self.cfg.expt and self.cfg.expt.use_gf_readout:
             self.use_gf_readout = self.cfg.expt.use_gf_readout
-
+            
         extended_readout_delay_cycles = 3  # delay between readout repeats for one trigger stack
         if self.use_gf_readout:
             n_trig *= 2
@@ -1095,7 +1099,7 @@ class MultiReadoutProgram(QutritAveragerProgram):
                     wait=True,
                     syncdelay=syncdelay,
                 )
-
+            
         self.sync_all()
         self.measure(
             pulse_ch=self.measure_chs,
@@ -1182,6 +1186,8 @@ class MultiReadoutExperiment(Experiment):
         # ================= #
 
         # Ground state shots
+
+        
         cfg = AttrDict(deepcopy(self.cfg))
         cfg.expt.n_init_readout = 0
         cfg.expt.init_read_wait_us = 0
@@ -1742,7 +1748,8 @@ class MultiReadoutOptExperiment(Experiment):
                     multihist.cfg = deepcopy(self.cfg)
                     multihist.cfg.device.readout.frequency[qTest] = f
                     multihist.cfg.device.readout.gain[qTest] = g
-                    
+                    multihist.cfg.expt = deepcopy(self.cfg.expt)
+
                     
                     check_e = True 
                     if "check_f" in self.cfg.expt:
@@ -1751,29 +1758,22 @@ class MultiReadoutOptExperiment(Experiment):
                         check_f = self.cfg.expt.check_f
                         check_e = not check_f
                         
-                    multihist.cfg.expt = dict(
-                        reps=self.cfg.expt.reps,
-                        check_e=check_e,
-                        check_f=check_f,
-                        qTest=qTest,
-                        readout_cool=True,
-                        n_init_readout=self.cfg.expt.n_init_readout,
-                        init_read_wait_us=self.cfg.expt.init_read_wait_us,
-                        n_trig=self.cfg.expt.n_trig,
-                        avg_trigs=self.cfg.expt.avg_trigs,
-                        full_mux_expt = self.cfg.expt.full_mux_expt,
-                        full_mux_ch=self.cfg.expt.full_mux_ch,
-                        mask = self.cfg.expt.mask, 
-                        lengths = [l]*self.cfg.expt.full_mux_ch, 
-                        )
+                        
+                    if 'full_mux_expt' in self.cfg.expt and self.cfg.expt.full_mux_expt:
+                        multihist.cfg.expt.lengths = [l]*4
+                        multihist.cfg.device.readout.readout_length = [l]*4
+                    else:
+                        multihist.cfg.device.readout.readout_length[qTest] = l
                     
-                    amplitude_mode = self.cfg.expt.amplitude_mode
+                    
+                    multihist.cfg.expt.check_e = check_e
+                    amplitude_mode = False 
+                    if "amplitude_mode" in self.cfg.expt:
+                        amplitude_mode = self.cfg.expt.amplitude_mode
                     
                     multihist.go(analyze=False, display=False, progress=False,
                                  save=False)
-                    result = multihist.analyze(check_readouts=[-1], fit=False, post_select=False, data=multihist.data, verbose=False, amplitude_mode=amplitude_mode)
-                    
-                    
+                    result = multihist.analyze(check_readouts=[0], fit=False, post_select=False, data=multihist.data, verbose=False, amplitude_mode=amplitude_mode, plot=False)
                     
                     fid[i_f, i_g, i_l] = (result["fids"][0]
                     if not check_f else result["fids"][1])
