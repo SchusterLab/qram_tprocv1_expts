@@ -189,29 +189,10 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         assert basis in "IXYZ"
         assert len(basis) == 1
         if basis == "X":
-            self.Y_pulse(
-                qubit,
-                pihalf=True,
-                play=play,
-                ZZ_qubit=ZZ_qubit,
-                neg=True,
-                # neg=False,
-                flag=flag,
-                reload=True,
-            )  # -Y/2 pulse to get from +X to +Z
-            # print('WARNING, USING A DIFFERENT SIGN ON THE Y PULSE FOR X BASIS MEASUREMENT')
+            self.Y_pulse(qubit, pihalf=True, play=play, ZZ_qubit=ZZ_qubit, neg=True, flag=flag, reload=True,)  # -Y/2 pulse to get from +X to +Z
         elif basis == "Y":
-            self.X_pulse(
-                qubit,
-                pihalf=True,
-                ZZ_qubit=ZZ_qubit,
-                neg=False,
-                play=play,
-                flag=flag,
-                reload=True,
-            )  # X/2 pulse to get from +Y to +Z
-        else:
-            pass  # measure in I/Z basis
+            self.X_pulse(qubit, pihalf=True, ZZ_qubit=ZZ_qubit, neg=False, play=play, flag=flag, reload=True,)  # X/2 pulse to get from +Y to +Z
+        else: pass # measure in I/Z basis
         self.sync_all()
 
     def state_prep_pulse(self, qubits, **kwargs):
@@ -272,7 +253,6 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
     def collect_counts(self, angle=None, threshold=None):
         shots, _ = self.get_shots(angle=angle, threshold=threshold)
         # collect shots for all adcs, then sorts into e, g based on >/< threshold and angle rotation
-        # shots = np.array([np.heaviside(avgi[i] - threshold[i], 0) for i in range(len(self.adc_chs))])
 
         qubits = self.cfg.expt.tomo_qubits
         # get the shots for the qubits we care about

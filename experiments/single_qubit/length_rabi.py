@@ -82,6 +82,9 @@ class LengthRabiProgram(QutritAveragerProgram):
                 cool_idle = self.cfg.expt.cool_idle
             self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
 
+        if self.readout_cool:
+            self.measure_readout_cool()
+
         # initializations as necessary
         if self.checkZZ:
             self.X_pulse(q=qZZ, play=True)
