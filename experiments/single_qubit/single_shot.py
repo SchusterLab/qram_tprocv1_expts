@@ -182,6 +182,7 @@ def general_hist(
     """
     Loop over check states
     """
+    y_max = 0
     for check_i, data_check in enumerate(iqshots):
         state_label = state_labels[check_i]
 
@@ -263,6 +264,8 @@ def general_hist(
                 linestyle=linestyle,
                 normalize=normalize,
             )
+            y_max = max(y_max, max(n))
+            axs[1, 0].set_ylim((0, y_max * 1.1))
             # n, bins = np.histogram(I_new, bins=numbins, range=xlims)
             # axs[1,0].plot(bins[:-1], n/n.sum(), color=default_colors[check_i % len(default_colors)], linestyle=linestyle)
 
@@ -335,12 +338,6 @@ def general_hist(
                     "-",
                     color=default_colors[check_i % len(default_colors)],
                 )
-                if y_norm.max() > y_max:
-                    y_max = y_norm.max()
-                    print(y_max)
-                    print(y_norm.max())
-
-                axs[1, 0].set_ylim((0, y_max * 1.1))
 
             popts[check_i] = popt
             pcovs[check_i] = pcov
@@ -423,7 +420,6 @@ def hist(
     e_states = [1]
 
     if "If" in data.keys():
-        plot_f = True
         If = data["If"]
         Qf = data["Qf"]
         iqshots.append((If, Qf))
@@ -482,7 +478,6 @@ def multihist(
     """
     state_labels = []
     assert len(play_pulses_list) == len(check_states)
-    print("check states", check_states)
     for i in range(len(check_states)):
         check_state = check_states[i]
         play_pulses = play_pulses_list[i]
@@ -493,12 +488,12 @@ def multihist(
         state_labels.append(label)
     all_q_iqshots = data["iqshots"]
     iqshots = []
-    for check_i, data_check in enumerate(iqshots):
+    for check_i, data_check in enumerate(all_q_iqshots):
         I, Q = data_check
         I = I[check_qubit]
         Q = Q[check_qubit]
         iqshots.append((I, Q))
-        check_qubit_label = check_qubit
+    check_qubit_label = check_qubit
     return_data = general_hist(
         iqshots=iqshots,
         check_qubit_label=check_qubit_label,
@@ -521,6 +516,7 @@ def multihist(
     )
     if check_qnd:
         data["n_diff_qnd"] = return_data[-1]
+    return return_data
 
 
 # ====================================================== #
