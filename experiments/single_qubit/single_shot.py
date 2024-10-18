@@ -482,7 +482,8 @@ def multihist(
     """
     state_labels = []
     assert len(play_pulses_list) == len(check_states)
-    for i in range(check_states):
+    print("check states", check_states)
+    for i in range(len(check_states)):
         check_state = check_states[i]
         play_pulses = play_pulses_list[i]
         label = f"{check_state}"
