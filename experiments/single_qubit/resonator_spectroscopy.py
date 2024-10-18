@@ -1,14 +1,15 @@
 import time
 from copy import deepcopy
 
-import experiments.fitting as fitter
 import matplotlib.pyplot as plt
 import numpy as np
-from experiments.single_qubit.single_shot import HistogramProgram
 from qick import *
 from qick.helpers import gauss
 from slab import AttrDict, Experiment, dsfit
 from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
+from experiments.single_qubit.single_shot import HistogramProgram
 
 
 class ResonatorSpectroscopyExperiment(Experiment):
@@ -54,8 +55,8 @@ class ResonatorSpectroscopyExperiment(Experiment):
             datai, dataq = rspec.collect_shots()
             avgi = np.average(datai)
             avgq = np.average(dataq)
-            amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
-            phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
+            amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
+            phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
             self.prog = rspec
             # if f > 822.426:
             #     print('amps', amp)
