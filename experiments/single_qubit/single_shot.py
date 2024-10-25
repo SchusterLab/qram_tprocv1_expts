@@ -1568,7 +1568,15 @@ class MultiReadoutOptExperiment(Experiment):
                         print(f"Finished {i_f}/{len(fpts)} {i_g}/{len(gainpts)} {i_l}/{len(lenpts)}")
                         print(f"freq: {f} gain: {g} length: {l}")
                         print(f"Fidelity: {fid[i_f, i_g, i_l]}")
-
+                        
+                        
+        mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq
+        # check if mixer_freq is a list or not, then add the corresponding idx to fpts
+        if not isinstance(mixer_freq, list):
+            fpts += mixer_freq
+        else: 
+            fpts += mixer_freq[qTest]        
+                    
         data = dict()
         data["fpts"] = fpts
         data["gainpts"] = gainpts
@@ -1604,6 +1612,7 @@ class MultiReadoutOptExperiment(Experiment):
         gainpts = data["gainpts"]
         lenpts = data["lenpts"]
         fid = data["fid"]
+        
 
         for i, length in enumerate(lenpts):
             fig, ax = plt.subplots(1, 1, figsize=(7, 5))

@@ -248,8 +248,11 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
                 # avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                 # avgi = avgi[0][0]
                 # avgq = avgq[0][0]
-                amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
-                phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
+                
+                amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
+                phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
+                # amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
+                # phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
                 data["avgi"][-1].append(avgi)
                 data["avgq"][-1].append(avgq)
                 data["amps"][-1].append(amp)
@@ -333,11 +336,14 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
         plt.show()
 
         if select is not None:
-            y_closest_i = np.argmin(abs(y_sweep - select))
-            y_closest = y_sweep[y_closest_i]
-            print("plotting at gain", y_closest, "index", y_closest_i)
-            plt.plot(x_sweep, data["amps"][y_closest_i, :], "o-")
-            plt.show()
+            fig, ax = plt.subplots()
+            for s in select:
+                y_closest_i = np.argmin(abs(y_sweep - s))
+                y_closest = y_sweep[y_closest_i]
+                y_plot = data["amps"][y_closest_i, :]/np.max(data["amps"][y_closest_i, :])
+                print("plotting at gain", y_closest, "index", y_closest_i)
+                ax.plot(x_sweep, y_plot, "o-", label=f"Gain {y_closest}")
+            ax.legend()
 
     def save_data(self, data=None):
         print(f"Saving {self.fname}")
@@ -418,6 +424,7 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
                 avgq = avgq[0][0]
                 amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
                 phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
+        
 
                 data["avgi"][-1].append(avgi)
                 data["avgq"][-1].append(avgq)
