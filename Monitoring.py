@@ -1,9 +1,10 @@
-import numpy as np
+import os
+import sys
+
 import matplotlib.pyplot as plt
 import matplotlib.style as style
+import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import sys 
-import os 
 
 cmap = plt.get_cmap('Dark2')
 plt.rcParams['figure.figsize'] = [10,6]
@@ -16,33 +17,34 @@ sys.path.append('../slab/')
 sys.path.append('/home/xilinx/jupyter_notebooks/')
 
 
+import time
+
 from qick import *
 from qick.helpers import gauss
 from tqdm import tqdm_notebook as tqdm
 
-import time
 expt_path=os.getcwd()+'/data'
-import scipy as sp
 import json
-import yaml
-import experiments as meas
-import Pyro4.util
+import time
 from copy import deepcopy
-import scipy.constants as const
 
+import Pyro4.util
 import qutip as qt
 import qutip.visualization as qplt
-
-from slab.instruments import *
-from slab.experiment import Experiment
-from slab.datamanagement import SlabFile
-from slab import get_next_filename, AttrDict
-
-from QSwitch import QSwitch
+import scipy as sp
+import scipy.constants as const
+import yaml
 from PulseSequence import PulseSequence
-from TomoAnalysis import TomoAnalysis
-import time 
+from QSwitch import QSwitch
+from slab import AttrDict, get_next_filename
+from slab.datamanagement import SlabFile
+from slab.experiment import Experiment
+from slab.instruments import *
+
+import experiments as meas
 import experiments.fitting as fitter
+from TomoAnalysis import TomoAnalysis
+
 
 class Monitoring(): 
     
@@ -150,7 +152,7 @@ class Monitoring():
                  qubits = [0,1,2,3],
                  ip_address='10.108.30.56',
                  config_file='\config_q3diamond_full688and638_reset.yml', 
-                 save_path='data_241007',
+                 save_path='data_241025',
                  debug=False,
                  using_LO=False, 
                  live_plot=True):
