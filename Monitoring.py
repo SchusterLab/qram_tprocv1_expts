@@ -149,7 +149,7 @@ class Monitoring():
                  param_dict,
                  qubits = [0,1,2,3],
                  ip_address='10.108.30.56',
-                 config_file='config_q3diamond_full688and638_reset.yml', 
+                 config_file='\config_q3diamond_full688and638_reset.yml', 
                  save_path='data_241007',
                  debug=False,
                  using_LO=False, 
@@ -160,7 +160,8 @@ class Monitoring():
         self.save_path = save_path
         # load experiment config and rfsoc config
         self.im = InstrumentManager(ns_address=ip_address)
-        config_path = os.path.join(os.getcwd(), config_file)
+        # config_path = os.path.join(os.getcwd(), config_file)
+        config_path = 'S:\Connie\experiments\qram_tprocv1_expts\configs' + config_file
         self.config_path = config_path
         with open(config_path, 'r') as cfg_file:
             yaml_cfg = yaml.safe_load(cfg_file)
@@ -1733,209 +1734,209 @@ class Monitoring():
     def measure_all(self, live_plotting=False, debug=False, save=True, report=True, start_time=None):
     
     
-        # for idxq, qubit_i in enumerate(self.qubit_watched):
+        for idxq, qubit_i in enumerate(self.qubit_watched):
             
-        #     if debug: print(f'Qubit {qubit_i}')
+            if debug: print(f'Qubit {qubit_i}')
             
-        #     if 't2' in self.param_dict[qubit_i].keys():
-        #         if 'ge' in self.param_dict[qubit_i].t2.keys():
-        #             try: 
-        #                 time_saved = False
+            if 't2' in self.param_dict[qubit_i].keys():
+                if 'ge' in self.param_dict[qubit_i].t2.keys():
+                    try: 
+                        time_saved = False
                     
-        #                 freq_qb,freq_qb_err, t2_ge, t2_ge_err = self.measure_t2(start_time, qubit_i=qubit_i, EF=False, debug=debug, save=save)
+                        freq_qb,freq_qb_err, t2_ge, t2_ge_err = self.measure_t2(start_time, qubit_i=qubit_i, EF=False, debug=debug, save=save)
                         
                         
-        #                 if freq_qb_err/freq_qb > 0.1:
-        #                     print(f'Warning: GE frequency is too large for qubit {qubit_i}')
-        #                     continue
-        #                 else:
-        #                     self.param_dict[qubit_i].t2.ge.freq_qb = freq_qb
-        #                     self.param_dict[qubit_i].t2.ge.freq_qb_err = freq_qb_err 
-        #                     if 't1' in self.param_dict[qubit_i].keys():
-        #                         if 'ge' in self.param_dict[qubit_i].t1.keys():
-        #                             self.param_dict[qubit_i].t1.ge.freq_qb = freq_qb
-        #                     if 'pi' in self.param_dict[qubit_i].keys():
-        #                         if 'ge' in self.param_dict[qubit_i].pi.keys():
-        #                             self.param_dict[qubit_i].pi.ge.freq_qb = freq_qb
+                        if freq_qb_err/freq_qb > 0.1:
+                            print(f'Warning: GE frequency is too large for qubit {qubit_i}')
+                            continue
+                        else:
+                            self.param_dict[qubit_i].t2.ge.freq_qb = freq_qb
+                            self.param_dict[qubit_i].t2.ge.freq_qb_err = freq_qb_err 
+                            if 't1' in self.param_dict[qubit_i].keys():
+                                if 'ge' in self.param_dict[qubit_i].t1.keys():
+                                    self.param_dict[qubit_i].t1.ge.freq_qb = freq_qb
+                            if 'pi' in self.param_dict[qubit_i].keys():
+                                if 'ge' in self.param_dict[qubit_i].pi.keys():
+                                    self.param_dict[qubit_i].pi.ge.freq_qb = freq_qb
                                     
-        #                     if live_plotting:
-        #                         self.param_dict[qubit_i].t2.ge.time.append(time.time()-start_time)
+                            if live_plotting:
+                                self.param_dict[qubit_i].t2.ge.time.append(time.time()-start_time)
 
-        #                         time_saved = True
-        #                         self.param_dict[qubit_i].t2.ge.freq_stored.append(freq_qb)
-        #                         self.param_dict[qubit_i].t2.ge.freq_err_stored.append(freq_qb_err)
-        #                         self.param_dict[qubit_i].t2.ge.stored.append(0)
-        #                         self.param_dict[qubit_i].t2.ge.stored_err.append(0)
+                                time_saved = True
+                                self.param_dict[qubit_i].t2.ge.freq_stored.append(freq_qb)
+                                self.param_dict[qubit_i].t2.ge.freq_err_stored.append(freq_qb_err)
+                                self.param_dict[qubit_i].t2.ge.stored.append(0)
+                                self.param_dict[qubit_i].t2.ge.stored_err.append(0)
                         
-        #                 if t2_ge_err/t2_ge > 0.5:
-        #                     print(f'Warning: GE t2 error is too large for qubit {qubit_i}')
-        #                     continue
-        #                 else:       
-        #                     self.param_dict[qubit_i].t2.ge.value = t2_ge
-        #                     self.param_dict[qubit_i].t2.ge.value_err = t2_ge_err
+                        if t2_ge_err/t2_ge > 0.5:
+                            print(f'Warning: GE t2 error is too large for qubit {qubit_i}')
+                            continue
+                        else:       
+                            self.param_dict[qubit_i].t2.ge.value = t2_ge
+                            self.param_dict[qubit_i].t2.ge.value_err = t2_ge_err
                                                         
                             
                             
-        #                     if live_plotting:
+                            if live_plotting:
 
-        #                         if not time_saved:
-        #                             self.param_dict[qubit_i].t2.ge.time.append(time.time()-start_time)
-        #                             self.param_dict[qubit_i].t2.ge.freq_stored.append(0)
-        #                             self.param_dict[qubit_i].t2.ge.freq_err_stored.append(0)
-        #                             self.param_dict[qubit_i].t2.ge.stored.append(t2_ge)
-        #                             self.param_dict[qubit_i].t2.ge.stored_err.append(t2_ge_err)
-        #                         else:
-        #                             self.param_dict[qubit_i].t2.ge.stored[-1] = t2_ge
-        #                             self.param_dict[qubit_i].t2.ge.stored_err[-1] = t2_ge_err
+                                if not time_saved:
+                                    self.param_dict[qubit_i].t2.ge.time.append(time.time()-start_time)
+                                    self.param_dict[qubit_i].t2.ge.freq_stored.append(0)
+                                    self.param_dict[qubit_i].t2.ge.freq_err_stored.append(0)
+                                    self.param_dict[qubit_i].t2.ge.stored.append(t2_ge)
+                                    self.param_dict[qubit_i].t2.ge.stored_err.append(t2_ge_err)
+                                else:
+                                    self.param_dict[qubit_i].t2.ge.stored[-1] = t2_ge
+                                    self.param_dict[qubit_i].t2.ge.stored_err[-1] = t2_ge_err
 
                     
 
-        #             except Exception as e:
-        #                 print(f'Error in T2 GE: {e}')
+                    except Exception as e:
+                        print(f'Error in T2 GE: {e}')
                     
-        #         if 'ef' in self.param_dict[qubit_i].t2.keys():
-        #             try:
-        #                 time_saved = False
-        #                 freq_qb, freq_qb_err, t2_ef, t2_ef_err = self.measure_t2(start_time, qubit_i=qubit_i, EF=True, debug=debug, save=save)
+                if 'ef' in self.param_dict[qubit_i].t2.keys():
+                    try:
+                        time_saved = False
+                        freq_qb, freq_qb_err, t2_ef, t2_ef_err = self.measure_t2(start_time, qubit_i=qubit_i, EF=True, debug=debug, save=save)
                         
                         
-        #                 if freq_qb_err/freq_qb > 0.1:
-        #                     print(f'Warning: EF frequency error is too large for qubit {qubit_i}')
-        #                     continue
-        #                 else:
-        #                     self.param_dict[qubit_i].t2.ef.freq_qb = freq_qb
-        #                     self.param_dict[qubit_i].t2.ef.freq_qb_err = freq_qb_err
+                        if freq_qb_err/freq_qb > 0.1:
+                            print(f'Warning: EF frequency error is too large for qubit {qubit_i}')
+                            continue
+                        else:
+                            self.param_dict[qubit_i].t2.ef.freq_qb = freq_qb
+                            self.param_dict[qubit_i].t2.ef.freq_qb_err = freq_qb_err
                             
-        #                     if 't1' in self.param_dict[qubit_i].keys():
-        #                         if 'ef' in self.param_dict[qubit_i].t1.keys():
-        #                             self.param_dict[qubit_i].t1.ef.freq_qb = freq_qb
-        #                     if 'pi' in self.param_dict[qubit_i].keys():
-        #                         if 'ef' in self.param_dict[qubit_i].pi.keys():
-        #                             self.param_dict[qubit_i].pi.ef.freq_qb = freq_qb
+                            if 't1' in self.param_dict[qubit_i].keys():
+                                if 'ef' in self.param_dict[qubit_i].t1.keys():
+                                    self.param_dict[qubit_i].t1.ef.freq_qb = freq_qb
+                            if 'pi' in self.param_dict[qubit_i].keys():
+                                if 'ef' in self.param_dict[qubit_i].pi.keys():
+                                    self.param_dict[qubit_i].pi.ef.freq_qb = freq_qb
                                     
-        #                     if live_plotting:
-        #                         self.param_dict[qubit_i].t2.ef.time.append(time.time()-start_time)
-        #                         time_saved = True
-        #                         self.param_dict[qubit_i].t2.ef.freq_stored.append(freq_qb)
-        #                         self.param_dict[qubit_i].t2.ef.freq_err_stored.append(freq_qb_err)
-        #                         self.param_dict[qubit_i].t2.ef.stored.append(0)
-        #                         self.param_dict[qubit_i].t2.ef.stored_err.append(0)
+                            if live_plotting:
+                                self.param_dict[qubit_i].t2.ef.time.append(time.time()-start_time)
+                                time_saved = True
+                                self.param_dict[qubit_i].t2.ef.freq_stored.append(freq_qb)
+                                self.param_dict[qubit_i].t2.ef.freq_err_stored.append(freq_qb_err)
+                                self.param_dict[qubit_i].t2.ef.stored.append(0)
+                                self.param_dict[qubit_i].t2.ef.stored_err.append(0)
                     
                         
-        #                 if t2_ef_err/t2_ef > 0.5:
-        #                     print(f'Warning: EF t2 error is too large for qubit {qubit_i}')
-        #                     continue
-        #                 else:  
-        #                     self.param_dict[qubit_i].t2.ef.value = t2_ef
-        #                     self.param_dict[qubit_i].t2.ef.value_err = t2_ef_err
+                        if t2_ef_err/t2_ef > 0.5:
+                            print(f'Warning: EF t2 error is too large for qubit {qubit_i}')
+                            continue
+                        else:  
+                            self.param_dict[qubit_i].t2.ef.value = t2_ef
+                            self.param_dict[qubit_i].t2.ef.value_err = t2_ef_err
                             
-        #                     if live_plotting:
-        #                         if not time_saved:
-        #                             self.param_dict[qubit_i].t2.ef.time.append(time.time()-start_time)
-        #                             self.param_dict[qubit_i].t2.ef.freq_stored.append(0)
-        #                             self.param_dict[qubit_i].t2.ef.freq_err_stored.append(0)
-        #                             self.param_dict[qubit_i].t2.ef.stored.append(t2_ef)
-        #                             self.param_dict[qubit_i].t2.ef.stored_err.append(t2_ef_err)
-        #                         else:
-        #                             self.param_dict[qubit_i].t2.ef.stored[-1] = t2_ef
-        #                             self.param_dict[qubit_i].t2.ef.stored_err[-1] = t2_ef_err
+                            if live_plotting:
+                                if not time_saved:
+                                    self.param_dict[qubit_i].t2.ef.time.append(time.time()-start_time)
+                                    self.param_dict[qubit_i].t2.ef.freq_stored.append(0)
+                                    self.param_dict[qubit_i].t2.ef.freq_err_stored.append(0)
+                                    self.param_dict[qubit_i].t2.ef.stored.append(t2_ef)
+                                    self.param_dict[qubit_i].t2.ef.stored_err.append(t2_ef_err)
+                                else:
+                                    self.param_dict[qubit_i].t2.ef.stored[-1] = t2_ef
+                                    self.param_dict[qubit_i].t2.ef.stored_err[-1] = t2_ef_err
      
-        #             except Exception as e:
-        #                 print(f'Error in T2 EF: {e}')
+                    except Exception as e:
+                        print(f'Error in T2 EF: {e}')
                 
-        #     if 'pi' in self.param_dict[qubit_i].keys():
-        #         if 'ge' in self.param_dict[qubit_i].pi.keys():
-        #             try:
-        #                 pi_gain, constrast = self.measure_pi_pulse(start_time, qubit_test=qubit_i, EF=False, debug=debug, save=save)
+            if 'pi' in self.param_dict[qubit_i].keys():
+                if 'ge' in self.param_dict[qubit_i].pi.keys():
+                    try:
+                        pi_gain, constrast = self.measure_pi_pulse(start_time, qubit_test=qubit_i, EF=False, debug=debug, save=save)
                         
-        #                 self.param_dict[qubit_i].pi.ge.value = pi_gain
-        #                 if 't2' in self.param_dict[qubit_i].keys():
-        #                     if 'ge' in self.param_dict[qubit_i].t2.keys():
-        #                         self.param_dict[qubit_i].t2.ge.pi_gain = pi_gain
-        #                 if 't1' in self.param_dict[qubit_i].keys():
-        #                     if 'ge' in self.param_dict[qubit_i].t1.keys():
-        #                         self.param_dict[qubit_i].t1.ge.pi_gain = pi_gain
+                        self.param_dict[qubit_i].pi.ge.value = pi_gain
+                        if 't2' in self.param_dict[qubit_i].keys():
+                            if 'ge' in self.param_dict[qubit_i].t2.keys():
+                                self.param_dict[qubit_i].t2.ge.pi_gain = pi_gain
+                        if 't1' in self.param_dict[qubit_i].keys():
+                            if 'ge' in self.param_dict[qubit_i].t1.keys():
+                                self.param_dict[qubit_i].t1.ge.pi_gain = pi_gain
                         
-        #                 if live_plotting:
-        #                     self.param_dict[qubit_i].pi.ge.stored.append(pi_gain)
-        #                     self.param_dict[qubit_i].pi.ge.time.append(time.time()-start_time)
+                        if live_plotting:
+                            self.param_dict[qubit_i].pi.ge.stored.append(pi_gain)
+                            self.param_dict[qubit_i].pi.ge.time.append(time.time()-start_time)
                             
                             
-        #             except Exception as e:
-        #                 print(f'Error in pi pulse GE: {e}')
+                    except Exception as e:
+                        print(f'Error in pi pulse GE: {e}')
                     
-        #         if 'ef' in self.param_dict[qubit_i].pi.keys():
-        #             try:
-        #                 pi_gain, constrast = self.measure_pi_pulse(start_time, qubit_test=qubit_i, EF=True, debug=debug, save=save)
+                if 'ef' in self.param_dict[qubit_i].pi.keys():
+                    try:
+                        pi_gain, constrast = self.measure_pi_pulse(start_time, qubit_test=qubit_i, EF=True, debug=debug, save=save)
                         
-        #                 self.param_dict[qubit_i].pi.ef.value = pi_gain
-        #                 if 't2' in self.param_dict[qubit_i].keys():
-        #                     if 'ef' in self.param_dict[qubit_i].t2.keys():
-        #                         self.param_dict[qubit_i].t2.ef.pi_gain = pi_gain
-        #                 if 't1' in self.param_dict[qubit_i].keys():
-        #                     if 'ef' in self.param_dict[qubit_i].t1.keys():
-        #                         self.param_dict[qubit_i].t1.ef.pi_gain = pi_gain
+                        self.param_dict[qubit_i].pi.ef.value = pi_gain
+                        if 't2' in self.param_dict[qubit_i].keys():
+                            if 'ef' in self.param_dict[qubit_i].t2.keys():
+                                self.param_dict[qubit_i].t2.ef.pi_gain = pi_gain
+                        if 't1' in self.param_dict[qubit_i].keys():
+                            if 'ef' in self.param_dict[qubit_i].t1.keys():
+                                self.param_dict[qubit_i].t1.ef.pi_gain = pi_gain
                         
-        #                 if live_plotting:
-        #                     self.param_dict[qubit_i].pi.ef.stored.append(pi_gain)
-        #                     self.param_dict[qubit_i].pi.ef.time.append(time.time()-start_time)
+                        if live_plotting:
+                            self.param_dict[qubit_i].pi.ef.stored.append(pi_gain)
+                            self.param_dict[qubit_i].pi.ef.time.append(time.time()-start_time)
                             
                         
-        #             except Exception as e:
-        #                 print(f'Error in pi pulse EF: {e}')
+                    except Exception as e:
+                        print(f'Error in pi pulse EF: {e}')
                     
-        #     if 't1' in self.param_dict[qubit_i].keys():
-        #         if 'ge' in self.param_dict[qubit_i].t1.keys():
-        #             try:
-        #                 t1_ge, t1_ge_err = self.measure_t1(start_time, qubit_test=qubit_i, EF=False, debug=debug, save=save)
+            if 't1' in self.param_dict[qubit_i].keys():
+                if 'ge' in self.param_dict[qubit_i].t1.keys():
+                    try:
+                        t1_ge, t1_ge_err = self.measure_t1(start_time, qubit_test=qubit_i, EF=False, debug=debug, save=save)
                         
-        #                 if t1_ge_err/t1_ge > 0.5:
-        #                     print(f'Warning: T1GE error is too large for qubit {qubit_i}')
-        #                 else:
-        #                     self.param_dict[qubit_i].t1.ge.value = t1_ge
-        #                     self.param_dict[qubit_i].t1.ge.value_err = t1_ge_err
+                        if t1_ge_err/t1_ge > 0.5:
+                            print(f'Warning: T1GE error is too large for qubit {qubit_i}')
+                        else:
+                            self.param_dict[qubit_i].t1.ge.value = t1_ge
+                            self.param_dict[qubit_i].t1.ge.value_err = t1_ge_err
                             
-        #                     if live_plotting:
-        #                         self.param_dict[qubit_i].t1.ge.stored.append(t1_ge)
-        #                         self.param_dict[qubit_i].t1.ge.stored_err.append(t1_ge_err)
-        #                         self.param_dict[qubit_i].t1.ge.time.append(time.time()-start_time)
+                            if live_plotting:
+                                self.param_dict[qubit_i].t1.ge.stored.append(t1_ge)
+                                self.param_dict[qubit_i].t1.ge.stored_err.append(t1_ge_err)
+                                self.param_dict[qubit_i].t1.ge.time.append(time.time()-start_time)
 
 
-        #             except Exception as e:
-        #                 print(f'Error in T1 GE: {e}')
+                    except Exception as e:
+                        print(f'Error in T1 GE: {e}')
                     
-        #         if 'ef' in self.param_dict[qubit_i].t1.keys():
-        #             try:
-        #                 t1_ef, t1_ef_err = self.measure_t1(start_time, qubit_test=qubit_i, EF=True, debug=debug, save=save)
+                if 'ef' in self.param_dict[qubit_i].t1.keys():
+                    try:
+                        t1_ef, t1_ef_err = self.measure_t1(start_time, qubit_test=qubit_i, EF=True, debug=debug, save=save)
                         
-        #                 if t1_ef_err/t1_ef > 0.5:
-        #                     print(f'Warning: T1EF error is too large for qubit {qubit_i}')
-        #                 else:
-        #                     self.param_dict[qubit_i].t1.ef.value = t1_ef
-        #                     self.param_dict[qubit_i].t1.ef.value_err = t1_ef_err
+                        if t1_ef_err/t1_ef > 0.5:
+                            print(f'Warning: T1EF error is too large for qubit {qubit_i}')
+                        else:
+                            self.param_dict[qubit_i].t1.ef.value = t1_ef
+                            self.param_dict[qubit_i].t1.ef.value_err = t1_ef_err
                             
-        #                     if live_plotting:
-        #                         self.param_dict[qubit_i].t1.ef.stored.append(t1_ef)
-        #                         self.param_dict[qubit_i].t1.ef.stored_err.append(t1_ef_err)
-        #                         self.param_dict[qubit_i].t1.ef.time.append(time.time()-start_time)
+                            if live_plotting:
+                                self.param_dict[qubit_i].t1.ef.stored.append(t1_ef)
+                                self.param_dict[qubit_i].t1.ef.stored_err.append(t1_ef_err)
+                                self.param_dict[qubit_i].t1.ef.time.append(time.time()-start_time)
 
-        #             except Exception as e: 
-        #                 print(f'Error in T1 EF: {e}')
+                    except Exception as e: 
+                        print(f'Error in T1 EF: {e}')
                         
                         
-        #     if 'temp' in self.param_dict[qubit_i].keys():
-        #         try:
-        #             T = self.measure_temp(qubit_i, debug=debug, save=save, start_time=start_time)
+            if 'temp' in self.param_dict[qubit_i].keys():
+                try:
+                    T = self.measure_temp(qubit_i, debug=debug, save=save, start_time=start_time)
                     
-        #             self.param_dict[qubit_i].temp.value = T
+                    self.param_dict[qubit_i].temp.value = T
                     
                     
-        #             if live_plotting:
-        #                 self.param_dict[qubit_i].temp.stored.append(self.param_dict[qubit_i].temp.value)
-        #                 self.param_dict[qubit_i].temp.time.append(time.time()-start_time)
+                    if live_plotting:
+                        self.param_dict[qubit_i].temp.stored.append(self.param_dict[qubit_i].temp.value)
+                        self.param_dict[qubit_i].temp.time.append(time.time()-start_time)
                         
-        #         except Exception as e:
-        #             print(f'Error in temperature: {e}')
+                except Exception as e:
+                    print(f'Error in temperature: {e}')
                         
                         
                 
