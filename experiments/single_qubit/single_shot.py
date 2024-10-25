@@ -1166,7 +1166,6 @@ class MultiReadoutExperiment(Experiment):
             fit=fit,
             fitparams=fitparams,
             verbose=verbose,
-            plot=plot,
             check_qnd=check_qnd,
             amplitude_mode=amplitude_mode,
         )
@@ -1384,6 +1383,7 @@ class MultiReadoutExperiment(Experiment):
         numbins=None,
         verbose=True,
         export=False,
+        amplitude_mode=False,
     ):
         """
         check_readouts should be a list of integers indicating which readout indices to check; use -1 to indicate the standard (last) readout
@@ -1429,6 +1429,7 @@ class MultiReadoutExperiment(Experiment):
             verbose=verbose,
             plot=True,
             export=export,
+            amplitude_mode=amplitude_mode,
         )
 
         if fit:
