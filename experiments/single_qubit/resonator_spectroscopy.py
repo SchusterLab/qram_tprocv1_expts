@@ -310,7 +310,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
         # THIS IS CORRECT EXTENT LIMITS FOR 2D PLOTS
         plt.figure(figsize=(10, 8))
-        plt.title(f"Resonator Power Spectroscopy (Qubit {self.cfg.expt.qubit})")
+        plt.title(f"Resonator Power Spectroscopy (Qubit {self.cfg.expt.qTest})")
         plt.pcolormesh(x_sweep, y_sweep, amps, cmap="viridis", shading="auto")
 
         if fit:
