@@ -248,7 +248,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
                 # avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                 # avgi = avgi[0][0]
                 # avgq = avgq[0][0]
-                
+
                 amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
                 phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
                 # amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -337,12 +337,11 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
         if select is not None:
             fig, ax = plt.subplots()
-            for s in select:
-                y_closest_i = np.argmin(abs(y_sweep - s))
-                y_closest = y_sweep[y_closest_i]
-                y_plot = data["amps"][y_closest_i, :]/np.max(data["amps"][y_closest_i, :])
-                print("plotting at gain", y_closest, "index", y_closest_i)
-                ax.plot(x_sweep, y_plot, "o-", label=f"Gain {y_closest}")
+            y_closest_i = np.argmin(abs(y_sweep - select))
+            y_closest = y_sweep[y_closest_i]
+            y_plot = data["amps"][y_closest_i, :] / np.max(data["amps"][y_closest_i, :])
+            print("plotting at gain", y_closest, "index", y_closest_i)
+            ax.plot(x_sweep, y_plot, "o-", label=f"Gain {y_closest}")
             ax.legend()
 
     def save_data(self, data=None):
@@ -424,7 +423,6 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
                 avgq = avgq[0][0]
                 amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
                 phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
-        
 
                 data["avgi"][-1].append(avgi)
                 data["avgq"][-1].append(avgq)

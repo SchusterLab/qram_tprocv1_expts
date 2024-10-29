@@ -204,8 +204,8 @@ class LengthRabiProgram(QutritAveragerProgram):
 
             else:
                 n_pulses = 1
-                if self.test_pi_half:
-                    n_pulses = 2
+                # if self.test_pi_half:
+                n_pulses = 2
                 for i in range(int(n_pulses)):
                     if self.checkEF:
                         self.Xef_pulse(
@@ -219,8 +219,8 @@ class LengthRabiProgram(QutritAveragerProgram):
                         name = "X"
                 if self.checkZZ:
                     name += f"_ZZ{qZZ}"
-                if self.test_pi_half:
-                    name += "_half"
+                # if self.test_pi_half:
+                name += "_half"
                 self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
         if self.checkEF and self.readout_ge:  # map excited back to qubit ground state for measurement

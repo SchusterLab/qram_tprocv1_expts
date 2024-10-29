@@ -1,6 +1,5 @@
 import logging
 
-import experiments.fitting as fitter
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy as sp
@@ -8,6 +7,8 @@ from qick import *
 from qick.helpers import ch2list
 from slab import AttrDict, Experiment
 from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 
 logger = logging.getLogger("qick.qick_asm")
 logger.setLevel(logging.ERROR)
@@ -767,6 +768,11 @@ class CliffordAveragerProgram(AveragerProgram):
             times_us = np.linspace(0, tot_length_us, int(tot_length_us / dt_us))
             pulse_I_shapes = np.ones((len(mux_freqs), len(times_us)))
             pulse_Q_shapes = np.zeros((len(mux_freqs), len(times_us)))
+            
+        print("times_us", times_us)
+        print("pulse_I", pulse_I_shapes)
+        print("pulse_Q", pulse_Q_shapes)
+        
 
         tot_I_vs_us = np.zeros_like(times_us)
         tot_Q_vs_us = np.zeros_like(times_us)
@@ -850,7 +856,7 @@ class CliffordAveragerProgram(AveragerProgram):
             assert mask is not None
             assert mux_freqs is not None
             assert mixer_freq is not None
-            assert lengths is not None
+            # assert lengths is not None
             tot_I_vs_us, tot_Q_vs_us, times_us = self.setup_full_mux_pulse(
                 mask=mask,
                 mux_freqs=mux_freqs,
@@ -1200,6 +1206,10 @@ class CliffordAveragerProgram(AveragerProgram):
             mixer_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq)
             assert np.all(mixer_freqs == mixer_freqs[0])
             mixer_freq = mixer_freqs[0]
+            if 'plot_IQ' in self.cfg.expt:
+                plot_IQ = self.cfg.expt.plot_IQ
+            else:
+                plot_IQ = False
 
             self.setup_fullmux_readout(
                 full_mux_ch=full_mux_ch,
@@ -1212,7 +1222,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 pulse_I_shapes=pulse_I_shapes,
                 pulse_Q_shapes=pulse_Q_shapes,
                 times_us=times_us,
-                plot_IQ=False,
+                plot_IQ=plot_IQ,
             )
 
     def setup_mux_gen_readout(self):
@@ -1312,7 +1322,7 @@ class CliffordAveragerProgram(AveragerProgram):
         for ch in adc_chs:
             chs_to_round.append(self.soccfg["readouts"][ch])
         rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
-        rounded_mux_freqs = np.array([self.roundfreq(f, chs_to_round) for f in mux_freqs])
+        rounded_mux_freqs = np.array([np.abs(self.roundfreq(f, chs_to_round)) for f in mux_freqs])
         rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
 
         self.res_chs = [full_mux_ch] * self.num_qubits_sample

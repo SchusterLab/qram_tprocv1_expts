@@ -450,6 +450,67 @@ def fitquadratic(xdata, ydata, fitparams=None):
 # ====================================================== #
 
 
+def rabifunc(x, *p):
+    length, omega, f0, scale, z0 = p
+    sqrt_part = 1 + (x - f0) ** 2 / omega**2
+    factor = omega**2 / (omega**2 + (x - f0) ** 2)
+    return z0 + scale * factor * np.sin(2 * np.pi * omega * np.sqrt(sqrt_part) * length / 2) ** 2
+
+
+def fitrabi_gainslice(xdata, ydata, length, fitparams=None):
+    """
+    Fit a single slice through frequency at a single gain; length is given. xdata is frequency, ydata is measured signal
+    fitparams will be omega, f0, scale, z0
+    """
+    if fitparams is None:
+        fitparams = [None] * 4
+    else:
+        fitparams = np.copy(fitparams)
+
+    partitioned = np.partition(ydata, -2)
+    largest = partitioned[-1]
+    freq_largest = xdata[np.argwhere(ydata == largest)[0][0]]
+    second_largest = partitioned[-2]
+    freq_second_largest = xdata[np.argwhere(ydata == second_largest)[0][0]]
+    guess_freq = np.mean([freq_largest, freq_second_largest])
+    if fitparams[0] is None:
+        fitparams[0] = 5
+    if fitparams[1] is None:
+        fitparams[1] = guess_freq
+    if fitparams[2] is None:
+        fitparams[2] = np.max(ydata) - np.min(ydata)
+    if fitparams[3] is None:
+        fitparams[3] = np.mean(ydata)
+    bounds = (
+        [0.1, min(xdata), 0.01 * fitparams[2], min(ydata)],
+        [100, max(xdata), 100 * fitparams[2], max(ydata)],
+    )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(
+                f"Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}"
+            )
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(
+            lambda x, omega, f0, scale, z0: rabifunc(x, length, omega, f0, scale, z0),
+            xdata,
+            ydata,
+            p0=fitparams,
+            bounds=bounds,
+        )
+        # return pOpt, pCov
+    except RuntimeError:
+        print("Warning: fit failed!")
+        # return 0, 0
+    return pOpt, pCov
+
+
+# ====================================================== #
+
+
 def decaysin(x, *p):
     yscale, freq, phase_deg, decay, y0 = p
     return yscale * np.sin(2 * np.pi * freq * x + phase_deg * np.pi / 180) * np.exp(-x / decay) + y0
