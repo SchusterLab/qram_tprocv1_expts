@@ -1096,7 +1096,10 @@ class PiMinusPiExperiment(Experiment):
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
         else:
-            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            if self.cfg.expt.pulse_type != "robust":
+                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            else:
+                old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
         print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
 
         plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
