@@ -535,6 +535,10 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         Load/play an arbitrary IQ pulse on channel ch
         """
+        
+        # print('hello')
+        
+        
         if name not in self.pulse_dict.keys() or reload:
             assert ch is not None and I_mhz_vs_us is not None and Q_mhz_vs_us is not None and times_us is not None
             if waveformname is None:
@@ -576,7 +580,7 @@ class CliffordAveragerProgram(AveragerProgram):
                         times_us=times_us,
                         plot_IQ=plot_IQ,
                     )
-        if play or set_reg:
+        if play or set_reg:            
             # if not (ch == sigma == None):
             #     print('Warning: you have specified a pulse parameter that can only be changed when loading.')
             params = self.pulse_dict[name].copy()
@@ -599,21 +603,16 @@ class CliffordAveragerProgram(AveragerProgram):
             )
             if play:
                 self.pulse(ch=params["ch"])
-                # print('played iq pulse on ch', ch, params)
                 if sync_after:
                     self.sync_all()
 
-    def setup_robust_pulse(self, q, pihalf=True, plot_IQ=False):
-        assert pihalf, "Only pihalf robust pulses are supported for now"
+    def setup_robust_pulse(self, q, play, ZZ_qubit=None, set_reg=True, pihalf=True, plot_IQ=False):
+        
+        
         pulse_cfg = self.cfg.device.qubit.pulses.pihalf_ge_robust
-        pulse_name = f"pihalf_ge_robust_q{q}"
-        pulse_gains = []
-        for qDrive in range(self.num_qubits_sample):
-            pulse_gains.append(pulse_cfg[f"gain_q{qDrive}"][q])
-
+        pulse_name = f"X_2_{q}"
         pulse_filename = pulse_cfg.filename[q]
         pulse_filepath = os.path.join("S:\\QRAM\\qram_4QR2\\optctrl_pulses", pulse_filename + ".npz")
-
         pulse_params_dict = dict()  # open file
         with np.load(pulse_filepath) as npzfile:
             for key in npzfile.keys():
@@ -623,30 +622,63 @@ class CliffordAveragerProgram(AveragerProgram):
         I_values_MHz = []
         Q_values_MHz = []
         IQ_qubits = []
-
-        for qDrive in range(self.num_qubits_sample):
-            if f"I_{qDrive}" in pulse_params_dict.keys() and f"Q_{qDrive}" in pulse_params_dict.keys():
-                I_values_MHz.append(pulse_params_dict[f"I_{qDrive}"])
-                Q_values_MHz.append(pulse_params_dict[f"Q_{qDrive}"])
-                IQ_qubits.append(qDrive)
-        I_values_MHz = np.array(I_values_MHz) * 1e-6
-        Q_values_MHz = np.array(Q_values_MHz) * 1e-6
+        freq_MHz = []
+        pulse_gains = []    
+        # print('pulse_cfg', pulse_cfg)   
+        
+        print(f"Setting up robust pulse for qubit {q}, ZZ_qubit {ZZ_qubit}")
+        
+        I = np.array(pulse_params_dict[f"I_{q}"]) * 1e-6
+        Q = np.array(pulse_params_dict[f"Q_{q}"]) * 1e-6
         times_us = times * 1e6
+        freq_MHz = self.f_ges_robust[q, ZZ_qubit]
+        gain = self.pihalf_gain_robust[q, ZZ_qubit]
+        print(f"freq_MHz: {freq_MHz}, gain: {gain}")    
+        
 
-        for iq, q in enumerate(IQ_qubits):
-            self.handle_IQ_pulse(
-                name=f"{pulse_name}_Q{q}",
-                ch=self.qubit_chs[q],
-                I_mhz_vs_us=I_values_MHz[iq],
-                Q_mhz_vs_us=Q_values_MHz[iq],
-                times_us=times_us,
-                freq_MHz=self.f_ges[q, q],
-                phase_deg=0,
-                gain=pulse_gains[q],
-                reload=True,
-                play=False,
-                plot_IQ=self.cfg.expt.plot_IQ,
-            )
+        # for qDrive in range(self.num_qubits_sample):
+        #     if f"I_{qDrive}" in pulse_params_dict.keys() and f"Q_{qDrive}" in pulse_params_dict.keys():
+        #         I_values_MHz.append(pulse_params_dict[f"I_{qDrive}"])
+        #         Q_values_MHz.append(pulse_params_dict[f"Q_{qDrive}"])
+        #         IQ_qubits.append(qDrive)
+        #         freq_MHz.append(self.f_ges_robust[q, qDrive])  
+        #         pulse_gains.append(pulse_cfg[f"gain_q{qDrive}"][qDrive])     
+                                      
+        # I_values_MHz = np.array(I_values_MHz) * 1e-6 
+        # Q_values_MHz = np.array(Q_values_MHz) * 1e-6 
+        # times_us = times * 1e6 
+
+        # for iq, q in enumerate(IQ_qubits):
+        #     self.handle_IQ_pulse(
+        #         name=f"{pulse_name}",
+        #         ch=self.qubit_chs[q],
+        #         I_mhz_vs_us=I_values_MHz[iq],
+        #         Q_mhz_vs_us=Q_values_MHz[iq],
+        #         times_us=times_us,
+        #         freq_MHz=freq_MHz[iq],
+        #         phase_deg=0,
+        #         gain=pulse_gains[iq],
+        #         set_reg=set_reg,
+        #         play=play,
+        #         plot_IQ=plot_IQ,
+        #     )
+        self.handle_IQ_pulse(
+        name=f"{pulse_name}",
+        ch=self.qubit_chs[q],
+        I_mhz_vs_us=I,
+        Q_mhz_vs_us=Q,
+        times_us=times_us,
+        freq_MHz=freq_MHz,
+        phase_deg=0,
+        gain=gain,
+        set_reg=set_reg,
+        play=play,
+        plot_IQ=plot_IQ,
+        )
+        
+            
+            
+            
 
     def add_adiabatic(self, ch, name, mu, beta, period_us):
         """mu, beta are dimensionless"""
@@ -916,6 +948,7 @@ class CliffordAveragerProgram(AveragerProgram):
         phrst=0,
         reload=False,
         sync_after=True,
+        pihalf=True,
         **kwargs,
     ):
         # q: qubit number in config
@@ -947,7 +980,6 @@ class CliffordAveragerProgram(AveragerProgram):
                 type = "adiabatic"
             elif special == "pulseiq":
                 type = "pulseiq"
-                gain = self.cfg.device.qubit.pulses.pi_ge_IQ.gain[q]
                 waveformname = "pi_ge_IQ"
                 assert (
                     "I_mhz_vs_us" in kwargs.keys() and "Q_mhz_vs_us" in kwargs.keys() and "times_us" in kwargs.keys()
@@ -955,7 +987,10 @@ class CliffordAveragerProgram(AveragerProgram):
                 I_mhz_vs_us = kwargs["I_mhz_vs_us"]
                 Q_mhz_vs_us = kwargs["Q_mhz_vs_us"]
                 times_us = kwargs["times_us"]
-
+                
+            elif special == 'robust':
+                type='robust'
+                                
         if divide_len:
             sigma_cycles = sigma_cycles // 2
             waveformname += "_half"
@@ -973,6 +1008,7 @@ class CliffordAveragerProgram(AveragerProgram):
         ), f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}sigma may not be calibrated'
         if neg:
             phase_deg -= 180
+            
         if type == "const":
             self.handle_const_pulse(
                 name=f"{name}_q{q}",
@@ -1044,6 +1080,10 @@ class CliffordAveragerProgram(AveragerProgram):
                 reload=reload,
                 sync_after=sync_after,
             )
+            
+        elif type == 'robust':
+            self.setup_robust_pulse(q, ZZ_qubit=ZZ_qubit, pihalf=pihalf, play=play, set_reg=set_reg)
+              
         elif type == "flat_top":
             assert False, "flat top not checked yet"
             flat_length = (
@@ -1085,9 +1125,11 @@ class CliffordAveragerProgram(AveragerProgram):
         sync_after=True,
         **kwargs,
     ):
+
         n_pulse = 1
         if not pihalf:
             n_pulse = 2
+    
         for i in range(n_pulse):
             self.X_half_pulse(
                 q=q,
@@ -1103,6 +1145,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 phrst=phrst,
                 reload=reload,
                 sync_after=sync_after,
+                pihalf=pihalf,
                 **kwargs,
             )
 
@@ -1119,6 +1162,7 @@ class CliffordAveragerProgram(AveragerProgram):
         set_reg=False,
         flag=None,
         phrst=0,
+        special=None,
         reload=False,
         sync_after=True,
     ):
@@ -1135,6 +1179,7 @@ class CliffordAveragerProgram(AveragerProgram):
             name="Y",
             flag=flag,
             adiabatic=adiabatic,
+            special=special,
             phrst=phrst,
             reload=reload,
             sync_after=sync_after,
@@ -1600,6 +1645,8 @@ class CliffordAveragerProgram(AveragerProgram):
         self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4, 4))
         self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4, 4))
         self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4, 4))
+        self.f_ges_robust = np.reshape(self.cfg.device.qubit.f_ge_robust, (4, 4))
+        self.pihalf_gain_robust = np.reshape(self.cfg.device.qubit.pulses.pihalf_ge_robust.gain, (4, 4))
         self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
         self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
 

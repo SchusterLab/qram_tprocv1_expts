@@ -45,7 +45,6 @@ class LengthRabiProgram(QutritAveragerProgram):
                 ] = self.cfg.expt.sigma_test
 
         super().initialize()
-
         # calibrate the pi/2 pulse instead of the pi pulse by taking half the sigma and calibrating the gain
         self.test_pi_half = False
         self.divide_len = True
@@ -108,6 +107,16 @@ class LengthRabiProgram(QutritAveragerProgram):
         if "sigma_test" in self.cfg.expt and self.cfg.expt.sigma_test == 0:
             play_pulse = False
         self.cfg.expt.gain = 0
+        
+        if 'pulse_type' in self.cfg.expt:
+            if 'pulse_type' != 'gauss' and 'pulse_type' != 'const':
+                special = self.cfg.expt.pulse_type
+                
+        if 'skip_first_pi2' in self.cfg.expt: 
+            skip_first_pi2 = self.cfg.expt.skip_first_pi2
+        else:
+            skip_first_pi2 = False
+        
         if play_pulse:
             if self.error_amp:
                 assert "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None
@@ -115,12 +124,13 @@ class LengthRabiProgram(QutritAveragerProgram):
                 # print('init pi/2 freq', self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]), 'gain', self.pi_test_half_gain)
 
                 if not self.pi_minuspi or self.check_I_distort:
-                    # play initial pi/2 pulse if you're just doing error amplification and not the pi/-pi sweep
-                    if not self.checkEF:
-                        self.X_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True)
-                    else:
-                        self.Xef_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True)
-                self.sync_all()
+                    if not skip_first_pi2:
+                        # play initial pi/2 pulse if you're just doing error amplification and not the pi/-pi sweep
+                        if not self.checkEF:
+                            self.X_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True, special=special)
+                        else:
+                            self.Xef_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True, special=special)
+                    self.sync_all()
 
                 # setup pulse regs to save memory for iteration
                 if self.checkEF:
@@ -131,6 +141,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                         divide_len=self.divide_len,
                         play=False,
                         set_reg=True,
+                        special=special
                     )
                     name = "X_ef"
                 else:
@@ -141,13 +152,17 @@ class LengthRabiProgram(QutritAveragerProgram):
                         divide_len=self.divide_len,
                         play=False,
                         set_reg=True,
+                        special=special
                     )
                     name = "X"
                 if self.checkZZ:
                     name += f"_ZZ{qZZ}"
                 if self.test_pi_half:
                     name += "_half"
-                self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
+                if self.cfg.expt.pulse_type != 'robust':
+                    self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
+                else:
+                    self.cfg.expt.gain = self.pulse_dict[f"X_2_{qTest}"]["gain"]
 
                 # print("n_pulses", n_pulses)
                 for i in range(int(2 * n_pulses)):  # n_pulses is the number of cycle sets
@@ -222,6 +237,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                 # if self.test_pi_half:
                 name += "_half"
                 self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
+    
 
         if self.checkEF and self.readout_ge:  # map excited back to qubit ground state for measurement
             self.X_pulse(q=qTest, ZZ_qubit=qZZ, play=True)
@@ -719,6 +735,7 @@ class NPulseExperiment(Experiment):
 
         current_gain = self.cfg.expt.gain
 
+
         plt.figure(figsize=(8, 5))
         label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{2n}$)"
         plt.subplot(
@@ -794,6 +811,9 @@ class NPulseExperiment(Experiment):
         print(f"Saving {self.fname}")
         super().save_data(data=data)
         return self.fname
+    
+    
+
 
 
 # ====================================================== #
@@ -991,11 +1011,14 @@ class PiMinusPiExperiment(Experiment):
             for icycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress or self.cfg.expt.loops > 1)):
                 for ifreq, freq in enumerate(freq_sweep):
                     cfg.expt.n_pulses = n_cycle
-
+                
                     if self.checkEF:
                         cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ] = freq
                     else:
-                        cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ] = freq
+                        if self.cfg.expt.pulse_type != "robust":
+                            cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ] = freq
+                        else:
+                            cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ] = freq
 
                     # print('n cycle', n_cycle)
                     lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=cfg)
@@ -1072,7 +1095,10 @@ class PiMinusPiExperiment(Experiment):
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
         else:
-            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            if self.cfg.expt.pulse_type != "robust":
+                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            else:
+                old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
         print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
 
         plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
