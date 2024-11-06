@@ -805,8 +805,8 @@ class EgGfFreqGainChevronExperiment(Experiment):
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data["avgi"][q_ind].append(avgi[adc_chs[q]][0])
                 data["avgq"][q_ind].append(avgq[adc_chs[q]][0])
-                data["amps"][q_ind].append(np.abs(avgi[adc_chs[q]][0] + 1j * avgi[adc_chs[q]][0]))
-                data["phases"][q_ind].append(np.angle(avgi[adc_chs[q]][0] + 1j * avgi[adc_chs[q]][0]))
+                data["amps"][q_ind].append(np.abs(avgi[adc_chs[q]][0] + 1j * avgq[adc_chs[q]][0]))
+                data["phases"][q_ind].append(np.angle(avgi[adc_chs[q]][0] + 1j * avgq[adc_chs[q]][0]))
 
         for k, a in data.items():
             data[k] = np.array(a)
@@ -845,7 +845,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
                     )
                     fit[i_gain] = p
                     fit_err[i_gain] = pCov
-                    data_fit[i_gain] = fitter.rabifunc(y_sweep, length, *p)
+                    data_fit[i_gain] = fitter.rabifunc(y_sweep, *p)
 
                 data[f"fit{data_name}"][q_index] = fit
                 data[f"fit{data_name}_err"][q_index] = fit_err
@@ -974,30 +974,35 @@ class EgGfFreqGainChevronExperiment(Experiment):
         """
         # Output data: fit{data_name}: (len(measure_qubits), len(x_sweep), len(fitparams))
         fit_qind = 0 if self.cfg.expt.qubits[0] == self.cfg.expt.qDrive else 1
-        fit_freqs = np.array([f[1] if f is not None else np.nan for f in data["fitamps"][fit_qind]])
+        fit_freqs = np.array([f[2] if f is not None else np.nan for f in data["fitamps"][fit_qind]])
+
+        fitparams = [x_sweep[0], fit_freqs[0], fit_freqs[-1] - fit_freqs[0]]
+        p, pCov = fitter.fitquadratic(x_sweep[:-5], fit_freqs[:-5], fitparams=fitparams)
+        fit_freqs_fit = fitter.quadraticfunc(x_sweep, *p)
+        print("gain_sweep =", x_sweep.tolist())
+        print("fit_freqs =", fit_freqs_fit.tolist())
 
         plt.figure(figsize=(9, 7))
         plt.suptitle(f"Fit Eg-Gf Chevron Frequency vs. Gain (Length {self.cfg.expt.pi_EgGf_sigma} us)")
 
-        plt.subplot(221, title=f"Qubit A ({self.cfg.expt.qubits[0]})", ylabel="Pulse Frequency [MHz]")
-        plt.pcolormesh(x_sweep, y_sweep, data["avgi"][0], cmap="viridis", shading="auto")
+        plt.subplot(
+            221,
+            title=f"Qubit A ({self.cfg.expt.qubits[0]})",
+            xlabel="Gain [DAC units]",
+            ylabel="Pulse Frequency [MHz]",
+        )
+        plt.pcolormesh(x_sweep, y_sweep, data["amps"][0], cmap="viridis", shading="auto")
         if fit:
-            plt.plot(x_sweep, fit_freqs, color="k", linestyle="--")
+            plt.plot(x_sweep, fit_freqs, color="k", linestyle="-.")
+            plt.plot(x_sweep, fit_freqs_fit, color="r", linestyle="--")
+        plt.colorbar(label="[ADC level]")
 
-        plt.subplot(223, xlabel="Gain [DAC units]", ylabel="Pulse Frequency [MHz]")
-        plt.pcolormesh(x_sweep, y_sweep, data["avgq"][0], cmap="viridis", shading="auto")
+        plt.subplot(222, title=f"Qubit B ({self.cfg.expt.qubits[1]})", xlabel="Gain [DAC units]")
+        plt.pcolormesh(x_sweep, y_sweep, data["amps"][1], cmap="viridis", shading="auto")
         if fit:
-            plt.plot(x_sweep, fit_freqs, color="k", linestyle="--")
-
-        plt.subplot(222, title=f"Qubit B ({self.cfg.expt.qubits[1]})")
-        plt.pcolormesh(x_sweep, y_sweep, data["avgi"][1], cmap="viridis", shading="auto")
-        if fit:
-            plt.plot(x_sweep, fit_freqs, color="k", linestyle="--")
-
-        plt.subplot(224, xlabel="Gain [DAC units]")
-        plt.pcolormesh(x_sweep, y_sweep, data["avgq"][1], cmap="viridis", shading="auto")
-        if fit:
-            plt.plot(x_sweep, fit_freqs, color="k", linestyle="--")
+            plt.plot(x_sweep, fit_freqs, color="k", linestyle="-.")
+            plt.plot(x_sweep, fit_freqs_fit, color="r", linestyle="--")
+        plt.colorbar(label="[ADC level]")
 
         plt.tight_layout()
         plt.show()

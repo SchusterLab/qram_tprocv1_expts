@@ -460,10 +460,10 @@ def rabifunc(x, *p):
 def fitrabi_gainslice(xdata, ydata, length, fitparams=None):
     """
     Fit a single slice through frequency at a single gain; length is given. xdata is frequency, ydata is measured signal
-    fitparams will be omega, f0, scale, z0
+    fitparams will be length, omega, f0, scale, z0
     """
     if fitparams is None:
-        fitparams = [None] * 4
+        fitparams = [None] * 5
     else:
         fitparams = np.copy(fitparams)
 
@@ -474,16 +474,18 @@ def fitrabi_gainslice(xdata, ydata, length, fitparams=None):
     freq_second_largest = xdata[np.argwhere(ydata == second_largest)[0][0]]
     guess_freq = np.mean([freq_largest, freq_second_largest])
     if fitparams[0] is None:
-        fitparams[0] = 5
+        fitparams[0] = length
     if fitparams[1] is None:
-        fitparams[1] = guess_freq
+        fitparams[1] = 5
     if fitparams[2] is None:
-        fitparams[2] = np.max(ydata) - np.min(ydata)
+        fitparams[2] = guess_freq
     if fitparams[3] is None:
-        fitparams[3] = np.mean(ydata)
+        fitparams[3] = np.max(ydata) - np.min(ydata)
+    if fitparams[4] is None:
+        fitparams[4] = np.mean(ydata)
     bounds = (
-        [0.1, min(xdata), 0.01 * fitparams[2], min(ydata)],
-        [100, max(xdata), 100 * fitparams[2], max(ydata)],
+        [0.5 * fitparams[0], 0.1, min(xdata), 0.01 * fitparams[3], min(ydata)],
+        [2 * fitparams[0], 100, max(xdata), 100 * fitparams[3], max(ydata)],
     )
     for i, param in enumerate(fitparams):
         if not (bounds[0][i] < param < bounds[1][i]):
@@ -494,13 +496,7 @@ def fitrabi_gainslice(xdata, ydata, length, fitparams=None):
     pOpt = fitparams
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
-        pOpt, pCov = sp.optimize.curve_fit(
-            lambda x, omega, f0, scale, z0: rabifunc(x, length, omega, f0, scale, z0),
-            xdata,
-            ydata,
-            p0=fitparams,
-            bounds=bounds,
-        )
+        pOpt, pCov = sp.optimize.curve_fit(rabifunc, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
     except RuntimeError:
         print("Warning: fit failed!")
