@@ -3,16 +3,17 @@ from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np
+from qick import *
+from slab import AttrDict, Experiment, NpEncoder
+from tqdm import tqdm_notebook as tqdm
+
 from experiments.clifford_averager_program import (
     CliffordAveragerProgram,
     QutritAveragerProgram,
     rotate_and_threshold,
 )
 from experiments.single_qubit.single_shot import hist
-from qick import *
-from slab import AttrDict, Experiment, NpEncoder
 from TomoAnalysis import TomoAnalysis
-from tqdm import tqdm_notebook as tqdm
 
 """
 Infer the populations of the g, e, (and f) states given 1 (2) measurements:
@@ -189,10 +190,27 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         assert basis in "IXYZ"
         assert len(basis) == 1
         if basis == "X":
-            self.Y_pulse(qubit, pihalf=True, play=play, ZZ_qubit=ZZ_qubit, neg=True, flag=flag, reload=True,)  # -Y/2 pulse to get from +X to +Z
+            self.Y_pulse(
+                qubit,
+                pihalf=True,
+                play=play,
+                ZZ_qubit=ZZ_qubit,
+                neg=True,
+                flag=flag,
+                reload=True,
+            )  # -Y/2 pulse to get from +X to +Z
         elif basis == "Y":
-            self.X_pulse(qubit, pihalf=True, ZZ_qubit=ZZ_qubit, neg=False, play=play, flag=flag, reload=True,)  # X/2 pulse to get from +Y to +Z
-        else: pass # measure in I/Z basis
+            self.X_pulse(
+                qubit,
+                pihalf=True,
+                ZZ_qubit=ZZ_qubit,
+                neg=False,
+                play=play,
+                flag=flag,
+                reload=True,
+            )  # X/2 pulse to get from +Y to +Z
+        else:
+            pass  # measure in I/Z basis
         self.sync_all()
 
     def state_prep_pulse(self, qubits, **kwargs):
@@ -626,14 +644,11 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
     )
     """
 
-    def setup_measure(self, basis: str, play=False):
+    def setup_measure(self, basis: str, play=False, ZZ_qubit=None, flag="ZZcorrection"):
         """
         Convert string indicating the measurement basis into the appropriate single qubit pulse (pre-measurement pulse)
         """
-        ZZ_qubit = None
-        if "ZZ_qubit" in self.cfg.expt and self.cfg.expt.ZZ_qubit is not None:
-            ZZ_qubit = self.cfg.expt.ZZ_qubit
-        super().setup_measure(qubit=self.qubit, basis=basis, ZZ_qubit=ZZ_qubit, play=play)
+        super().setup_measure(qubit=self.qubit, basis=basis, ZZ_qubit=ZZ_qubit, play=play, flag=flag)
 
     def state_prep_pulse(self, **kwargs):
         """
