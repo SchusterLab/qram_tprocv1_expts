@@ -21,7 +21,9 @@ If avg shots is True, returns the average value of ishots (qshots if specified)
 """
 
 
-def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, avg_shots=False):
+def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, amplitude_mode=False, avg_shots=False):
+    if amplitude_mode:
+        assert qshots_1q is not None
     ishots_1q = np.array(ishots_1q)
     qshots_1q = np.array(qshots_1q)
     assert len(np.array(ishots_1q).shape) == 1  # 1d array, for 1q only
@@ -41,7 +43,10 @@ def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, 
         qfinal = ishots_1q * np.sin(np.pi / 180 * angle) + qshots_1q * np.cos(np.pi / 180 * angle)
 
     if threshold is not None:
-        ifinal = np.heaviside(ifinal - threshold, 0)
+        if amplitude_mode:
+            ifinal = np.heaviside(np.abs(ifinal + 1j * qfinal) - threshold, 0)
+        else:
+            ifinal = np.heaviside(ifinal - threshold, 0)
         qfinal = np.zeros_like(ifinal)
 
     if avg_shots:
@@ -74,6 +79,7 @@ def post_select_shots(
     all_qshots_raw_q=None,
     angles=None,
     post_process="threshold",
+    amplitude_mode=False,
     thresholds=None,
     verbose=False,
     return_keep_indices=False,
@@ -88,6 +94,7 @@ def post_select_shots(
             qshots_1q=all_qshots_raw_q[final_qubit, -1, :],
             angle=angles[final_qubit],
             threshold=None,
+            amplitude_mode=amplitude_mode,
             avg_shots=False,
         )
     else:
@@ -104,6 +111,7 @@ def post_select_shots(
                     qshots_1q=all_qshots_raw_q[ps_qubit, i_readout, :],
                     angle=angles[ps_qubit],
                     threshold=None,
+                    amplitude_mode=amplitude_mode,
                     avg_shots=False,
                 )
             else:
@@ -125,7 +133,9 @@ def post_select_shots(
         thresholds = [None] * 4
     if thresholds is None:
         assert post_process is None
-    shots_final, _ = rotate_and_threshold(ishots_1q=shots_final, threshold=thresholds[final_qubit], avg_shots=False)
+    shots_final, _ = rotate_and_threshold(
+        ishots_1q=shots_final, threshold=thresholds[final_qubit], avg_shots=False, amplitude_mode=amplitude_mode
+    )
 
     assert shots_final.shape == keep_prev.shape
     if return_keep_indices:
@@ -143,7 +153,7 @@ Adjust > 0: adjust = +1 indicates to set the ps_threshold to the (rotated) e avg
 """
 
 
-def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles):
+def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles, amplitude_mode=False):
     num_qubits_sample = 4
     ps_thresholds_init = np.array(ps_thresholds_init)
     ge_avgs = np.array(ge_avgs)
@@ -155,7 +165,12 @@ def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles):
     g_avgs = np.array(
         [
             rotate_and_threshold(
-                ishots_1q=[ge_avgs[q, 0]], qshots_1q=[ge_avgs[q, 1]], angle=angles[q], threshold=None, avg_shots=False
+                ishots_1q=[ge_avgs[q, 0]],
+                qshots_1q=[ge_avgs[q, 1]],
+                angle=angles[q],
+                threshold=None,
+                amplitude_mode=amplitude_mode,
+                avg_shots=False,
             )[0][0]
             for q in range(num_qubits_sample)
         ]
@@ -163,7 +178,12 @@ def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles):
     e_avgs = np.array(
         [
             rotate_and_threshold(
-                ishots_1q=[ge_avgs[q, 2]], qshots_1q=[ge_avgs[q, 3]], angle=angles[q], threshold=None, avg_shots=False
+                ishots_1q=[ge_avgs[q, 2]],
+                qshots_1q=[ge_avgs[q, 3]],
+                angle=angles[q],
+                threshold=None,
+                amplitude_mode=amplitude_mode,
+                avg_shots=False,
             )[0][0]
             for q in range(num_qubits_sample)
         ]
@@ -588,6 +608,9 @@ class CliffordAveragerProgram(AveragerProgram):
                 params["gain"] = gain
             if ro_ch is not None:
                 params["ro_ch"] = ro_ch
+
+            assert params["freq_MHz"] > 0, "IQ pulse may not be calibrated for frequency"
+            assert params["gain"] > 0, "IQ pulse may not be calibrated for gain"
             self.set_pulse_registers(
                 ch=params["ch"],
                 style="arb",
@@ -602,46 +625,61 @@ class CliffordAveragerProgram(AveragerProgram):
                 if sync_after:
                     self.sync_all()
 
-    def setup_robust_pulse(self, q, play, ZZ_qubit=None, set_reg=True, pihalf=True, plot_IQ=False):
+    def setup_robust_pulse(
+        self,
+        q,
+        play,
+        name,
+        ZZ_qubit=None,
+        phase_deg=0,
+        set_reg=True,
+        flag=None,
+        reload=False,
+        plot_IQ=False,
+        sync_after=True,
+    ):
+        I_values_MHz = None
+        Q_values_MHz = None
+        times_us = None
+        freq_MHz = None
+        gain = None
 
-        pulse_cfg = self.cfg.device.qubit.pulses.pihalf_ge_robust
-        pulse_name = f"X_half_robust_q{q}"
-        pulse_filename = pulse_cfg.filename[q]
-        pulse_filepath = os.path.join("S:\\QRAM\\qram_4QR2\\optctrl_pulses", pulse_filename + ".npz")
-        pulse_params_dict = dict()  # open file
-        with np.load(pulse_filepath) as npzfile:
-            for key in npzfile.keys():
-                pulse_params_dict.update({key: npzfile[key]})
-        times = pulse_params_dict["times"]
-
-        I_values_MHz = []
-        Q_values_MHz = []
-        IQ_qubits = []
-        freq_MHz = []
-        pulse_gains = []
-        print(f"Setting up robust pulse for qubit {q}, ZZ_qubit {ZZ_qubit}")
+        # print(f"Setting up robust pulse for qubit {q}, ZZ_qubit {ZZ_qubit}")
         if ZZ_qubit is None:
             ZZ_qubit = q
 
-        I = np.array(pulse_params_dict[f"I_{q}"]) * 1e-6
-        Q = np.array(pulse_params_dict[f"Q_{q}"]) * 1e-6
-        times_us = times * 1e6
-        freq_MHz = self.f_ges_robust[q, ZZ_qubit]
-        gain = self.pihalf_gain_robust[q, ZZ_qubit]
-        print(f"freq_MHz: {freq_MHz}, gain: {gain}")
+        pulse_cfg = self.cfg.device.qubit.pulses.pihalf_ge_robust
+        if name not in self.pulse_dict.keys() or reload:
+            pulse_filename = pulse_cfg.filename[q]
+            pulse_filepath = os.path.join("S:\\QRAM\\qram_4QR2\\optctrl_pulses", pulse_filename + ".npz")
+            pulse_params_dict = dict()  # open file
+            with np.load(pulse_filepath) as npzfile:
+                for key in npzfile.keys():
+                    pulse_params_dict.update({key: npzfile[key]})
+            times = pulse_params_dict["times"]
+
+            I_values_MHz = np.array(pulse_params_dict[f"I_{q}"]) * 1e-6
+            Q_values_MHz = np.array(pulse_params_dict[f"Q_{q}"]) * 1e-6
+            times_us = times * 1e6
+            freq_MHz = self.f_ges_robust[q, ZZ_qubit]
+            gain = self.pihalf_gain_robust[q, ZZ_qubit]
+            # print(name, f"freq_MHz: {freq_MHz}, gain: {gain}")
 
         self.handle_IQ_pulse(
-            name=f"{pulse_name}",
+            name=name,
             ch=self.qubit_chs[q],
-            I_mhz_vs_us=I,
-            Q_mhz_vs_us=Q,
+            I_mhz_vs_us=I_values_MHz,
+            Q_mhz_vs_us=Q_values_MHz,
             times_us=times_us,
             freq_MHz=freq_MHz,
-            phase_deg=0,
+            phase_deg=phase_deg,
             gain=gain,
             set_reg=set_reg,
+            flag=flag,
             play=play,
             plot_IQ=plot_IQ,
+            reload=reload,
+            sync_after=sync_after,
         )
 
     def add_adiabatic(self, ch, name, mu, beta, period_us):
@@ -724,10 +762,11 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.pulse(ch=params["ch"])
                 self.sync_all()
 
-    def setup_full_mux_pulse(
+    def build_full_mux_pulse(
         self,
         mask,
         mux_freqs,
+        mixer_freq=None,
         relative_amps=None,
         lengths=None,
         pulse_I_shapes=None,
@@ -765,9 +804,9 @@ class CliffordAveragerProgram(AveragerProgram):
             pulse_I_shapes = np.ones((len(mux_freqs), len(times_us)))
             pulse_Q_shapes = np.zeros((len(mux_freqs), len(times_us)))
 
-        print("times_us", times_us)
-        print("pulse_I", pulse_I_shapes)
-        print("pulse_Q", pulse_Q_shapes)
+        # print("times_us", times_us)
+        # print("pulse_I", pulse_I_shapes)
+        # print("pulse_Q", pulse_Q_shapes)
 
         tot_I_vs_us = np.zeros_like(times_us)
         tot_Q_vs_us = np.zeros_like(times_us)
@@ -803,18 +842,35 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # plot_IQ = True
         if plot_IQ:
+            assert mixer_freq is not None
             plt.figure()
             xpts = times_us
             for q in mask:
-                fourier = np.fft.fftshift(np.abs(np.fft.fft(modulated_Is[q])))
+                fourier = np.fft.fftshift(
+                    np.abs(
+                        np.fft.fft(
+                            modulated_Is[q] * np.cos(mixer_freq * 2 * np.pi * times_us)
+                            + modulated_Qs[q] * np.sin(mixer_freq * 2 * np.pi * times_us)
+                        )
+                    )
+                )
                 freqs = np.fft.fftshift(np.fft.fftfreq(len(fourier), d=(xpts[1] - xpts[0])))
-                # print("fourier shape", fourier.shape, freqs.shape)
                 plt.plot(freqs, fourier, label=f"Q{q}")
             plt.xlabel("Frequency [MHz]")
-            plt.xlim(0, 2000)
+            # plt.xlim(0, 2000)
             # plt.ylim(0, 30000)
             plt.legend()
             plt.title(f"Fourier Transform of Modulated Pulse")
+            plt.show()
+
+            plt.figure()
+            for q in mask:
+                plt.plot(times_us, modulated_Is[q], label=f"I{q}")
+                plt.plot(times_us, modulated_Qs[q], label=f"Q{q}")
+            plt.xlabel("Time [us]")
+            plt.ylabel("Amplitude [a.u.]")
+            plt.legend()
+            plt.title(f"Pulse Envelopes")
             plt.show()
 
         return tot_I_vs_us, tot_Q_vs_us, times_us
@@ -852,9 +908,10 @@ class CliffordAveragerProgram(AveragerProgram):
             assert mux_freqs is not None
             assert mixer_freq is not None
             # assert lengths is not None
-            tot_I_vs_us, tot_Q_vs_us, times_us = self.setup_full_mux_pulse(
+            tot_I_vs_us, tot_Q_vs_us, times_us = self.build_full_mux_pulse(
                 mask=mask,
                 mux_freqs=mux_freqs,
+                mixer_freq=mixer_freq,
                 lengths=lengths,
                 relative_amps=relative_amps,
                 pulse_I_shapes=pulse_I_shapes,
@@ -869,7 +926,7 @@ class CliffordAveragerProgram(AveragerProgram):
         # scale so the same relative amp always gives the same amount of power regardless of what the other amplitudes are specified as
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
-        gain = max(relative_amps) * maxv * np.sum(relative_amps) / len(mux_freqs)
+        gain = maxv * np.sum(relative_amps) / len(mux_freqs)
 
         self.handle_IQ_pulse(
             name=name,
@@ -917,6 +974,11 @@ class CliffordAveragerProgram(AveragerProgram):
         # q: qubit number in config
         if ZZ_qubit is None:
             ZZ_qubit = q
+
+        if special is None and self.use_robust_pulses:  # use robust pulses as the default X/2
+            special = "robust"
+
+        # Get the freq, phase, length, type (assumes using default ge pulse)
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
         f_ge_MHz = self.f_ges[q, ZZ_qubit]
         # gain = self.pi_ge_gains[q, ZZ_qubit]
@@ -925,12 +987,12 @@ class CliffordAveragerProgram(AveragerProgram):
         ]
         # print("correction phase", correction_phase)
         phase_deg = self.overall_phase[q] + extra_phase + correction_phase
+        if neg:
+            phase_deg -= 180
         sigma_cycles = self.us2cycles(self.pi_ge_sigmas[q, ZZ_qubit], gen_ch=self.qubit_chs[q])
         type = self.cfg.device.qubit.pulses.pi_ge.type[q]
+
         waveformname = "pi_ge"
-        if ZZ_qubit != q:
-            waveformname += f"_ZZ{ZZ_qubit}"
-            name += f"_ZZ{ZZ_qubit}"
         if special:
             if special == "adiabatic":
                 gain = self.cfg.device.qubit.pulses.pi_ge_adiabatic.gain[q]
@@ -953,6 +1015,11 @@ class CliffordAveragerProgram(AveragerProgram):
 
             elif special == "robust":
                 type = "robust"
+                name += "_robust"
+
+        if ZZ_qubit != q:
+            waveformname += f"_ZZ{ZZ_qubit}"
+            name += f"_ZZ{ZZ_qubit}"
 
         if divide_len:
             sigma_cycles = sigma_cycles // 2
@@ -960,7 +1027,27 @@ class CliffordAveragerProgram(AveragerProgram):
             gain = self.pi_ge_half_gains[q, ZZ_qubit]
         else:
             gain = self.pi_ge_half_gain_pi_sigmas[q, ZZ_qubit]
+
         name += "_half"
+
+        if special == "robust":
+            # gain, freq are retrieved within setup_robust_pulse
+            plot_IQ = False
+            if "plot_IQ" in self.cfg.expt and self.cfg.expt.plot_IQ:
+                plot_IQ = True
+            self.setup_robust_pulse(
+                q,
+                name=f"{name}_q{q}",
+                ZZ_qubit=ZZ_qubit,
+                phase_deg=phase_deg,
+                play=play,
+                set_reg=set_reg,
+                reload=reload,
+                plot_IQ=plot_IQ,
+                sync_after=sync_after,
+                flag=flag,
+            )
+            return
 
         assert f_ge_MHz > 0, f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}freq may not be calibrated'
         assert (
@@ -969,8 +1056,6 @@ class CliffordAveragerProgram(AveragerProgram):
         assert (
             sigma_cycles > 0
         ), f'pulse on {q} {"ZZ "+str(ZZ_qubit) if ZZ_qubit != q else ""}sigma may not be calibrated'
-        if neg:
-            phase_deg -= 180
 
         if type == "const":
             self.handle_const_pulse(
@@ -1043,9 +1128,6 @@ class CliffordAveragerProgram(AveragerProgram):
                 reload=reload,
                 sync_after=sync_after,
             )
-
-        elif type == "robust":
-            self.setup_robust_pulse(q, ZZ_qubit=ZZ_qubit, pihalf=pihalf, play=play, set_reg=set_reg)
 
         elif type == "flat_top":
             assert False, "flat top not checked yet"
@@ -1129,7 +1211,7 @@ class CliffordAveragerProgram(AveragerProgram):
         reload=False,
         sync_after=True,
     ):
-        # the sign of the 180 does not matter, but the sign of the pihalf does!
+        # The sign of the 180 does not matter, but the sign of the pihalf does!
         self.X_pulse(
             q,
             pihalf=pihalf,
@@ -1185,14 +1267,14 @@ class CliffordAveragerProgram(AveragerProgram):
         For a fullmux expt:
         full_mux_expt: whether to use the full_mux to do the readout or standard mux setup
         If True, specify:
-        full_mux_ch
+        full_mux_chs: list of full mux channels to use for all possible qubits
         mask: list of qubits to play the readout
-        Specify either (see setup_full_mux_pulse for more details):
+        Specify either (see build_full_mux_pulse for more details):
         lengths
         OR
         pulse_I_shapes
         pulse_Q_shapes
-        times_us
+        times_us (should be just a 1d array that is the same for all channels in full_mux_chs)
         """
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
@@ -1201,8 +1283,8 @@ class CliffordAveragerProgram(AveragerProgram):
         if not full_mux_expt:
             self.setup_mux_gen_readout()
         else:
-            assert "full_mux_ch" in self.cfg.expt and self.cfg.expt.full_mux_ch is not None
-            full_mux_ch = self.cfg.expt.full_mux_ch
+            assert "full_mux_chs" in self.cfg.expt and self.cfg.expt.full_mux_chs is not None
+            full_mux_chs = self.cfg.expt.full_mux_chs
             assert "mask" in self.cfg.expt and self.cfg.expt.mask is not None
             mask = self.cfg.expt.mask
 
@@ -1212,26 +1294,71 @@ class CliffordAveragerProgram(AveragerProgram):
             times_us = self.cfg.expt.times_us if "times_us" in self.cfg.expt else None
 
             mixer_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq)
-            assert np.all(mixer_freqs == mixer_freqs[0])
-            mixer_freq = mixer_freqs[0]
+            # assert np.all(mixer_freqs == mixer_freqs[0])
             if "plot_IQ" in self.cfg.expt:
                 plot_IQ = self.cfg.expt.plot_IQ
             else:
                 plot_IQ = False
+            mux_freqs = self.cfg.device.readout.frequency
+            mux_gains = self.cfg.device.readout.gain
 
-            self.setup_fullmux_readout(
-                full_mux_ch=full_mux_ch,
-                adc_chs=self.adc_chs,
-                mask=mask,
-                mixer_freq=mixer_freq,
-                mux_freqs=self.cfg.device.readout.frequency,
-                mux_gains=self.cfg.device.readout.gain,
-                lengths=lengths,
-                pulse_I_shapes=pulse_I_shapes,
-                pulse_Q_shapes=pulse_Q_shapes,
-                times_us=times_us,
-                plot_IQ=plot_IQ,
-            )
+            mask_dict_unique_chs = dict()
+            mixer_dict_unique_chs = dict()
+            mux_freqs_dict_unique_chs = dict()
+            mux_gains_dict_unique_chs = dict()
+            lengths_dict_unique_chs = dict()
+            pulse_I_shapes_dict_unique_chs = dict()
+            pulse_Q_shapes_dict_unique_chs = dict()
+            adc_ch_dict_unique_chs = dict()
+
+            for i_ch, ch in enumerate(full_mux_chs):
+                if ch not in mux_freqs_dict_unique_chs.keys():
+                    mask_dict_unique_chs[ch] = []
+                    mixer_dict_unique_chs[ch] = mixer_freqs[i_ch]
+                    # print(f"setting mixer freq for full_mux_ch {ch}", mixer_freqs[i_ch])
+                    mux_freqs_dict_unique_chs[ch] = []
+                    mux_gains_dict_unique_chs[ch] = []
+                    lengths_dict_unique_chs[ch] = None if lengths is None else []
+                    pulse_I_shapes_dict_unique_chs[ch] = None if pulse_I_shapes is None else []
+                    pulse_Q_shapes_dict_unique_chs[ch] = None if pulse_Q_shapes is None else []
+                    adc_ch_dict_unique_chs[ch] = []
+                if i_ch in mask:
+                    mask_dict_unique_chs[ch].append(len(mask_dict_unique_chs[ch]))
+                assert (
+                    mixer_freqs[i_ch] == mixer_dict_unique_chs[ch]
+                ), f"All mixer freqs that use the same full_mux_ch should be the same but mixer for qubit {i_ch} is {mixer_freqs[i_ch]} and previous mixer_freq is {mixer_dict_unique_chs[ch]} on full mux ch {ch}"
+                mux_freqs_dict_unique_chs[ch].append(mux_freqs[i_ch])
+                mux_gains_dict_unique_chs[ch].append(mux_gains[i_ch])
+                if lengths is not None:
+                    lengths_dict_unique_chs[ch].append(lengths[i_ch])
+                if pulse_I_shapes is not None:
+                    pulse_I_shapes_dict_unique_chs[ch].append(pulse_I_shapes[i_ch])
+                if pulse_Q_shapes is not None:
+                    pulse_Q_shapes_dict_unique_chs[ch].append(pulse_Q_shapes[i_ch])
+                adc_ch_dict_unique_chs[ch].append(self.adc_chs[i_ch])
+            # print("mask_dict_unique_chs", mask_dict_unique_chs)
+            # print("mixer_dict_unique_chs", mixer_dict_unique_chs)
+            # print("mux_freqs_dict_unique_chs", mux_freqs_dict_unique_chs)
+            # print("mux_gains_dict_unique_chs", mux_gains_dict_unique_chs)
+            # print("lengths_dict_unique_chs", lengths_dict_unique_chs)
+            # print("pulse_I_shapes_dict_unique_chs", pulse_I_shapes_dict_unique_chs)
+            # print("pulse_Q_shapes_dict_unique_chs", pulse_Q_shapes_dict_unique_chs)
+            # print("adc_ch_dict_unique_chs", adc_ch_dict_unique_chs)
+
+            for full_mux_ch in mux_freqs_dict_unique_chs.keys():
+                self.setup_fullmux_readout(
+                    full_mux_ch=full_mux_ch,
+                    adc_chs=adc_ch_dict_unique_chs[full_mux_ch],
+                    mask=mask_dict_unique_chs[full_mux_ch],
+                    mixer_freq=mixer_dict_unique_chs[full_mux_ch],
+                    mux_freqs=mux_freqs_dict_unique_chs[full_mux_ch],
+                    mux_gains=mux_gains_dict_unique_chs[full_mux_ch],
+                    lengths=lengths_dict_unique_chs[full_mux_ch],
+                    pulse_I_shapes=pulse_I_shapes_dict_unique_chs[full_mux_ch],
+                    pulse_Q_shapes=pulse_Q_shapes_dict_unique_chs[full_mux_ch],
+                    times_us=times_us,
+                    plot_IQ=plot_IQ,
+                )
 
     def setup_mux_gen_readout(self):
         self.f_res_regs = [
@@ -1321,6 +1448,8 @@ class CliffordAveragerProgram(AveragerProgram):
         times_us=None,
         plot_IQ=False,
     ):
+        # ASSUMES ADC_CH = QUBIT NUMBER FOR THIS FUNCTION!
+
         self.declare_gen(ch=full_mux_ch, nqz=mux_nqz, ro_ch=adc_chs[0])
 
         # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
@@ -1333,10 +1462,9 @@ class CliffordAveragerProgram(AveragerProgram):
         rounded_mux_freqs = np.array([np.abs(self.roundfreq(f, chs_to_round)) for f in mux_freqs])
         rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
 
-        self.res_chs = [full_mux_ch] * self.num_qubits_sample
+        self.res_chs.append(full_mux_ch for _ in range(len(mux_freqs)))
         self.f_res_regs = [
-            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
-            for f, gen_ch, adc_ch in zip(rounded_mux_freqs, self.res_chs, self.adc_chs)
+            self.freq2reg(f, gen_ch=full_mux_ch, ro_ch=adc_ch) for f, adc_ch in zip(rounded_mux_freqs, adc_chs)
         ]
 
         self.handle_full_mux_pulse(
@@ -1353,24 +1481,23 @@ class CliffordAveragerProgram(AveragerProgram):
             times_us=times_us,
             phase_deg=0,
             plot_IQ=plot_IQ,
-            # ro_ch=self.adc_chs[0], # don't need this since we already rounded the freq I guess
+            # ro_ch=self.adc_chs[0],  # don't need this since we already rounded the freq I guess
             reload=True,
             play=False,
             set_reg=True,
         )
         self.measure_chs.append(full_mux_ch)
         self.meas_ch_types.append("full")
-        for q in mask:
+        for q in adc_chs:
             self.meas_ch_qs.append(q)
 
-        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
-        for q in range(self.num_qubits_sample):
-            if adc_chs[q] not in self.ro_chs:
+        for i_ch, adc_ch in enumerate(adc_chs):
+            if adc_ch not in self.ro_chs:
                 self.declare_readout(
-                    ch=adc_chs[q],
-                    length=self.readout_lengths_adc[q],
-                    freq=rounded_freqs[q],
-                    # gen_ch=self.full_mux_ch,
+                    ch=adc_ch,
+                    length=self.readout_lengths_adc[adc_ch],
+                    freq=rounded_freqs[i_ch],
+                    # gen_ch=full_mux_ch,
                 )
 
     def measure_readout_cool(
@@ -1391,6 +1518,10 @@ class CliffordAveragerProgram(AveragerProgram):
         if "rounds" in self.cfg.expt:
             assert self.cfg.expt.rounds == 1, "shots get averaged in a weird way when rounds != 1"
 
+        if "use_gf_readout" not in self.cfg.expt or not self.cfg.expt.use_gf_readout:
+            self.use_gf_readout = None
+        else:
+            self.use_gf_readout = self.cfg.expt.use_gf_readout
         if self.use_gf_readout is not None:
             # n_trig *= 2
             self.gf_readout_init(qubits=self.cfg.expt.use_gf_readout)
@@ -1415,13 +1546,15 @@ class CliffordAveragerProgram(AveragerProgram):
                     syncdelay=syncdelay,
                 )
 
-    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False):
+    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, amplitude_mode=False):
         """
         Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
         Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
         """
 
-        idata, qdata = self.get_multireadout_shots(angle=angle, threshold_final=threshold)
+        idata, qdata = self.get_multireadout_shots(
+            angle=angle, threshold_final=threshold, amplitude_mode=amplitude_mode
+        )
 
         idata = idata[:, -1, :]
         qdata = qdata[:, -1, :]
@@ -1430,11 +1563,12 @@ class CliffordAveragerProgram(AveragerProgram):
             qdata = np.average(qdata, axis=1)
         return idata, qdata
 
-    def get_multireadout_shots(self, angle=None, threshold_final=None, avg_trigs=True):
+    def get_multireadout_shots(self, angle=None, threshold_final=None, amplitude_mode=False, avg_trigs=True):
         """
         For all readouts, angle is applied if None; threshold_final is applied only to the last readout
         threshold_final should be specified for all qubits
-        if avg_trigs is False, return as if each trig is a separate readout
+        If avg_trigs is False, return as if each trig is a separate readout
+        If amplitude_mode is True, does thresholding based on amplitude (and assumes the threshold provided is this threshold)
         """
         n_init_readout = self.cfg.expt.n_init_readout
         n_trig = self.cfg.expt.n_trig
@@ -1450,7 +1584,12 @@ class CliffordAveragerProgram(AveragerProgram):
         dq_buf = np.array([self.dq_buf[i] / ro["length"] for i, (ch, ro) in enumerate(self.ro_chs.items())])
         for i, ch in enumerate(self.ro_chs):
             idata_ch, qdata_ch = rotate_and_threshold(
-                ishots_1q=di_buf[i], qshots_1q=dq_buf[i], angle=angle[i], threshold=None, avg_shots=False
+                ishots_1q=di_buf[i],
+                qshots_1q=dq_buf[i],
+                angle=angle[i],
+                threshold=None,
+                amplitude_mode=amplitude_mode,
+                avg_shots=False,
             )
             di_buf[i] = idata_ch
             dq_buf[i] = qdata_ch
@@ -1502,7 +1641,10 @@ class CliffordAveragerProgram(AveragerProgram):
         if threshold_final is not None:
             for ch in range(len(self.ro_chs)):
                 shots_i_reshaped[ch, -1, :], _ = rotate_and_threshold(
-                    ishots_1q=shots_i_reshaped[ch, -1, :], threshold=threshold_final[ch]
+                    ishots_1q=shots_i_reshaped[ch, -1, :],
+                    qshots_1q=shots_q_reshaped[ch, -1, :],
+                    threshold=threshold_final[ch],
+                    amplitude_mode=amplitude_mode,
                 )
 
         # final shape: (ro_chs, n_init_readout + 1, reps)
@@ -1522,7 +1664,15 @@ class CliffordAveragerProgram(AveragerProgram):
         )
 
     def acquire_rotated(
-        self, soc, progress, angle=None, threshold=None, ge_avgs=None, post_process=None, verbose=False
+        self,
+        soc,
+        progress,
+        angle=None,
+        threshold=None,
+        ge_avgs=None,
+        amplitude_mode=False,
+        post_process=None,
+        verbose=False,
     ):
         """
         If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
@@ -1531,15 +1681,21 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
         if post_process == None:
-            avgi_rot, avgq_rot = self.get_shots(angle=angle, avg_shots=True, verbose=verbose)
+            avgi_rot, avgq_rot = self.get_shots(
+                angle=angle, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+            )
             return avgi_rot, avgq_rot
         elif post_process == "threshold":
             assert threshold is not None
-            popln, avgq_rot = self.get_shots(angle=angle, threshold=threshold, avg_shots=True, verbose=verbose)
+            popln, avgq_rot = self.get_shots(
+                angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+            )
             return popln, avgq_rot
         elif post_process == "scale":
             assert ge_avgs is not None
-            avgi_rot, avgq_rot = self.get_shots(angle=angle, avg_shots=True, verbose=verbose)
+            avgi_rot, avgq_rot = self.get_shots(
+                angle=angle, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+            )
 
             ge_avgs_rot = [None] * 4
             for q, angle_q in enumerate(angle):
@@ -1627,6 +1783,11 @@ class CliffordAveragerProgram(AveragerProgram):
             for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)
         ]
 
+        # add IQ pulses
+        self.use_robust_pulses = False
+        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulses:
+            self.use_robust_pulses = True
+
         # declare qubit dacs, add qubit pi_ge pulses
         for q in range(self.num_qubits_sample):
             mixer_freq = None
@@ -1637,14 +1798,6 @@ class CliffordAveragerProgram(AveragerProgram):
                     ch=self.qubit_chs[q], nqz=self.cfg.hw.soc.dacs.qubit.nyquist[q], mixer_freq=mixer_freq
                 )
             self.X_pulse(q=q, play=False, reload=True)
-
-        # add IQ pulses
-        self.use_robust_pulses = False
-        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulse:
-            self.use_robust_pulses = True
-        if self.use_robust_pulses:
-            for q in range(self.num_qubits_sample):
-                self.setup_robust_pulse(q)
 
         if self.cool_qubits:
             mixer_freq = None
