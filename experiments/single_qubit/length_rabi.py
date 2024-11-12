@@ -8,7 +8,12 @@ from slab import AttrDict, Experiment, dsfit
 from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
-from experiments.clifford_averager_program import QutritAveragerProgram
+from experiments.clifford_averager_program import (
+    QutritAveragerProgram,
+    post_select_shots,
+    ps_threshold_adjust,
+    rotate_and_threshold,
+)
 from experiments.single_qubit.single_shot import hist
 from experiments.two_qubit.twoQ_state_tomography import (
     ErrorMitigationStateTomo1QProgram,
@@ -118,6 +123,9 @@ class LengthRabiProgram(QutritAveragerProgram):
         else:
             skip_first_pi2 = False
 
+        if not self.test_pi_half:
+            self.use_pi2_for_pi = True  # always using 2 pi/2 pulses for pi now
+
         if play_pulse:
             if self.error_amp:
                 assert "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None
@@ -138,7 +146,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                     self.Xef_pulse(
                         q=qTest,
                         ZZ_qubit=qZZ,
-                        pihalf=self.test_pi_half,
+                        pihalf=self.test_pi_half or self.use_pi2_for_pi,
                         divide_len=self.divide_len,
                         play=False,
                         set_reg=True,
@@ -149,23 +157,23 @@ class LengthRabiProgram(QutritAveragerProgram):
                     self.X_pulse(
                         q=qTest,
                         ZZ_qubit=qZZ,
-                        pihalf=self.test_pi_half,
+                        pihalf=self.test_pi_half or self.use_pi2_for_pi,
                         divide_len=self.divide_len,
                         play=False,
                         set_reg=True,
                         special=special,
                     )
                     name = "X"
-                if self.checkZZ:
-                    name += f"_ZZ{qZZ}"
-                if self.test_pi_half:
-                    name += "_half"
                 if self.cfg.expt.pulse_type == "robust":
                     name += "_robust"
+                if self.checkZZ:
+                    name += f"_ZZ{qZZ}"
+                if self.test_pi_half or self.cfg.expt.pulse_type == "robust" or self.use_pi2_for_pi:
+                    name += "_half"
                 self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
                 # print("n_pulses", n_pulses)
-                for i in range(int(2 * n_pulses)):  # n_pulses is the number of cycle sets
+                for i in range(int(n_pulses)):  # n_pulses is the number of cycle sets
                     phase = 0
                     if "use_Y" in self.cfg.expt:
                         use_Y = self.cfg.expt.use_Y
@@ -182,6 +190,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                         phase = -90 + phase
 
                     num_test_pulses = 1
+
                     if self.use_pi2_for_pi:
                         num_test_pulses = 2
 
@@ -191,7 +200,8 @@ class LengthRabiProgram(QutritAveragerProgram):
                     for j in range(num_test_pulses):
                         # print("phase", phase)
                         self.pulse(ch=self.qubit_chs[qTest])
-                        self.sync_all()
+                        # self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
+
                         # print(
                         #     "pulse pi test freq",
                         #     self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]),
@@ -205,7 +215,8 @@ class LengthRabiProgram(QutritAveragerProgram):
                     delay_cycles = 0
                     if self.check_C_distort or self.check_I_distort:
                         delay_cycles = self.cfg.expt.delay_error_amp
-                    self.sync_all(delay_cycles)
+                    if delay_cycles > 0:
+                        self.sync_all(delay_cycles)
 
                 if self.check_C_distort or self.check_I_distort:
                     if self.checkEF:
@@ -218,7 +229,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                         )
 
             else:
-                n_pulses = 1
+                # n_pulses = 1
                 # if self.test_pi_half:
                 n_pulses = 2
                 for i in range(int(n_pulses)):
@@ -232,10 +243,12 @@ class LengthRabiProgram(QutritAveragerProgram):
                             q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
                         )
                         name = "X"
+                if self.cfg.expt.pulse_type == "robust":
+                    name += "_robust"
                 if self.checkZZ:
                     name += f"_ZZ{qZZ}"
-                # if self.test_pi_half:
-                name += "_half"
+                if self.test_pi_half or self.cfg.expt.pulse_type == "robust" or self.use_pi2_for_pi:
+                    name += "_half"
                 self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
         if self.checkEF and self.readout_ge:  # map excited back to qubit ground state for measurement
@@ -677,10 +690,11 @@ class NPulseExperiment(Experiment):
             fitparams = None
             fitparams = [None, 1 * np.pi / 180]
             print("fitparams", fitparams)
-            if self.cfg.expt.test_pi_half:
-                fit_fitfunc = fitter.fit_probg_Xhalf
-            else:
-                fit_fitfunc = fitter.fit_probg_X
+            fit_fitfunc = fitter.fit_probg_Xhalf
+            # if self.cfg.expt.test_pi_half:
+            #     fit_fitfunc = fitter.fit_probg_Xhalf
+            # else:
+            #     fit_fitfunc = fitter.fit_probg_X
             if scale is not None:
                 Ig, Qg, Ie, Qe = scale[self.qTest]
                 reformatted_scale = [
@@ -712,10 +726,11 @@ class NPulseExperiment(Experiment):
         self.checkEF = self.cfg.expt.checkEF
 
         xdata = data["xpts"]
-        if self.cfg.expt.test_pi_half:
-            fit_func = fitter.probg_Xhalf
-        else:
-            fit_func = fitter.probg_X
+        fit_func = fitter.probg_Xhalf
+        # if self.cfg.expt.test_pi_half:
+        #     fit_func = fitter.probg_Xhalf
+        # else:
+        #     fit_func = fitter.probg_X
 
         title = (
             f"Angle Error Q{qTest}"
@@ -735,7 +750,7 @@ class NPulseExperiment(Experiment):
         current_gain = self.cfg.expt.gain
 
         plt.figure(figsize=(8, 5))
-        label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{2n}$)"
+        label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{"+ (str(2) if self.cfg.expt.test_pi_half else "") +"n}$)"
         plt.subplot(
             111,
             title=title,
@@ -781,7 +796,6 @@ class NPulseExperiment(Experiment):
                 amp_ratio = (180 - p[1]) / 180
             print(f"From avgi: adjust amplitude to {current_gain} / {amp_ratio} = {current_gain/amp_ratio}")
         plt.ylim(-0.1, 1.1)
-        print()
 
         label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{2n}$)"
         plt.subplot(212, xlabel=f"Number repeated gates {label} [n]", ylabel="Q (scaled)")
@@ -1068,12 +1082,14 @@ class PiMinusPiExperiment(Experiment):
             n_raw = np.zeros((np.prod(old_shape), 2))
             n_raw[:, 1] = data["avgi"].flatten()
             n_raw[:, 0] = 1 - data["avgi"].flatten()
-            data["avgi"] = np.reshape(tomo_analysis.correct_readout_err(n_raw, data["counts_calib"])[:, 1], old_shape)
+            data["popln"] = np.reshape(tomo_analysis.correct_readout_err(n_raw, data["counts_calib"])[:, 1], old_shape)
+        else:
+            data["popln"] = np.copy(data["avgi"])
 
         prods = []
         for col in range(len(data["freq_sweep"])):
-            col_data = data["avgi"][:, col]
-            prod = np.prod(1 - col_data)
+            col_data = data["popln"][:, col]
+            prod = np.round(np.prod(1 - col_data), decimals=5)
             prods.append(np.sqrt(prod))
 
         plt.figure(figsize=(8, 4))
@@ -1139,11 +1155,14 @@ class PiMinusPiExperiment(Experiment):
         plt.figure(figsize=(7 * cols, 6))
         plt.suptitle(title)
 
-        data_name = "avgi"
+        data_name = "popln"
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
         else:
-            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            if self.cfg.expt.pulse_type != "robust":
+                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            else:
+                old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
 
         ax = plt.gca()
         ax.set_ylabel(f"N {label}", fontsize=18)
@@ -1186,6 +1205,13 @@ class PreSelectionPiMinusPiExperiment(Experiment):
         checkEF: does ramsey on the EF transition instead of ge
         qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
         readout_ge: whether to readout at the g/e set point or e/f set point
+
+        These params will be set automatically if they are not specified:
+        readout_cool=True
+        n_init_readout=1
+        n_trig=1
+        avg_trigs=True
+        use_gf_readout=False
     )
 
     """
@@ -1235,6 +1261,18 @@ class PreSelectionPiMinusPiExperiment(Experiment):
             self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
             self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length_ef
 
+        if "readout_cool" not in self.cfg.expt:
+            self.cfg.expt.readout_cool = True
+        if "n_init_readout" not in self.cfg.expt:
+            self.cfg.expt.n_init_readout = 1
+        if "n_trig" not in self.cfg.expt:
+            self.cfg.expt.n_trig = 1
+        if "avg_trigs" not in self.cfg.expt:
+            self.cfg.expt.avg_trigs = True
+        if "use_gf_readout" not in self.cfg.expt:
+            self.cfg.expt.use_gf_readout = False
+        assert "init_read_wait_us" not in self.cfg.expt, "init_read_wait_us is a sweep variable in this experiment!"
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
@@ -1279,6 +1317,9 @@ class PreSelectionPiMinusPiExperiment(Experiment):
                 sscfg.expt.reps = sscfg.expt.singleshot_reps
                 sscfg.expt.qubit = qTest
 
+                # OVERRIDING THE READOUT COOLING SINCE THAT'S THE POINT OF THE PRE SELECTION EXPERIMENT!
+                sscfg.expt.readout_cool = False
+
                 calib_prog_dict = dict()
                 calib_order = ["g", "e" if self.cfg.expt.readout_ge else "f"]
                 for prep_state in tqdm(calib_order):
@@ -1312,7 +1353,9 @@ class PreSelectionPiMinusPiExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -1331,7 +1374,7 @@ class PreSelectionPiMinusPiExperiment(Experiment):
         # ================= #
 
         cycle_sweep = self.cfg.expt["start_N"] + self.cfg.expt["step_N"] * np.arange(self.cfg.expt["expts_N"])
-        time_sweep = self.cfg.expt["start_f"] + self.cfg.expt["step_f"] * np.arange(self.cfg.expt["expts_f"])
+        time_sweep = self.cfg.expt["start_t"] + self.cfg.expt["step_t"] * np.arange(self.cfg.expt["expts_t"])
         if "loops" not in self.cfg.expt:
             self.cfg.expt.loops = 1
 
@@ -1345,6 +1388,26 @@ class PreSelectionPiMinusPiExperiment(Experiment):
                 "avgq": np.zeros((self.cfg.expt.loops, len(cycle_sweep), len(time_sweep))),
                 "amps": np.zeros((self.cfg.expt.loops, len(cycle_sweep), len(time_sweep))),
                 "phases": np.zeros((self.cfg.expt.loops, len(cycle_sweep), len(time_sweep))),
+                "ishots_raw": np.zeros(
+                    (
+                        self.cfg.expt.loops,
+                        len(cycle_sweep),
+                        len(time_sweep),
+                        self.num_qubits_sample,
+                        self.cfg.expt.n_init_readout + 1,
+                        self.cfg.expt.reps,
+                    )
+                ),
+                "qshots_raw": np.zeros(
+                    (
+                        self.cfg.expt.loops,
+                        len(cycle_sweep),
+                        len(time_sweep),
+                        self.num_qubits_sample,
+                        self.cfg.expt.n_init_readout + 1,
+                        self.cfg.expt.reps,
+                    )
+                ),
             }
         )
 
@@ -1374,14 +1437,19 @@ class PreSelectionPiMinusPiExperiment(Experiment):
                         threshold=thresholds_q,
                         ge_avgs=ge_avgs_q,
                         post_process=self.cfg.expt.post_process,
+                        amplitude_mode=full_mux_expt,
                         progress=False,
                         verbose=False,
                     )
+                    ishots, qshots = lengthrabi.get_multireadout_shots()
+                    data["ishots_raw"][loop, icycle, itau, :, :, :] = ishots
+                    data["qshots_raw"][loop, icycle, itau, :, :, :] = qshots
+
                     self.cfg.expt.gain = self.prog.cfg.expt.gain
                     avgi = avgi[qTest]
                     avgq = avgq[qTest]
-                    amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
-                    phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
+                    amp = np.average(np.abs(ishots + 1j * qshots))
+                    phase = np.average(np.angle(ishots + 1j * qshots))
                     data["avgi"][loop, icycle, itau] = avgi
                     data["avgq"][loop, icycle, itau] = avgq
                     data["amps"][loop, icycle, itau] = amp
@@ -1399,56 +1467,67 @@ class PreSelectionPiMinusPiExperiment(Experiment):
 
         return data
 
-    def analyze(self, data=None, fit=True, scale=None):
-        # scale should be [Ig, Qg, Ie, Qe] single shot experiment
+    def analyze(
+        self,
+        data=None,
+        fit=True,
+        amplitude_mode=True,
+        preselect=True,
+        post_process="threshold",
+        ps_qubits=None,
+        ps_adjust=None,
+        verbose=True,
+    ):
 
-        self.checkEF = self.cfg.expt.checkEF
-        qTest = self.cfg.expt.qTest
-        qZZ = self.cfg.expt.qZZ
-        if qZZ is None:
-            qZZ = qTest
-
+        if not fit:
+            return
         if data is None:
             data = self.data
 
-        if self.cfg.expt.post_process == "threshold":
-            tomo_analysis = TomoAnalysis(nb_qubits=1)
-            old_shape = data["avgi"].shape
-            n_raw = np.zeros((np.prod(old_shape), 2))
-            n_raw[:, 1] = data["avgi"].flatten()
-            n_raw[:, 0] = 1 - data["avgi"].flatten()
-            data["avgi"] = np.reshape(tomo_analysis.correct_readout_err(n_raw, data["counts_calib"])[:, 1], old_shape)
+        thresholds = data["thresholds"]
+        angles = data["angles"]
+        ge_avgs = data["ge_avgs"]
+        counts_calib = data["counts_calib"]
 
-        prods = []
-        for col in range(len(data["freq_sweep"])):
-            col_data = data["avgi"][:, col]
-            prod = np.prod(1 - col_data)
-            prods.append(np.sqrt(prod))
+        if not preselect:
+            ps_qubits = []
+        data["popln"] = np.zeros((self.cfg.expt.loops, len(data["cycle_sweep"]), len(data["time_sweep"])))
+        tomo_analysis = TomoAnalysis(nb_qubits=1)
+        for loop in range(self.cfg.expt.loops):
+            for icycle, n_cycle in enumerate(data["cycle_sweep"]):
+                for itau, tau in enumerate(data["time_sweep"]):
+                    if ps_adjust is None:
+                        ps_thresholds = thresholds
+                    else:
+                        ps_thresholds = ps_threshold_adjust(
+                            ps_thresholds_init=thresholds,
+                            adjust=ps_adjust,
+                            ge_avgs=ge_avgs,
+                            angles=angles,
+                            amplitude_mode=amplitude_mode,
+                        )
+                    # print(ps_thresholds)
+                    shots_ps = post_select_shots(
+                        final_qubit=self.cfg.expt.qTest,
+                        all_ishots_raw_q=data[f"ishots_raw"][loop, icycle, itau, :, :, :],
+                        all_qshots_raw_q=data[f"qshots_raw"][loop, icycle, itau, :, :, :],
+                        angles=angles,
+                        thresholds=thresholds,
+                        ps_thresholds=ps_thresholds,
+                        ps_qubits=ps_qubits,
+                        n_init_readout=self.cfg.expt.n_init_readout,
+                        post_process=post_process,
+                        verbose=False if not preselect else verbose,
+                        amplitude_mode=amplitude_mode,
+                    )
 
-        plt.figure(figsize=(8, 4))
-        plt.plot(data["freq_sweep"], prods, ".-")
-        plt.xlabel("Frequency [MHz]")
-        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
+                    counts_raw = tomo_analysis.sort_counts([shots_ps])
+                    counts_ge_corrected = tomo_analysis.correct_readout_err([counts_raw], counts_calib)
+                    print(counts_calib, counts_raw, counts_ge_corrected)
+                    data["popln"][loop, icycle, itau] = counts_ge_corrected[0][1]
+        data["popln"] = np.average(data["popln"], axis=0)
 
-        if not fit:
-            plt.show()
-            return data
-
-        popt, pcov = fitter.fit_gauss(data["freq_sweep"], np.array(prods))
-        fit_freq = popt[1]
-        data["best_freq"] = fit_freq
-        if self.checkEF:
-            old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
-        else:
-            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
-        print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
-
-        plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
-        plt.show()
-
-        return data
-
-    def display(self, data=None, fit=True, scale=None):
+    def display(self, data=None, preselect=True, fit=True, scale=None, post_process=None):
         if data is None:
             data = self.data
 
@@ -1462,14 +1541,14 @@ class PreSelectionPiMinusPiExperiment(Experiment):
         self.checkEF = self.cfg.expt.checkEF
 
         title = (
-            f"Frequency Error Q{qTest}"
+            f"Pre Selection on Q{qTest}"
             + (f" ZZ Q{qZZ}" if (self.checkZZ and qZZ != qTest) else "")
             + (" EF" if self.checkEF else "")
             + (" $\pi/2$" if self.cfg.expt.test_pi_half else " $\pi$")
         )
 
         data = deepcopy(data)
-        inner_sweep = data["freq_sweep"]
+        inner_sweep = data["time_sweep"]
         outer_sweep = data["cycle_sweep"]
 
         y_sweep = outer_sweep
@@ -1485,20 +1564,19 @@ class PreSelectionPiMinusPiExperiment(Experiment):
         plt.figure(figsize=(7 * cols, 6))
         plt.suptitle(title)
 
-        data_name = "avgi"
-        if self.checkEF:
-            old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
+        if post_process is None: post_process = self.cfg.expt.post_process
+        if post_process == "threshold":
+            data_name = "popln"
         else:
-            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            data_name = "amps"
 
         ax = plt.gca()
         ax.set_ylabel(f"N {label}", fontsize=18)
-        ax.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
+        ax.set_xlabel("Delay Between Readouts [us]", fontsize=18)
         ax.tick_params(axis="both", which="major", labelsize=16)
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name], cmap="viridis", shading="auto")
-        if fit:
-            plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
+        plt.pcolormesh(x_sweep, y_sweep, data[data_name], cmap="viridis", shading="auto")
 
+        plt.clim(0, 1.0)
         plt.colorbar()
         plt.tight_layout()
         plt.show()

@@ -2,9 +2,14 @@ import json
 import time
 from copy import deepcopy
 
-import experiments.fitting as fitter
 import matplotlib.pyplot as plt
 import numpy as np
+from qick import *
+from qick.helpers import gauss
+from slab import AttrDict, Experiment, NpEncoder
+from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 from experiments.clifford_averager_program import (
     QutritAveragerProgram,
     post_select_shots,
@@ -17,11 +22,7 @@ from experiments.two_qubit.twoQ_state_tomography import (
     ErrorMitigationStateTomo2QProgram,
     infer_gef_popln_2readout,
 )
-from qick import *
-from qick.helpers import gauss
-from slab import AttrDict, Experiment, NpEncoder
 from TomoAnalysis import TomoAnalysis
-from tqdm import tqdm_notebook as tqdm
 
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
@@ -411,7 +412,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
             # loop over error amplification (if no amplification we just loop 1x)
             # print("n_pulses", n_pulses)
-            for i in range(int(2 * n_pulses)):
+            for i in range(int(n_pulses)):
 
                 # do the simultaneous 2q swap
                 if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
@@ -2315,7 +2316,8 @@ class NPulseEgGfExperiment(Experiment):
             xdata = data["xpts"]
             fitparams = None
             # if self.cfg.expt.test_pi_half: fit_fitfunc = fitter.fit_probg_Xhalf
-            fit_fitfunc = fitter.fit_probg_X
+            # fit_fitfunc = fitter.fit_probg_X
+            fit_fitfunc = fitter.fit_probg_Xhalf_decay
 
             q_names = ["A", "B", "C"]
 
@@ -2323,12 +2325,14 @@ class NPulseEgGfExperiment(Experiment):
                 q_name = q_names[i_q]
                 try:
                     p_avgi, pCov_avgi = fit_fitfunc(xdata, data["avgi"][i_q], fitparams=fitparams)
+                    print(p_avgi)
                     data[f"fit{q_name}_avgi"] = p_avgi
                     data[f"fit{q_name}_err_avgi"] = pCov_avgi
                 except Exception as e:
                     print("Exception:", e)
                 try:
                     p_avgq, pCov_avgq = fit_fitfunc(xdata, data["avgq"][i_q], fitparams=fitparams)
+                    print(p_avgq)
                     data[f"fit{q_name}_avgq"] = p_avgq
                     data[f"fit{q_name}_err_avgq"] = pCov_avgq
                 except Exception as e:
@@ -2356,20 +2360,23 @@ class NPulseEgGfExperiment(Experiment):
 
         xdata = data["xpts"]
         # if self.cfg.expt.test_pi_half: fit_func = fitter.probg_Xhalf
-        fit_func = fitter.probg_X
+        # fit_func = fitter.probg_X
+        fit_func = fitter.probg_Xhalf_decay
 
         title = f"Angle Error Q{self.cfg.expt.measure_qubits[0]} Q{self.cfg.expt.measure_qubits[1]}"
 
         plt.figure(figsize=(10, 8))
-        plt.subplot(211, title=title, ylabel=f"QA ({self.cfg.expt.measure_qubits[0]}) (scaled)")
+        ax_qA = plt.subplot(211, title=title)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        ax_qA.set_ylabel(f"QA ({self.cfg.expt.measure_qubits[0]}) (scaled)", fontsize=18)
         plot_data = data["avgi"][0]
-        plt.plot(xdata, plot_data, ".-")
+        plt.plot(xdata, plot_data, "o-", label="Data")
         if fit:
             p = data["fitA_avgi"]
             pCov = data["fitA_err_avgi"]
             captionStr = f"$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}"
-            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
-            plt.legend()
+            plt.plot(xdata, fit_func(xdata, *p), "--", label=captionStr)
+            plt.legend(fontsize=18)
             # if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
             if self.cfg.expt.measure_qubits[0] == qDrive:
                 sign = 1
@@ -2381,18 +2388,20 @@ class NPulseEgGfExperiment(Experiment):
         print()
 
         # label = '($X_{\pi/2}, X_{'+ ('\pi' if not self.cfg.expt.test_pi_half else '\pi/2') + '}^{2n}$)'
-        label = "($X_{\pi/2}, X_{\pi}^{2n}$)"
-        plt.subplot(
-            212, xlabel=f"Number repeated gates {label} [n]", ylabel=f"QA ({self.cfg.expt.measure_qubits[1]}) (scaled)"
-        )
+        # label = "($X_{\pi/2}, X_{\pi}^{2n}$)"
+        label = "($X_{\pi/2}, X_{\pi}^{n}$)"
+        ax_qB = plt.subplot(212)
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qB.set_ylabel(f"QA ({self.cfg.expt.measure_qubits[1]}) (scaled)", fontsize=18)
+        ax_qB.set_xlabel(f"Number repeated gates {label} [n]", fontsize=18)
         plot_data = data["avgi"][1]
-        plt.plot(xdata, plot_data, ".-")
+        plt.plot(xdata, plot_data, "o-", label="Data")
         if fit:
             p = data["fitB_avgi"]
             pCov = data["fitB_err_avgi"]
             captionStr = f"$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}"
-            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
-            plt.legend()
+            plt.plot(xdata, fit_func(xdata, *p), "--", label=captionStr)
+            plt.legend(fontsize=18)
             # if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
             if self.cfg.expt.measure_qubits[1] == qDrive:
                 sign = 1
@@ -2656,27 +2665,35 @@ class PiMinusPiEgGfExperiment(Experiment):
         # Amps shape: (measure_qubits, cycles, freqs)
         prods = np.zeros((len(self.cfg.expt.measure_qubits), len(data["freq_sweep"])))
         for iq, q in enumerate(self.cfg.expt.measure_qubits):
+            scaled_e = np.max(data["amps"][iq])
+            scaled_g = np.min(data["amps"][iq])
+            scale = np.max(data["amps"][iq]) - np.min(data["amps"][iq])
             if q == qDrive:
                 prods[iq] = np.sqrt(
-                    np.prod(np.abs(1 - data["amps"][iq]), axis=0)
+                    np.prod((scaled_e - data["amps"][iq]) / scale, axis=0)
                 )  # product over g population in all cycles
             else:
                 prods[iq] = np.sqrt(
-                    np.prod(np.abs(data["amps"][iq]), axis=0)
+                    np.prod((data["amps"][iq] - scaled_g) / scale, axis=0)
                 )  # expect to end in e, so we compare relative to e
 
-        title = f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length})"
+        label = "($X_{\pi}, X_{-\pi})^N$"
+        title = (
+            f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
+        )
         plt.figure(figsize=(8, 8))
-        plt.suptitle(title)
+        plt.suptitle(title, fontsize=20)
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        plt.plot(data["freq_sweep"], prods[0], ".-")
-        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
+        ax_qA.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plt.plot(data["freq_sweep"], prods[0], "o", label="Data")
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
-        plt.plot(data["freq_sweep"], prods[1], ".-")
-        plt.xlabel("Frequency [MHz]")
-        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qB.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        plt.plot(data["freq_sweep"], prods[1], "o", label="Data")
+        ax_qB.set_xlabel("Frequency [MHz]", fontsize=18)
 
         axs = [ax_qA, ax_qB]
         if fit:
@@ -2693,8 +2710,9 @@ class PiMinusPiEgGfExperiment(Experiment):
                 print("Fit best freq (qA)", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
 
                 plt.sca(axs[iq])
-                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
+                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt), label="Fit")
                 plt.axvline(fit_freq, color="r", linestyle="--")
+                plt.legend(fontsize=18)
             data["best_freq"] = np.average([data[f"fit_q{q}"][1] for q in self.cfg.expt.measure_qubits])
 
         plt.tight_layout()
@@ -2718,8 +2736,10 @@ class PiMinusPiEgGfExperiment(Experiment):
         else:
             old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
 
-        title = f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length})"
         label = "($X_{\pi}, X_{-\pi})^N$"
+        title = (
+            f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
+        )
 
         inner_sweep = data["freq_sweep"]
         outer_sweep = data["cycle_sweep"]
@@ -2728,25 +2748,35 @@ class PiMinusPiEgGfExperiment(Experiment):
         x_sweep = inner_sweep
 
         plt.figure(figsize=(8, 9))
-        plt.suptitle(title)
+        plt.suptitle(title, fontsize=20)
         data_name = "amps"
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        ax_qA.set_ylabel(f"N {label}")  # , fontsize=18)
-        ax_qA.tick_params(axis="both", which="major")  # , labelsize=16)
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][0], cmap="viridis", shading="auto")
+        ax_qA.set_ylabel(f"N", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plot_data = data[data_name][0]
+        scaled_e = np.max(plot_data)
+        scaled_g = np.min(plot_data)
+        scale_ge = scaled_e - scaled_g
+        plt.pcolormesh(x_sweep - old_freq, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
-        plt.colorbar()
+        cbar = plt.colorbar()
+        cbar.ax.tick_params(labelsize=18)
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
-        ax_qA.set_ylabel(f"N {label}")  # , fontsize=18)
-        ax_qB.set_xlabel("$f-f_0$ [MHz]")  # , fontsize=18)
-        ax_qB.tick_params(axis="both", which="major")  # , labelsize=16)
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][1], cmap="viridis", shading="auto")
+        ax_qB.set_ylabel(f"N", fontsize=18)
+        ax_qB.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        plot_data = data[data_name][1]
+        scaled_e = np.max(plot_data)
+        scaled_g = np.min(plot_data)
+        scale_ge = scaled_e - scaled_g
+        plt.pcolormesh(x_sweep - old_freq, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
-        plt.colorbar()
+        cbar = plt.colorbar()
+        cbar.ax.tick_params(labelsize=18)
 
         plt.tight_layout()
         plt.show()
