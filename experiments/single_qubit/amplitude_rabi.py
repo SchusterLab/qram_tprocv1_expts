@@ -120,16 +120,16 @@ class AmplitudeRabiProgram(RAveragerProgram):
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs] # get register page for qubit_chs
 
-        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4,4))
-        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4,4))
-        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4,4))
-        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4,4))
-        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4,4))
-        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4,4))
-        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4,4))
-        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4,4))
-        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4,4))
-        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4,4))
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (self.num_qubits_sample,self.num_qubits_sample))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (self.num_qubits_sample,self.num_qubits_sample))
+        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (self.num_qubits_sample,self.num_qubits_sample))
 
         self.f_res_regs = [self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch) for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)]
         if self.cool_qubits:
