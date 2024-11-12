@@ -127,9 +127,13 @@ class LengthRabiProgram(QutritAveragerProgram):
             self.use_pi2_for_pi = True  # always using 2 pi/2 pulses for pi now
 
         if play_pulse:
-            if self.error_amp:
-                assert "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None
-                n_pulses = self.cfg.expt.n_pulses
+            if not self.error_amp:
+                n_cycles = 1
+                n_pulse_per_cycle = 1
+            else:
+                assert "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None
+                n_cycles = self.cfg.expt.n_cycles
+                n_pulse_per_cycle = 2
                 # print('init pi/2 freq', self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]), 'gain', self.pi_test_half_gain)
 
                 if not self.pi_minuspi or self.check_I_distort:
@@ -141,46 +145,50 @@ class LengthRabiProgram(QutritAveragerProgram):
                             self.Xef_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True, special=special)
                     self.sync_all()
 
-                # setup pulse regs to save memory for iteration
-                if self.checkEF:
-                    self.Xef_pulse(
-                        q=qTest,
-                        ZZ_qubit=qZZ,
-                        pihalf=self.test_pi_half or self.use_pi2_for_pi,
-                        divide_len=self.divide_len,
-                        play=False,
-                        set_reg=True,
-                        special=special,
-                    )
-                    name = "X_ef"
-                else:
-                    self.X_pulse(
-                        q=qTest,
-                        ZZ_qubit=qZZ,
-                        pihalf=self.test_pi_half or self.use_pi2_for_pi,
-                        divide_len=self.divide_len,
-                        play=False,
-                        set_reg=True,
-                        special=special,
-                    )
-                    name = "X"
-                if self.cfg.expt.pulse_type == "robust":
-                    name += "_robust"
-                if self.checkZZ:
-                    name += f"_ZZ{qZZ}"
-                if self.test_pi_half or self.cfg.expt.pulse_type == "robust" or self.use_pi2_for_pi:
-                    name += "_half"
-                self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
+            # ============
+            # Loop over error amplification (if no amplification we just loop 1x)
+            # ============
+            # setup pulse regs to save memory for iteration
+            if self.checkEF:
+                self.Xef_pulse(
+                    q=qTest,
+                    ZZ_qubit=qZZ,
+                    pihalf=self.test_pi_half or self.use_pi2_for_pi,
+                    divide_len=self.divide_len,
+                    play=False,
+                    set_reg=True,
+                    special=special,
+                )
+                name = "X_ef"
+            else:
+                self.X_pulse(
+                    q=qTest,
+                    ZZ_qubit=qZZ,
+                    pihalf=self.test_pi_half or self.use_pi2_for_pi,
+                    divide_len=self.divide_len,
+                    play=False,
+                    set_reg=True,
+                    special=special,
+                )
+                name = "X"
+            if self.cfg.expt.pulse_type == "robust":
+                name += "_robust"
+            if self.checkZZ:
+                name += f"_ZZ{qZZ}"
+            if self.test_pi_half or self.cfg.expt.pulse_type == "robust" or self.use_pi2_for_pi:
+                name += "_half"
+            self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
-                # print("n_pulses", n_pulses)
-                for i in range(int(n_pulses)):  # n_pulses is the number of cycle sets
+            # print("n_cycles", n_cycles)
+            for i in range(int(n_cycles)):  # n_cycles is the number of cycle sets
+                for j in range(n_pulse_per_cycle):
                     phase = 0
                     if "use_Y" in self.cfg.expt:
                         use_Y = self.cfg.expt.use_Y
                     else:
                         use_Y = False
 
-                    if i % 2 == 1:
+                    if j % 2 == 1:
                         if self.pi_minuspi:
                             phase = -180
                         if self.check_I_distort:
@@ -197,7 +205,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                     self.safe_regwi(
                         self.q_rps[qTest], self.qTest_rphase, self.deg2reg(phase, gen_ch=self.qubit_chs[qTest])
                     )
-                    for j in range(num_test_pulses):
+                    for k in range(num_test_pulses):
                         # print("phase", phase)
                         self.pulse(ch=self.qubit_chs[qTest])
                         # self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
@@ -218,38 +226,15 @@ class LengthRabiProgram(QutritAveragerProgram):
                     if delay_cycles > 0:
                         self.sync_all(delay_cycles)
 
-                if self.check_C_distort or self.check_I_distort:
-                    if self.checkEF:
-                        self.Yef_pulse(
-                            q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
-                        )
-                    else:
-                        self.Y_pulse(
-                            q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
-                        )
-
-            else:
-                # n_pulses = 1
-                # if self.test_pi_half:
-                n_pulses = 2
-                for i in range(int(n_pulses)):
-                    if self.checkEF:
-                        self.Xef_pulse(
-                            q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
-                        )
-                        name = "X_ef"
-                    else:
-                        self.X_pulse(
-                            q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
-                        )
-                        name = "X"
-                if self.cfg.expt.pulse_type == "robust":
-                    name += "_robust"
-                if self.checkZZ:
-                    name += f"_ZZ{qZZ}"
-                if self.test_pi_half or self.cfg.expt.pulse_type == "robust" or self.use_pi2_for_pi:
-                    name += "_half"
-                self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
+            if self.check_C_distort or self.check_I_distort:
+                if self.checkEF:
+                    self.Yef_pulse(
+                        q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
+                    )
+                else:
+                    self.Y_pulse(
+                        q=qTest, ZZ_qubit=qZZ, pihalf=self.test_pi_half, divide_len=self.divide_len, play=True
+                    )
 
         if self.checkEF and self.readout_ge:  # map excited back to qubit ground state for measurement
             self.X_pulse(q=qTest, ZZ_qubit=qZZ, play=True)
@@ -638,7 +623,7 @@ class NPulseExperiment(Experiment):
             self.cfg.expt.loops = 1
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
             for n_cycle in tqdm(cycles, disable=not progress or self.cfg.expt.loops > 1):
-                self.cfg.expt.n_pulses = n_cycle
+                self.cfg.expt.n_cycles = n_cycle
                 # print('n cycle', n_cycle)
                 lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=self.cfg)
                 self.prog = lengthrabi
@@ -1020,7 +1005,7 @@ class PiMinusPiExperiment(Experiment):
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
             for icycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress or self.cfg.expt.loops > 1)):
                 for ifreq, freq in enumerate(freq_sweep):
-                    cfg.expt.n_pulses = n_cycle
+                    cfg.expt.n_cycles = n_cycle
 
                     if self.checkEF:
                         cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ] = freq
@@ -1425,7 +1410,7 @@ class PreSelectionPiMinusPiExperiment(Experiment):
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
             for icycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress or self.cfg.expt.loops > 1)):
                 for itau, tau in enumerate(time_sweep):
-                    cfg.expt.n_pulses = n_cycle
+                    cfg.expt.n_cycles = n_cycle
                     cfg.expt.init_read_wait_us = tau
 
                     # print('n cycle', n_cycle)
@@ -1783,7 +1768,7 @@ class CDistortPiMinusPiExperiment(Experiment):
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
             for icycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress or self.cfg.expt.loops > 1)):
                 for itau, tau in enumerate(time_sweep):
-                    cfg.expt.n_pulses = n_cycle
+                    cfg.expt.n_cycles = n_cycle
                     cfg.expt.delay_error_amp = tau
 
                     # print('n cycle', n_cycle)
@@ -2125,7 +2110,7 @@ class IDistortDelayExperiment(Experiment):
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
             for icycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress or self.cfg.expt.loops > 1)):
                 for itau, tau in enumerate(time_sweep):
-                    cfg.expt.n_pulses = n_cycle
+                    cfg.expt.n_cycles = n_cycle
                     cfg.expt.delay_error_amp = tau
 
                     # print('n cycle', n_cycle)
