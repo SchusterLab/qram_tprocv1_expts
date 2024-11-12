@@ -485,3 +485,121 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
         print(f"Saving {self.fname}")
         super().save_data(data=data)
         return self.fname
+    
+    
+class ResonatorRingDownExperiment(Experiment):
+    """Resonator Ring Down Experiment
+    Experimental Config
+    expt_cfg={
+        "start_time": start time (us),
+        "step_time": time step (us),
+        "expts": number of experiments in time,
+        "freq": frequency of the drive,
+        "gain": gain of the readout,
+        "reps": number of reps,
+    """
+    
+    def __init__(self, soccfg=None, path="", prefix="ResonatorRingDown", config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+    
+    def acquire(self, progress=False):
+        xpts = self.cfg.expt["start_time"] + self.cfg.expt["step_time"] * np.arange(self.cfg.expt["expts"])
+        qTest = self.cfg.expt.qTest
+        
+        if "freq" in self.cfg.expt and self.cfg.expt["freq"] is not None:
+            self.cfg.device.readout.frequency[qTest] = self.cfg.expt["freq"]
+            
+        if "gain" in self.cfg.expt and self.cfg.expt["gain"] is not None:
+            self.cfg.device.readout.gain[qTest] = self.cfg.expt["gain"]
+            
+        if "readout_length" in self.cfg.expt and self.cfg.expt["readout_length"] is not None:
+            self.cfg.expt.len_readout_adc = self.cfg.expt["readout_length"]
+    
+        num_qubits_sample = len(self.cfg.device.readout.frequency)
+        for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
+            for key, value in subcfg.items():
+                if isinstance(value, dict):
+                    for key2, value2 in value.items():
+                        if isinstance(value2, dict):
+                            for key3, value3 in value2.items():
+                                if not (isinstance(value3, list)):
+                                    value2.update({key3: [value3] * num_qubits_sample})
+                elif not (isinstance(value, list)):
+                    subcfg.update({key: [value] * num_qubits_sample})
+
+        data = {"xpts": [], "avgi": [], "avgq": [], "amps": [], "phases": []}
+        for t in tqdm(xpts, disable=not progress):
+            cfg = AttrDict(deepcopy(self.cfg))
+            
+            t_readout = min(t, self.cfg.device.readout.readout_length[qTest])
+            t_offset = max(t, t_readout)
+            cycles_off_baseline = cfg.device.readout.trig_offset[0] 
+            
+            cfg.device.readout.trig_offset[0] = self.soc.us2cycles(t_offset) + cycles_off_baseline
+            cfg.device.readout.readout_length[qTest] = t_readout
+            print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
+            
+            
+            
+            rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
+            avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
+            datai, dataq = rspec.collect_shots()
+            avgi = np.average(datai)
+            avgq = np.average(dataq)
+            amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
+            phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
+            self.prog = rspec
+
+            data["xpts"].append(t)
+            data["avgi"].append(avgi)
+            data["avgq"].append(avgq)
+            data["amps"].append(amp)
+            data["phases"].append(phase)
+
+        for k, a in data.items():
+            data[k] = np.array(a)
+            
+        self.data = data
+        return data
+    
+    def analyze(self, data=None, fit=True, **kwargs):
+        if data is None:
+            data = self.data
+        qTest = self.cfg.expt.qTest
+        
+        return data
+
+    def display(self, data=None, **kwargs):
+        
+        if data is None:
+            data = self.data
+        qTest = self.cfg.expt.qTest
+        
+        fig, ax = plt.subplots(4, 1, figsize=(10, 10))
+        ax[0].plot(data["xpts"], data["amps"], '.-')
+        ax[0].set_title(f"Resonator Ring Down Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
+        ax[0].set_ylabel("Amps [ADC units]")
+        ax[0].set_xlabel("Time [us]")
+        ax[1].plot(data["xpts"], data["avgi"], '.-')
+        ax[1].set_ylabel("I [ADC units]")
+        ax[2].plot(data["xpts"], data["avgq"], '.-')
+        ax[2].set_ylabel("Q [ADC units]")
+        ax[3].plot(data["xpts"], data["phases"], '.-')
+        ax[3].set_ylabel("Phase [radians]")
+        ax[3].set_xlabel("Time [us]")
+        fig.tight_layout()
+        
+        # plot the IQ trajectory in the complex plane
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        ax.plot(data["avgi"], data["avgq"], '.-')
+        
+    def save_data(self, data=None):
+        print(f"Saving {self.fname}")
+        super().save_data(data=data)
+        return self.fname   
+    
+            
+        
+        
+    
+    

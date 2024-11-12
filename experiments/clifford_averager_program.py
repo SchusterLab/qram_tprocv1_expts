@@ -1647,9 +1647,17 @@ class CliffordAveragerProgram(AveragerProgram):
             self.us2cycles(length, gen_ch=gen_ch)
             for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)
         ]
+        
+        
+        if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
+            _ro_lengths_adc = self.cfg.expt.len_readout_adc
+        else:
+            _ro_lengths_adc = self.cfg.device.readout.readout_length
+            
+            
         self.readout_lengths_adc = [
             self.us2cycles(length, ro_ch=ro_ch)
-            for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)
+            for length, ro_ch in zip(_ro_lengths_adc, self.adc_chs)
         ]
 
         # declare qubit dacs, add qubit pi_ge pulses
