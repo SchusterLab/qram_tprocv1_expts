@@ -3,9 +3,14 @@ import math
 import os
 from copy import deepcopy
 
-import experiments.fitting as fitter
 import matplotlib.pyplot as plt
 import numpy as np
+from qick import *
+from qick.helpers import gauss
+from slab import AttrDict, Experiment, NpEncoder
+from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 from experiments.clifford_averager_program import CliffordAveragerProgram
 from experiments.four_qubit.fourQ_state_tomo import (
     AbstractStateTomo4QProgram,
@@ -27,11 +32,7 @@ from experiments.two_qubit.twoQ_state_tomography import (
     ErrorMitigationStateTomo2QProgram,
     infer_gef_popln,
 )
-from qick import *
-from qick.helpers import gauss
-from slab import AttrDict, Experiment, NpEncoder
 from TomoAnalysis import TomoAnalysis
-from tqdm import tqdm_notebook as tqdm
 
 default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 linestyle_cycle = ["solid", "dashed", "dotted", "dashdot"]
@@ -331,35 +332,12 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         if self.timestep_us < np.inf:
             assert False, "no time stepping on the ef pulse right now"
         return 0
-        # if ZZ_qubit is None:
-        #     ZZ_qubit = 2
-        # phase_deg = self.overall_phase[2]
-        # phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[2])
-        # count_us = self.handle_next_pulse(
-        #     count_us=count_us,
-        #     ch=self.qubit_chs[2],
-        #     freq_reg=self.freq2reg(self.f_efs[2, ZZ_qubit], gen_ch=self.qubit_chs[2]),
-        #     type=self.pi_ef_types[2],
-        #     phase=phase,
-        #     gain=self.pi_ef_gains[2, ZZ_qubit],
-        #     sigma_us=self.pi_ef_sigmas[2, ZZ_qubit],
-        #     waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=2 else ""}_q2',
-        # )
-        # if sync_after:
-        #     self.sync_all()
-        # return count_us
 
     def q3_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
         self.Xef_pulse(q=3, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
         if self.timestep_us < np.inf:
             assert False, "no time stepping on the ef pulse right now"
         return 0
-        # if ZZ_qubit is None: ZZ_qubit = 3
-        # phase_deg = self.overall_phase[3]
-        # phase = self.deg2reg(phase_deg, gen_ch=self.qubit_chs[3])
-        # count_us = self.handle_next_pulse(count_us=count_us, ch=self.qubit_chs[3], freq_reg=self.freq2reg(self.f_efs[3, ZZ_qubit], gen_ch=self.qubit_chs[3]), type=self.pi_ef_types[3], phase=phase, gain=self.pi_ef_gains[3, ZZ_qubit], sigma_us=self.pi_ef_sigmas[3, ZZ_qubit], waveform=f'pi_ef{"_ZZ"+str(ZZ_qubit) if ZZ_qubit!=3 else ""}_q3')
-        # if sync_after: self.sync_all()
-        # return count_us
 
     def state_prep_pulse(self, qubits=None, **kwargs):
         cfg = AttrDict(self.cfg)
@@ -374,25 +352,27 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             pass
 
         elif init_state == "|0>|1>":
-            self.Y_pulse(q=1, play=True)
-            # print("WARNING INITIALIZING 01 WITH 6 PI/2 PULSES")
-            # self.Y_pulse(q=1, play=True)
-            # self.Y_pulse(q=1, play=True)
+            self.X_pulse(q=1, play=True, special="gauss")
 
         elif init_state == "|0>|0+1>":
+            # self.Y_pulse(q=1, play=True, pihalf=True, special="gauss")
+            # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
             self.Y_pulse(q=1, play=True, pihalf=True)
 
         elif init_state == "|0>|2>":
-            self.Y_pulse(q=1, play=True)
-            self.Yef_pulse(q=1, play=True)
+            self.X_pulse(q=1, play=True)
+            self.Xef_pulse(q=1, play=True)
 
         elif init_state == "|1>|0>":
-            self.Y_pulse(q=0, play=True, pihalf=False)
+            self.X_pulse(q=0, play=True)
 
         elif init_state == "|1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
-                self.Y_pulse(q=0, play=True)
-                self.Y_pulse(q=1, pihalf=True, ZZ_qubit=0, play=True)
+                assert self.use_robust_pulses
+                # self.Y_pulse(q=1, pihalf=True, play=True, special="gauss")
+                # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
+                self.Y_pulse(q=1, play=True, pihalf=True)
+                self.X_pulse(q=0, play=True)
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
@@ -401,12 +381,16 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 self.sync_all()
 
         elif init_state == "|1>|1>":
-            self.Y_pulse(q=0, play=True)
-            self.Y_pulse(q=1, ZZ_qubit=0, play=True)
+            # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
+            self.X_pulse(q=1, play=True)
+            # self.X_pulse(q=1, play=True, special="gauss")
+            self.X_pulse(q=0, ZZ_qubit=1, play=True)
 
         elif init_state == "|0+1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
-                assert False, "not implemented!"
+                assert self.use_robust_pulses
+                self.Y_pulse(q=1, pihalf=True, play=True, special="gauss")
+                self.Y_pulse(q=0, pihalf=True, play=True)
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
@@ -414,33 +398,15 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                     self.handle_IQ_pulse(name=f"pulse_pp_Q{q}", ch=self.qubit_chs[q], sync_after=False, play=True)
                 self.sync_all()
 
-        #     # SLOW 2X PULSE VERSION
-        #     phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1]) # +Y/2 -> 0+1
-
-        #     freq = self.f_Q1_ZZ_regs[0]
-        #     waveform = 'qubit1_ZZ0_half_slow'
-        #     sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_Q1_ZZ_slow.sigma[0]/2, gen_ch=self.qubit_chs[1])
-        #     gain = self.cfg.device.qubit.pulses.pi_Q1_ZZ_slow.gain[0]
-        #     self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-        #     self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-        #     self.sync_all()
-
-        #     freq = self.f_ge_regs[1]
-        #     waveform = 'qubit1_pi_ge_half_slow'
-        #     sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_ge_slow.sigma[1]/2, gen_ch=self.qubit_chs[1])
-        #     gain = self.cfg.device.qubit.pulses.pi_ge_slow.gain[1]
-        #     self.add_gauss(ch=self.qubit_chs[1], name=waveform, sigma=sigma_cycles, length=4*sigma_cycles)
-        #     self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=freq, phase=phase, gain=gain, waveform=waveform)
-        #     self.sync_all()
-
         elif init_state == "|0+1>|0>":
             self.Y_pulse(q=0, play=True, pihalf=True)  # -> 0+1
             self.sync_all()
 
         elif init_state == "|0+1>|1>":
             if not self.cfg.expt.use_IQ_pulse:
-                self.Y_pulse(q=1, play=True)  # -> 1
-                self.Y_pulse(q=0, ZZ_qubit=1, pihalf=True, play=True)
+                assert self.use_robust_pulses
+                self.Y_pulse(q=1, play=True, special="gauss")  # -> 1
+                self.Y_pulse(q=0, pihalf=True, play=True)
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
@@ -450,6 +416,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         elif init_state == "|0+i1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
+                assert self.use_robust_pulses
                 assert False, "not implemented!"
             else:
                 assert False, "no i+ state prep implemented!"
@@ -481,18 +448,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.Xef_pulse(q=3, ZZ_qubit=0, play=True)
 
         elif init_state == "|test>":
-            # print("-x/2")
-            # self.X_pulse(q=1, pihalf=True, neg=True, play=True)
-            # print("z/2")
-            # self.Z_pulse(q=1, pihalf=True, play=True)
-            # print("y/2")
-            # self.Y_pulse(q=1, pihalf=True, play=True)
-
-            for i in range(1):
-                print("-x/2")
-                self.X_pulse(q=1, pihalf=True, neg=True, play=True)
-                print("x/2")
-                self.X_pulse(q=1, pihalf=True, neg=False, play=True)
+            self.X_pulse(q=0, pihalf=True, play=True, sync_after=False)
+            self.X_pulse(q=1, pihalf=True, play=True, sync_after=False)
+            self.X_pulse(q=2, pihalf=True, play=True, sync_after=False)
+            self.X_pulse(q=3, pihalf=True, play=True)
 
         elif (
             "Q" in init_state
@@ -1507,6 +1466,10 @@ class QramProtocol1QTomoExperiment(Experiment):
                 np.average(Ie[self.qubit]),
                 np.average(Qe[self.qubit]),
             ]
+            print(f"Qubit ({self.qubit}) ge")
+            print(
+                f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[self.qubit]} \t threshold ge: {thresholds_q[self.qubit]}"
+            )
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for iprep, prep_state in enumerate(self.calib_order):
@@ -1789,7 +1752,9 @@ class QramProtocol3QTomoExperiment(Experiment):
             if (
                 self.readout_cool
                 or self.cfg.expt.expts > 1
-                or (self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits)
+                or (
+                    "post_select" in self.cfg.expt and self.cfg.expt.post_select and 1 not in self.cfg.expt.tomo_qubits
+                )
             ):
                 sscfg = AttrDict(deepcopy(self.cfg))
                 sscfg.expt.reps = self.cfg.expt.singleshot_reps

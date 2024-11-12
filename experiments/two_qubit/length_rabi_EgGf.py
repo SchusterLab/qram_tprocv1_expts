@@ -2,9 +2,14 @@ import json
 import time
 from copy import deepcopy
 
-import experiments.fitting as fitter
 import matplotlib.pyplot as plt
 import numpy as np
+from qick import *
+from qick.helpers import gauss
+from slab import AttrDict, Experiment, NpEncoder
+from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 from experiments.clifford_averager_program import (
     QutritAveragerProgram,
     post_select_shots,
@@ -17,11 +22,7 @@ from experiments.two_qubit.twoQ_state_tomography import (
     ErrorMitigationStateTomo2QProgram,
     infer_gef_popln_2readout,
 )
-from qick import *
-from qick.helpers import gauss
-from slab import AttrDict, Experiment, NpEncoder
 from TomoAnalysis import TomoAnalysis
-from tqdm import tqdm_notebook as tqdm
 
 """
 Measures Rabi oscillations by sweeping over the duration of the qubit drive pulse. This is a preliminary measurement to prove that we see Rabi oscillations. This measurement is followed up by the Amplitude Rabi experiment.
@@ -137,7 +138,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 self.add_gauss(ch=self.swap_chs_simul[qSort_simul], name="pi_EgGf_swap_simul", sigma=3, length=3 * 4)
 
         if (
-            "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None
+            "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None
         ):  # add pihalf initialization pulse for error amplification
             if self.cfg.expt.pulse_type.lower() == "gauss" and self.cfg.expt.sigma_test > 0:
                 self.pi_half_sigma_test = self.us2cycles(self.sigma_test, gen_ch=self.swap_chs[qSort]) // 2
@@ -321,9 +322,11 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
         self.pi_minuspi = "pi_minuspi" in self.cfg.expt and self.cfg.expt.pi_minuspi
 
+        n_pulse_per_cycle = 1
         if self.sigma_test > 0:
-            if "n_pulses" in self.cfg.expt and self.cfg.expt.n_pulses is not None:
-                n_pulses = self.cfg.expt.n_pulses
+            if "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None:
+                n_cycles = self.cfg.expt.n_cycles
+                n_pulse_per_cycle = 2 # (pi, +/- pi)^N
 
                 if not self.pi_minuspi:
                     # play the pihalf initialization for the error amplification
@@ -363,9 +366,10 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                         )  # , phrst=1)
                     self.sync_all()
             else:
-                n_pulses = 0.5
+                n_cycles = 1
+                n_pulse_per_cycle = 1 # (pi/2 or pi)^1
             if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
-                n_pulses *= 2
+                n_pulse_per_cycle = 2 # (pi/2, +/- pi/2)^N
 
             # set pulse regs to save memory for iteration
             pulse_type = cfg.expt.pulse_type.lower()
@@ -409,79 +413,82 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     length=self.sigma_test,
                 )  # , phrst=1)
 
+            # ============
             # loop over error amplification (if no amplification we just loop 1x)
-            # print("n_pulses", n_pulses)
-            for i in range(int(2 * n_pulses)):
+            # ============
+            # print("n_cycles", n_cycles)
+            for i in range(int(n_cycles)):
+                for j in range(n_pulse_per_cycle):
 
-                # do the simultaneous 2q swap
-                if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
-                    assert (
-                        self.swap_chs_simul[self.qSort_simul] != self.swap_chs[self.qSort]
-                    ), "simultaneous swap should be on a different generator channel!"
-                    pulse_type = self.type_EgGf_simul.lower()
-                    if pulse_type == "gauss":
-                        self.setup_and_pulse(
-                            ch=self.swap_chs_simul[self.qSort_simul],
-                            style="arb",
-                            freq=self.f_EgGf_reg_simul,
-                            phase=0,
-                            gain=self.gain_EgGf_simul,
-                            waveform="pi_EgGf_swap_simul",
-                        )
-                    elif pulse_type == "flat_top":
-                        sigma_ramp_cycles = 3
-                        flat_length_cycles = self.sigma_EgGf_cycles_simul - sigma_ramp_cycles * 4
-                        if flat_length_cycles >= 3:
-                            self.pulse(ch=self.swap_chs_simul[self.qSort_simul])
-                            self.sync_all()
+                    # do the simultaneous 2q swap
+                    if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
+                        assert (
+                            self.swap_chs_simul[self.qSort_simul] != self.swap_chs[self.qSort]
+                        ), "simultaneous swap should be on a different generator channel!"
+                        pulse_type = self.type_EgGf_simul.lower()
+                        if pulse_type == "gauss":
                             self.setup_and_pulse(
-                                style="flat_top",
+                                ch=self.swap_chs_simul[self.qSort_simul],
+                                style="arb",
                                 freq=self.f_EgGf_reg_simul,
                                 phase=0,
                                 gain=self.gain_EgGf_simul,
-                                length=flat_length_cycles,
                                 waveform="pi_EgGf_swap_simul",
                             )
-                    else:  # const
-                        self.setup_and_pulse(
-                            ch=self.swap_chs_simul[self.qSort_simul],
-                            style="const",
-                            freq=self.f_EgGf_reg_simul,
-                            phase=0,
-                            gain=self.gain_EgGf_simul,
-                            length=self.sigma_EgGf_cycles_simul,
-                        )
-                    # DO NOT SYNC FOR SIMULTANEOUS PULSE
+                        elif pulse_type == "flat_top":
+                            sigma_ramp_cycles = 3
+                            flat_length_cycles = self.sigma_EgGf_cycles_simul - sigma_ramp_cycles * 4
+                            if flat_length_cycles >= 3:
+                                self.pulse(ch=self.swap_chs_simul[self.qSort_simul])
+                                self.sync_all()
+                                self.setup_and_pulse(
+                                    style="flat_top",
+                                    freq=self.f_EgGf_reg_simul,
+                                    phase=0,
+                                    gain=self.gain_EgGf_simul,
+                                    length=flat_length_cycles,
+                                    waveform="pi_EgGf_swap_simul",
+                                )
+                        else:  # const
+                            self.setup_and_pulse(
+                                ch=self.swap_chs_simul[self.qSort_simul],
+                                style="const",
+                                freq=self.f_EgGf_reg_simul,
+                                phase=0,
+                                gain=self.gain_EgGf_simul,
+                                length=self.sigma_EgGf_cycles_simul,
+                            )
+                        # DO NOT SYNC FOR SIMULTANEOUS PULSE
 
-                phase = 0
-                if i % 2 == 1:
-                    if self.pi_minuspi:
-                        phase = -180
+                    phase = 0
+                    if j % 2 == 1:
+                        if self.pi_minuspi:
+                            phase = -180
 
-                # apply Eg -> Gf pulse on qDrive: expect to end in Gf
-                pulse_type = cfg.expt.pulse_type.lower()
-                play_pulse = True
-                # print('pulse type', pulse_type, flat_length_cycles)
-                sigma_ramp_cycles = 3
-                if "sigma_ramp_cycles" in self.cfg.expt:
-                    sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
-                if pulse_type == "flat_top" and flat_length_cycles <= 3:
-                    play_pulse = False
-                num_test_pulses = 1
-                # if self.use_pi2_for_pi:
-                #     num_test_pulses = 2
+                    # apply Eg -> Gf pulse on qDrive: expect to end in Gf
+                    pulse_type = cfg.expt.pulse_type.lower()
+                    play_pulse = True
+                    # print('pulse type', pulse_type, flat_length_cycles)
+                    sigma_ramp_cycles = 3
+                    if "sigma_ramp_cycles" in self.cfg.expt:
+                        sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
+                    flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
+                    if pulse_type == "flat_top" and flat_length_cycles <= 3:
+                        play_pulse = False
+                    num_test_pulses = 1
+                    if self.use_pi2_for_pi:
+                        num_test_pulses = 2
 
-                # print('play pulses', play_pulse, num_test_pulses)
+                    # print('play pulses', play_pulse, num_test_pulses)
 
-                self.safe_regwi(
-                    self.swap_rps[self.qSort], self.swap_rphase, self.deg2reg(phase, gen_ch=self.swap_chs[qSort])
-                )
-                for j in range(num_test_pulses):
-                    if play_pulse:
-                        self.pulse(ch=self.swap_chs[qSort])
-                        # print("playing pulse with phase", phase)
-                        self.sync_all()
+                    self.safe_regwi(
+                        self.swap_rps[self.qSort], self.swap_rphase, self.deg2reg(phase, gen_ch=self.swap_chs[qSort])
+                    )
+                    for k in range(num_test_pulses):
+                        if play_pulse:
+                            self.pulse(ch=self.swap_chs[qSort])
+                            # print("playing pulse with phase", phase)
+                            self.sync_all()
 
         setup_measure = None
         if "setup_measure" in self.cfg.expt:
@@ -2269,8 +2276,8 @@ class NPulseEgGfExperiment(Experiment):
         if "loops" not in self.cfg.expt:
             self.cfg.expt.loops = 1
         for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
-            for n_cycle in tqdm(cycles, disable=not progress or self.cfg.expt.loops > 1):
-                self.cfg.expt.n_pulses = n_cycle
+            for n_cycles in tqdm(cycles, disable=not progress or self.cfg.expt.loops > 1):
+                self.cfg.expt.n_cycles = n_cycles
                 assert not self.cfg.expt.measure_f, "measure f not implemented currently"
                 if self.cfg.expt.post_process is not None and len(self.cfg.expt.measure_qubits) != 2:
                     assert False, "more qubits not implemented for measure f"
@@ -2315,7 +2322,8 @@ class NPulseEgGfExperiment(Experiment):
             xdata = data["xpts"]
             fitparams = None
             # if self.cfg.expt.test_pi_half: fit_fitfunc = fitter.fit_probg_Xhalf
-            fit_fitfunc = fitter.fit_probg_X
+            # fit_fitfunc = fitter.fit_probg_X
+            fit_fitfunc = fitter.fit_probg_Xhalf_decay
 
             q_names = ["A", "B", "C"]
 
@@ -2323,12 +2331,14 @@ class NPulseEgGfExperiment(Experiment):
                 q_name = q_names[i_q]
                 try:
                     p_avgi, pCov_avgi = fit_fitfunc(xdata, data["avgi"][i_q], fitparams=fitparams)
+                    print(p_avgi)
                     data[f"fit{q_name}_avgi"] = p_avgi
                     data[f"fit{q_name}_err_avgi"] = pCov_avgi
                 except Exception as e:
                     print("Exception:", e)
                 try:
                     p_avgq, pCov_avgq = fit_fitfunc(xdata, data["avgq"][i_q], fitparams=fitparams)
+                    print(p_avgq)
                     data[f"fit{q_name}_avgq"] = p_avgq
                     data[f"fit{q_name}_err_avgq"] = pCov_avgq
                 except Exception as e:
@@ -2356,20 +2366,23 @@ class NPulseEgGfExperiment(Experiment):
 
         xdata = data["xpts"]
         # if self.cfg.expt.test_pi_half: fit_func = fitter.probg_Xhalf
-        fit_func = fitter.probg_X
+        # fit_func = fitter.probg_X
+        fit_func = fitter.probg_Xhalf_decay
 
         title = f"Angle Error Q{self.cfg.expt.measure_qubits[0]} Q{self.cfg.expt.measure_qubits[1]}"
 
         plt.figure(figsize=(10, 8))
-        plt.subplot(211, title=title, ylabel=f"QA ({self.cfg.expt.measure_qubits[0]}) (scaled)")
+        ax_qA = plt.subplot(211, title=title)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        ax_qA.set_ylabel(f"QA ({self.cfg.expt.measure_qubits[0]}) (scaled)", fontsize=18)
         plot_data = data["avgi"][0]
-        plt.plot(xdata, plot_data, ".-")
+        plt.plot(xdata, plot_data, "o-", label="Data")
         if fit:
             p = data["fitA_avgi"]
             pCov = data["fitA_err_avgi"]
             captionStr = f"$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}"
-            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
-            plt.legend()
+            plt.plot(xdata, fit_func(xdata, *p), "--", label=captionStr)
+            plt.legend(fontsize=18)
             # if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
             if self.cfg.expt.measure_qubits[0] == qDrive:
                 sign = 1
@@ -2381,18 +2394,20 @@ class NPulseEgGfExperiment(Experiment):
         print()
 
         # label = '($X_{\pi/2}, X_{'+ ('\pi' if not self.cfg.expt.test_pi_half else '\pi/2') + '}^{2n}$)'
-        label = "($X_{\pi/2}, X_{\pi}^{2n}$)"
-        plt.subplot(
-            212, xlabel=f"Number repeated gates {label} [n]", ylabel=f"QA ({self.cfg.expt.measure_qubits[1]}) (scaled)"
-        )
+        # label = "($X_{\pi/2}, X_{\pi}^{2n}$)"
+        label = "($X_{\pi/2}, X_{\pi}^{n}$)"
+        ax_qB = plt.subplot(212)
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qB.set_ylabel(f"QA ({self.cfg.expt.measure_qubits[1]}) (scaled)", fontsize=18)
+        ax_qB.set_xlabel(f"Number repeated gates {label} [n]", fontsize=18)
         plot_data = data["avgi"][1]
-        plt.plot(xdata, plot_data, ".-")
+        plt.plot(xdata, plot_data, "o-", label="Data")
         if fit:
             p = data["fitB_avgi"]
             pCov = data["fitB_err_avgi"]
             captionStr = f"$\epsilon$ fit [deg]: {p[1]:.3} $\pm$ {np.sqrt(pCov[1][1]):.3}"
-            plt.plot(xdata, fit_func(xdata, *p), label=captionStr)
-            plt.legend()
+            plt.plot(xdata, fit_func(xdata, *p), "--", label=captionStr)
+            plt.legend(fontsize=18)
             # if self.cfg.expt.test_pi_half: amp_ratio = (90 + p[1])/90
             if self.cfg.expt.measure_qubits[1] == qDrive:
                 sign = 1
@@ -2597,7 +2612,7 @@ class PiMinusPiEgGfExperiment(Experiment):
             self.cfg.expt.loops = 1
         cfg = deepcopy(self.cfg)
         for loop in tqdm(range(self.cfg.expt.loops), disable=(self.cfg.expt.loops == 1)):
-            for i_cycle, n_cycle in enumerate(tqdm(cycle_sweep, disable=not progress)):
+            for i_cycle, n_cycles in enumerate(tqdm(cycle_sweep, disable=not progress)):
                 for ifreq, freq in enumerate(freq_sweep):
                     assert not cfg.expt.measure_f, "measure f not implemented currently"
                     if cfg.expt.post_process is not None and len(cfg.expt.measure_qubits) != 2:
@@ -2608,7 +2623,7 @@ class PiMinusPiEgGfExperiment(Experiment):
                         cfg.device.qubit.f_EgGf[qSort] = freq
                     else:
                         cfg.device.qubit.f_EgGf_Q[qSort] = freq
-                    cfg.expt.n_pulses = n_cycle
+                    cfg.expt.n_cycles = n_cycles
 
                     lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=cfg)
                     self.prog = lengthrabi
@@ -2656,27 +2671,35 @@ class PiMinusPiEgGfExperiment(Experiment):
         # Amps shape: (measure_qubits, cycles, freqs)
         prods = np.zeros((len(self.cfg.expt.measure_qubits), len(data["freq_sweep"])))
         for iq, q in enumerate(self.cfg.expt.measure_qubits):
+            scaled_e = np.max(data["amps"][iq])
+            scaled_g = np.min(data["amps"][iq])
+            scale = np.max(data["amps"][iq]) - np.min(data["amps"][iq])
             if q == qDrive:
                 prods[iq] = np.sqrt(
-                    np.prod(np.abs(1 - data["amps"][iq]), axis=0)
+                    np.prod((scaled_e - data["amps"][iq]) / scale, axis=0)
                 )  # product over g population in all cycles
             else:
                 prods[iq] = np.sqrt(
-                    np.prod(np.abs(data["amps"][iq]), axis=0)
+                    np.prod((data["amps"][iq] - scaled_g) / scale, axis=0)
                 )  # expect to end in e, so we compare relative to e
 
-        title = f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length})"
+        label = "($X_{\pi}, X_{-\pi})^N$"
+        title = (
+            f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
+        )
         plt.figure(figsize=(8, 8))
-        plt.suptitle(title)
+        plt.suptitle(title, fontsize=20)
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        plt.plot(data["freq_sweep"], prods[0], ".-")
-        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
+        ax_qA.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plt.plot(data["freq_sweep"], prods[0], "o", label="Data")
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
-        plt.plot(data["freq_sweep"], prods[1], ".-")
-        plt.xlabel("Frequency [MHz]")
-        plt.ylabel("$\sqrt{\Pi_n (1-P(e))}$")
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qB.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        plt.plot(data["freq_sweep"], prods[1], "o", label="Data")
+        ax_qB.set_xlabel("Frequency [MHz]", fontsize=18)
 
         axs = [ax_qA, ax_qB]
         if fit:
@@ -2693,8 +2716,9 @@ class PiMinusPiEgGfExperiment(Experiment):
                 print("Fit best freq (qA)", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
 
                 plt.sca(axs[iq])
-                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
+                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt), label="Fit")
                 plt.axvline(fit_freq, color="r", linestyle="--")
+                plt.legend(fontsize=18)
             data["best_freq"] = np.average([data[f"fit_q{q}"][1] for q in self.cfg.expt.measure_qubits])
 
         plt.tight_layout()
@@ -2718,8 +2742,10 @@ class PiMinusPiEgGfExperiment(Experiment):
         else:
             old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
 
-        title = f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length})"
         label = "($X_{\pi}, X_{-\pi})^N$"
+        title = (
+            f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
+        )
 
         inner_sweep = data["freq_sweep"]
         outer_sweep = data["cycle_sweep"]
@@ -2728,25 +2754,35 @@ class PiMinusPiEgGfExperiment(Experiment):
         x_sweep = inner_sweep
 
         plt.figure(figsize=(8, 9))
-        plt.suptitle(title)
+        plt.suptitle(title, fontsize=20)
         data_name = "amps"
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        ax_qA.set_ylabel(f"N {label}")  # , fontsize=18)
-        ax_qA.tick_params(axis="both", which="major")  # , labelsize=16)
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][0], cmap="viridis", shading="auto")
+        ax_qA.set_ylabel(f"N", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plot_data = data[data_name][0]
+        scaled_e = np.max(plot_data)
+        scaled_g = np.min(plot_data)
+        scale_ge = scaled_e - scaled_g
+        plt.pcolormesh(x_sweep - old_freq, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
-        plt.colorbar()
+        cbar = plt.colorbar()
+        cbar.ax.tick_params(labelsize=18)
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
-        ax_qA.set_ylabel(f"N {label}")  # , fontsize=18)
-        ax_qB.set_xlabel("$f-f_0$ [MHz]")  # , fontsize=18)
-        ax_qB.tick_params(axis="both", which="major")  # , labelsize=16)
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name][1], cmap="viridis", shading="auto")
+        ax_qB.set_ylabel(f"N", fontsize=18)
+        ax_qB.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        plot_data = data[data_name][1]
+        scaled_e = np.max(plot_data)
+        scaled_g = np.min(plot_data)
+        scale_ge = scaled_e - scaled_g
+        plt.pcolormesh(x_sweep - old_freq, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
         if fit:
             plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
-        plt.colorbar()
+        cbar = plt.colorbar()
+        cbar.ax.tick_params(labelsize=18)
 
         plt.tight_layout()
         plt.show()

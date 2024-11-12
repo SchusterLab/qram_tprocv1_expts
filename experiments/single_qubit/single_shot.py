@@ -371,9 +371,9 @@ def general_hist(
         axs[1, 1].axvline(thresholds[0], color="0.2", linestyle="--")
 
         prop = {"size": 8}
-        axs[0, 0].legend(loc="upper right", prop=prop)
-        axs[0, 1].legend(loc="upper right", prop=prop)
-        axs[1, 0].legend(loc="upper left", prop=prop)
+        axs[0, 0].legend(prop=prop)
+        axs[0, 1].legend(prop=prop)
+        axs[1, 0].legend(prop=prop)
         axs[1, 1].legend(prop=prop)
 
         if export:
@@ -656,34 +656,44 @@ class HistogramExperiment(Experiment):
         self.data = data
         return data
 
-    def analyze(self, data=None, verbose=True, **kwargs):
+    def analyze(self, data=None, verbose=True, amplitude_mode=False, **kwargs):
         if data is None:
             data = self.data
 
-        fids, thresholds, angle = hist(data=data, plot=False, verbose=verbose)
+        fids, thresholds, angle = hist(data=data, plot=False, amplitude_mode=amplitude_mode, verbose=verbose)
         data["fids"] = fids
         data["angle"] = angle
         data["thresholds"] = thresholds
 
         return data
 
-    def display(self, data=None, verbose=True, **kwargs):
+    def display(self, data=None, verbose=True, fit=False, amplitude_mode=False, **kwargs):
         if data is None:
             data = self.data
 
         qTest = self.cfg.expt.qTest
-        fids, thresholds, angle = hist(data=data, plot=True, verbose=verbose, title=f"Qubit {qTest}")
+        return_data = hist(
+            data=data, plot=True, fit=fit, amplitude_mode=amplitude_mode, verbose=verbose, title=f"Qubit {qTest}"
+        )
+        if fit:
+            fids, thresholds, angle, popts, pcovs = return_data
+            g_check = 0
+            a1, b1, c1, a2, b2, c2 = popts[g_check]
+            therm_pop = a2 / (a1 + a2)
+            print("thermal population (%):", 100 * therm_pop)
+        else:
+            fids, thresholds, angle = return_data
 
         print(f"ge fidelity (%): {100*fids[0]}")
-        if self.cfg.expt.check_f:
-            print(f"gf fidelity (%): {100*fids[1]}")
-            print(f"ef fidelity (%): {100*fids[2]}")
+        # if self.cfg.expt.check_f:
+        #     print(f"gf fidelity (%): {100*fids[1]}")
+        #     print(f"ef fidelity (%): {100*fids[2]}")
         print(f"rotation angle (deg): {angle}")
         # print(f'set angle to (deg): {-angle}')
         print(f"threshold ge: {thresholds[0]}")
-        if self.cfg.expt.check_f:
-            print(f"threshold gf: {thresholds[1]}")
-            print(f"threshold ef: {thresholds[2]}")
+        # if self.cfg.expt.check_f:
+        #     print(f"threshold gf: {thresholds[1]}")
+        #     print(f"threshold ef: {thresholds[2]}")
 
     def save_data(self, data=None):
         print(f"Saving {self.fname}")
@@ -1169,7 +1179,6 @@ class MultiReadoutExperiment(Experiment):
             fit=fit,
             fitparams=fitparams,
             verbose=verbose,
-            plot=plot,
             check_qnd=check_qnd,
             amplitude_mode=amplitude_mode,
         )
@@ -1587,15 +1596,14 @@ class MultiReadoutOptExperiment(Experiment):
                         print(f"Finished {i_f}/{len(fpts)} {i_g}/{len(gainpts)} {i_l}/{len(lenpts)}")
                         print(f"freq: {f} gain: {g} length: {l}")
                         print(f"Fidelity: {fid[i_f, i_g, i_l]}")
-                        
-                        
+
         mixer_freq = self.cfg.hw.soc.dacs.readout.mixer_freq
         # check if mixer_freq is a list or not, then add the corresponding idx to fpts
         if not isinstance(mixer_freq, list):
             fpts += mixer_freq
-        else: 
-            fpts += mixer_freq[qTest]        
-                    
+        else:
+            fpts += mixer_freq[qTest]
+
         data = dict()
         data["fpts"] = fpts
         data["gainpts"] = gainpts
@@ -1631,7 +1639,6 @@ class MultiReadoutOptExperiment(Experiment):
         gainpts = data["gainpts"]
         lenpts = data["lenpts"]
         fid = data["fid"]
-        
 
         for i, length in enumerate(lenpts):
             fig, ax = plt.subplots(1, 1, figsize=(7, 5))

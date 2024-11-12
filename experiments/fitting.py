@@ -450,6 +450,63 @@ def fitquadratic(xdata, ydata, fitparams=None):
 # ====================================================== #
 
 
+def rabifunc(x, *p):
+    length, omega, f0, scale, z0 = p
+    sqrt_part = 1 + (x - f0) ** 2 / omega**2
+    factor = omega**2 / (omega**2 + (x - f0) ** 2)
+    return z0 + scale * factor * np.sin(2 * np.pi * omega * np.sqrt(sqrt_part) * length / 2) ** 2
+
+
+def fitrabi_gainslice(xdata, ydata, length, fitparams=None):
+    """
+    Fit a single slice through frequency at a single gain; length is given. xdata is frequency, ydata is measured signal
+    fitparams will be length, omega, f0, scale, z0
+    """
+    if fitparams is None:
+        fitparams = [None] * 5
+    else:
+        fitparams = np.copy(fitparams)
+
+    partitioned = np.partition(ydata, -2)
+    largest = partitioned[-1]
+    freq_largest = xdata[np.argwhere(ydata == largest)[0][0]]
+    second_largest = partitioned[-2]
+    freq_second_largest = xdata[np.argwhere(ydata == second_largest)[0][0]]
+    guess_freq = np.mean([freq_largest, freq_second_largest])
+    if fitparams[0] is None:
+        fitparams[0] = length
+    if fitparams[1] is None:
+        fitparams[1] = 5
+    if fitparams[2] is None:
+        fitparams[2] = guess_freq
+    if fitparams[3] is None:
+        fitparams[3] = np.max(ydata) - np.min(ydata)
+    if fitparams[4] is None:
+        fitparams[4] = np.mean(ydata)
+    bounds = (
+        [0.5 * fitparams[0], 0.1, min(xdata), 0.01 * fitparams[3], min(ydata)],
+        [2 * fitparams[0], 100, max(xdata), 100 * fitparams[3], max(ydata)],
+    )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(
+                f"Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}"
+            )
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(rabifunc, xdata, ydata, p0=fitparams, bounds=bounds)
+        # return pOpt, pCov
+    except RuntimeError:
+        print("Warning: fit failed!")
+        # return 0, 0
+    return pOpt, pCov
+
+
+# ====================================================== #
+
+
 def decaysin(x, *p):
     yscale, freq, phase_deg, decay, y0 = p
     return yscale * np.sin(2 * np.pi * freq * x + phase_deg * np.pi / 180) * np.exp(-x / decay) + y0
@@ -693,8 +750,11 @@ def fitthreefreq_decaysin(xdata, ydata, fitparams=None):
 
 
 def hangerfunc(x, *p):
+    """
+    See https://arxiv.org/pdf/1909.01487
+    """
     f0, Qi, Qe, phi = p
-    Q0 = 1 / (1 / Qi + np.real(1 / Qe))
+    Q0 = 1 / (1 / Qi + np.real(np.exp(1j * phi) / Qe))
     return 1 - Q0 / Qe * np.exp(1j * phi) / (1 + 2j * Q0 * (x - f0) / f0)  # - (1-Q0/Qe)
 
 
@@ -723,20 +783,20 @@ def fithanger(xdata, ydata, fitparams=None):
     if fitparams[4] is None:
         fitparams[4] = (ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])
     if fitparams[5] is None:
-        fitparams[5] = 0
+        fitparams[5] = np.mean(ydata)
 
-    print(fitparams)
+    print("param guess", fitparams)
 
     # bounds = (
     #     [np.min(xdata), -1e9, -1e9, -2*np.pi, (max(np.abs(ydata))-min(np.abs(ydata)))/10, -np.max(np.abs(ydata))],
     #     [np.max(xdata), 1e9, 1e9, 2*np.pi, (max(np.abs(ydata))-min(np.abs(ydata)))*10, np.max(np.abs(ydata))]
     #     )
     bounds = (
-        [np.min(xdata), 0, 0, -2 * np.pi, -1.5 * abs((ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])), 0],
+        [np.min(xdata), 0, 0, -2 * np.pi, -1.5 * abs((ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])), -np.inf],
         [
             np.max(xdata),
-            1e6,
-            1e6,
+            1e9,
+            1e8,
             2 * np.pi,
             1.5 * abs((ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])),
             np.max(ydata),
@@ -748,12 +808,13 @@ def fithanger(xdata, ydata, fitparams=None):
             print(
                 f"Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}"
             )
+    print("param bounds", bounds)
 
     pOpt = fitparams
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
         pOpt, pCov = sp.optimize.curve_fit(hangerS21func_sloped, xdata, ydata, p0=fitparams, bounds=bounds)
-        print(pOpt)
+        print("popt", pOpt)
         # return pOpt, pCov
     except RuntimeError:
         print("Warning: fit failed!")
@@ -933,6 +994,12 @@ def probg_X(n, *p):
     return a + (0.5 * np.cos(np.pi / 2 + 2 * n * delta))
 
 
+def probg_Xhalf_decay(n, *p):
+    a, delta, decay = p
+    delta = delta * np.pi / 180
+    return a + (0.5 * (-1) ** n * np.cos(np.pi / 2 + 2 * n * delta)) * np.exp(-n / decay)
+
+
 def fit_probg_Xhalf(xdata, ydata, fitparams=None):
     if fitparams is None:
         fitparams = [None] * 2
@@ -986,6 +1053,38 @@ def fit_probg_X(xdata, ydata, fitparams=None):
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
     try:
         pOpt, pCov = sp.optimize.curve_fit(probg_X, xdata, ydata, p0=fitparams, bounds=bounds)
+        # return pOpt, pCov
+    except RuntimeError:
+        print("Warning: fit failed!")
+        # return 0, 0
+    return pOpt, pCov
+
+
+def fit_probg_Xhalf_decay(xdata, ydata, fitparams=None):
+    if fitparams is None:
+        fitparams = [None] * 3
+    else:
+        fitparams = np.copy(fitparams)
+    if fitparams[0] is None:
+        fitparams[0] = np.average(ydata)
+    if fitparams[1] is None:
+        fitparams[1] = 0.0
+    if fitparams[2] is None:
+        fitparams[2] = 10
+    bounds = (
+        [min(ydata), -20.0, 1],
+        [max(ydata), 20.0, 100],
+    )
+    for i, param in enumerate(fitparams):
+        if not (bounds[0][i] < param < bounds[1][i]):
+            fitparams[i] = np.mean((bounds[0][i], bounds[1][i]))
+            print(
+                f"Attempted to init fitparam {i} to {param}, which is out of bounds {bounds[0][i]} to {bounds[1][i]}. Instead init to {fitparams[i]}"
+            )
+    pOpt = fitparams
+    pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
+    try:
+        pOpt, pCov = sp.optimize.curve_fit(probg_Xhalf_decay, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
     except RuntimeError:
         print("Warning: fit failed!")

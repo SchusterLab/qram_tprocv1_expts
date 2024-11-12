@@ -171,8 +171,9 @@ class ResonatorSpectroscopyExperiment(Experiment):
         plt.axvline(minfreq, c="k", ls="--")  # |0>|1>
         plt.axvline(minfreq - 0.1, c="k", ls="--")  # |0>|1>
 
-        f0, Qi, Qe, phi, slope, a0 = data["fit"]
-        plt.axvline(f0, c="r", ls="--")  # |0>|1>
+        if fit:
+            f0, Qi, Qe, phi, slope, a0 = data["fit"]
+            plt.axvline(f0, c="r", ls="--")  # |0>|1>
 
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1], ".-")
@@ -248,7 +249,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
                 # avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                 # avgi = avgi[0][0]
                 # avgq = avgq[0][0]
-                
+
                 amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
                 phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
                 # amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
@@ -313,7 +314,7 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
         # THIS IS CORRECT EXTENT LIMITS FOR 2D PLOTS
         plt.figure(figsize=(10, 8))
-        # plt.title(f"Resonator Power Spectroscopy (Qubit {self.cfg.expt.qubit})")
+        plt.title(f"Resonator Power Spectroscopy (Qubit {self.cfg.expt.qTest})")
         plt.pcolormesh(x_sweep, y_sweep, amps, cmap="viridis", shading="auto")
 
         if fit:
@@ -337,12 +338,11 @@ class ResonatorPowerSweepSpectroscopyExperiment(Experiment):
 
         if select is not None:
             fig, ax = plt.subplots()
-            for s in select:
-                y_closest_i = np.argmin(abs(y_sweep - s))
-                y_closest = y_sweep[y_closest_i]
-                y_plot = data["amps"][y_closest_i, :]/np.max(data["amps"][y_closest_i, :])
-                print("plotting at gain", y_closest, "index", y_closest_i)
-                ax.plot(x_sweep, y_plot, "o-", label=f"Gain {y_closest}")
+            y_closest_i = np.argmin(abs(y_sweep - select))
+            y_closest = y_sweep[y_closest_i]
+            y_plot = data["amps"][y_closest_i, :] / np.max(data["amps"][y_closest_i, :])
+            print("plotting at gain", y_closest, "index", y_closest_i)
+            ax.plot(x_sweep, y_plot, "o-", label=f"Gain {y_closest}")
             ax.legend()
 
     def save_data(self, data=None):
@@ -424,7 +424,6 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
                 avgq = avgq[0][0]
                 amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
                 phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
-        
 
                 data["avgi"][-1].append(avgi)
                 data["avgq"][-1].append(avgq)

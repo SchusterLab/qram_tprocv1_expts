@@ -1,10 +1,13 @@
-import experiments.fitting as fitter
+from copy import deepcopy
+
 import matplotlib.pyplot as plt
 import numpy as np
 from qick import *
 from qick.helpers import gauss
 from slab import AttrDict, Experiment, dsfit
 from tqdm import tqdm_notebook as tqdm
+
+import experiments.fitting as fitter
 
 
 class AmplitudeRabiEgGfProgram(RAveragerProgram):
@@ -802,18 +805,54 @@ class EgGfFreqGainChevronExperiment(Experiment):
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data["avgi"][q_ind].append(avgi[adc_chs[q]][0])
                 data["avgq"][q_ind].append(avgq[adc_chs[q]][0])
-                data["amps"][q_ind].append(np.abs(avgi[adc_chs[q]][0] + 1j * avgi[adc_chs[q]][0]))
-                data["phases"][q_ind].append(np.angle(avgi[adc_chs[q]][0] + 1j * avgi[adc_chs[q]][0]))
+                data["amps"][q_ind].append(np.abs(avgi[adc_chs[q]][0] + 1j * avgq[adc_chs[q]][0]))
+                data["phases"][q_ind].append(np.angle(avgi[adc_chs[q]][0] + 1j * avgq[adc_chs[q]][0]))
 
         for k, a in data.items():
             data[k] = np.array(a)
         self.data = data
         return data
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=True, fitparams=None):
         if data is None:
             data = self.data
-        pass
+
+        data = deepcopy(data)
+        inner_sweep = data["gainpts"]
+        outer_sweep = data["freqpts"]
+
+        y_sweep = outer_sweep  # index 0
+        x_sweep = inner_sweep  # index 1
+
+        length = self.cfg.expt.pi_EgGf_sigma
+
+        # fitparams = [yscale, freq, phase_deg, y0]
+        # fitparams=[None, 2/x_sweep[-1], None, None]
+        for data_name in ["avgi", "avgq", "amps"]:
+            data.update({f"fit{data_name}": [None] * len(self.cfg.expt.measure_qubits)})
+            data.update({f"fit{data_name}_err": [None] * len(self.cfg.expt.measure_qubits)})
+            data.update({f"data_fit{data_name}": [None] * len(self.cfg.expt.measure_qubits)})
+            for q_index in range(len(self.cfg.expt.measure_qubits)):
+                this_data = data[data_name][q_index]
+
+                fit = [None] * len(x_sweep)
+                fit_err = [None] * len(x_sweep)
+                data_fit = [None] * len(x_sweep)
+
+                for i_gain, gain in enumerate(x_sweep):
+                    p, pCov = fitter.fitrabi_gainslice(
+                        y_sweep, this_data[:, i_gain], length=length, fitparams=fitparams
+                    )
+                    fit[i_gain] = p
+                    fit_err[i_gain] = pCov
+                    data_fit[i_gain] = fitter.rabifunc(y_sweep, *p)
+
+                data[f"fit{data_name}"][q_index] = fit
+                data[f"fit{data_name}_err"][q_index] = fit_err
+                data[f"data_fit{data_name}"][q_index] = data_fit
+
+        # Output data: fit{data_name}: (len(measure_qubits), len(x_sweep), len(fitparams))
+        return data
 
     def display(self, data=None, fit=True, plot_freq=None, plot_gain=None, saveplot=False, **kwargs):
         if data is None:
@@ -925,6 +964,47 @@ class EgGfFreqGainChevronExperiment(Experiment):
             plt.savefig(plot_filename, format="png", bbox_inches="tight", transparent=True)
             print("Saved", plot_filename)
 
+        plt.show()
+
+        if not fit:
+            return
+
+        """
+        Plot fit chevron
+        """
+        # Output data: fit{data_name}: (len(measure_qubits), len(x_sweep), len(fitparams))
+        fit_qind = 0 if self.cfg.expt.qubits[0] == self.cfg.expt.qDrive else 1
+        fit_freqs = np.array([f[2] if f is not None else np.nan for f in data["fitamps"][fit_qind]])
+
+        fitparams = [x_sweep[0], fit_freqs[0], fit_freqs[-1] - fit_freqs[0]]
+        p, pCov = fitter.fitquadratic(x_sweep[:-5], fit_freqs[:-5], fitparams=fitparams)
+        fit_freqs_fit = fitter.quadraticfunc(x_sweep, *p)
+        print("gain_sweep =", x_sweep.tolist())
+        print("fit_freqs =", fit_freqs_fit.tolist())
+
+        plt.figure(figsize=(9, 7))
+        plt.suptitle(f"Fit Eg-Gf Chevron Frequency vs. Gain (Length {self.cfg.expt.pi_EgGf_sigma} us)")
+
+        plt.subplot(
+            221,
+            title=f"Qubit A ({self.cfg.expt.qubits[0]})",
+            xlabel="Gain [DAC units]",
+            ylabel="Pulse Frequency [MHz]",
+        )
+        plt.pcolormesh(x_sweep, y_sweep, data["amps"][0], cmap="viridis", shading="auto")
+        if fit:
+            plt.plot(x_sweep, fit_freqs, color="k", linestyle="-.")
+            plt.plot(x_sweep, fit_freqs_fit, color="r", linestyle="--")
+        plt.colorbar(label="[ADC level]")
+
+        plt.subplot(222, title=f"Qubit B ({self.cfg.expt.qubits[1]})", xlabel="Gain [DAC units]")
+        plt.pcolormesh(x_sweep, y_sweep, data["amps"][1], cmap="viridis", shading="auto")
+        if fit:
+            plt.plot(x_sweep, fit_freqs, color="k", linestyle="-.")
+            plt.plot(x_sweep, fit_freqs_fit, color="r", linestyle="--")
+        plt.colorbar(label="[ADC level]")
+
+        plt.tight_layout()
         plt.show()
 
     def save_data(self, data=None):
