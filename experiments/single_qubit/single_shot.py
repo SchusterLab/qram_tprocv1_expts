@@ -389,6 +389,9 @@ def general_hist(
         return_data += [popts, pcovs]
     if check_qnd:
         return_data += [n_diff_qnd]
+        
+    print(len(return_data))
+    print(return_data)
 
     return return_data
 
