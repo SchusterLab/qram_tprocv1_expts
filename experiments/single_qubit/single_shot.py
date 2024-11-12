@@ -371,9 +371,9 @@ def general_hist(
         axs[1, 1].axvline(thresholds[0], color="0.2", linestyle="--")
 
         prop = {"size": 8}
-        axs[0, 0].legend(loc="upper right", prop=prop)
-        axs[0, 1].legend(loc="upper right", prop=prop)
-        axs[1, 0].legend(loc="upper left", prop=prop)
+        axs[0, 0].legend(prop=prop)
+        axs[0, 1].legend(prop=prop)
+        axs[1, 0].legend(prop=prop)
         axs[1, 1].legend(prop=prop)
 
         if export:
@@ -653,23 +653,25 @@ class HistogramExperiment(Experiment):
         self.data = data
         return data
 
-    def analyze(self, data=None, verbose=True, **kwargs):
+    def analyze(self, data=None, verbose=True, amplitude_mode=False, **kwargs):
         if data is None:
             data = self.data
 
-        fids, thresholds, angle = hist(data=data, plot=False, verbose=verbose)
+        fids, thresholds, angle = hist(data=data, plot=False, amplitude_mode=amplitude_mode, verbose=verbose)
         data["fids"] = fids
         data["angle"] = angle
         data["thresholds"] = thresholds
 
         return data
 
-    def display(self, data=None, verbose=True, fit=False, **kwargs):
+    def display(self, data=None, verbose=True, fit=False, amplitude_mode=False, **kwargs):
         if data is None:
             data = self.data
 
         qTest = self.cfg.expt.qTest
-        return_data = hist(data=data, plot=True, fit=fit, verbose=verbose, title=f"Qubit {qTest}")
+        return_data = hist(
+            data=data, plot=True, fit=fit, amplitude_mode=amplitude_mode, verbose=verbose, title=f"Qubit {qTest}"
+        )
         if fit:
             fids, thresholds, angle, popts, pcovs = return_data
             g_check = 0
@@ -677,7 +679,7 @@ class HistogramExperiment(Experiment):
             therm_pop = a2 / (a1 + a2)
             print("thermal population (%):", 100 * therm_pop)
         else:
-            fids, thresholds, angle = fit
+            fids, thresholds, angle = return_data
 
         print(f"ge fidelity (%): {100*fids[0]}")
         # if self.cfg.expt.check_f:

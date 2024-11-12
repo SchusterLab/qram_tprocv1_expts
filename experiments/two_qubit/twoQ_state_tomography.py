@@ -268,8 +268,8 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
             syncdelay=syncdelay,
         )
 
-    def collect_counts(self, angle=None, threshold=None):
-        shots, _ = self.get_shots(angle=angle, threshold=threshold)
+    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False):
+        shots, _ = self.get_shots(angle=angle, threshold=threshold, amplitude_mode=amplitude_mode)
         # collect shots for all adcs, then sorts into e, g based on >/< threshold and angle rotation
 
         qubits = self.cfg.expt.tomo_qubits
@@ -701,8 +701,8 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
             syncdelay=syncdelay,
         )
 
-    def collect_counts(self, angle=None, threshold=None):
-        ishots, _ = self.get_shots(angle=angle, threshold=threshold)
+    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False):
+        ishots, _ = self.get_shots(angle=angle, threshold=threshold, amplitude_mode=amplitude_mode)
         # get the shots for the qubits we care about
         shots = ishots[self.adc_chs[self.qubit]]
 

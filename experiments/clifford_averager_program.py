@@ -89,7 +89,7 @@ def post_select_shots(
         assert all_qshots_raw_q is not None
         assert len(all_qshots_raw_q.shape) == 3
     if angles is not None:
-        shots_final, _ = rotate_and_threshold(
+        ishots_final, qshots_final = rotate_and_threshold(
             ishots_1q=all_ishots_raw_q[final_qubit, -1, :],
             qshots_1q=all_qshots_raw_q[final_qubit, -1, :],
             angle=angles[final_qubit],
@@ -98,10 +98,10 @@ def post_select_shots(
             avg_shots=False,
         )
     else:
-        shots_final = all_ishots_raw_q[final_qubit, -1, :]
-    reps_orig = len(shots_final)
+        ishots_final = all_ishots_raw_q[final_qubit, -1, :]
+    reps_orig = len(ishots_final)
 
-    keep_prev = np.ones_like(shots_final, dtype="bool")
+    keep_prev = np.ones_like(ishots_final, dtype="bool")
     for i_readout in range(n_init_readout):
         for ps_qubit in ps_qubits:
             # For initialization readouts, shots_raw is the rotated i value
@@ -134,7 +134,11 @@ def post_select_shots(
     if thresholds is None:
         assert post_process is None
     shots_final, _ = rotate_and_threshold(
-        ishots_1q=shots_final, threshold=thresholds[final_qubit], avg_shots=False, amplitude_mode=amplitude_mode
+        ishots_1q=ishots_final,
+        qshots_1q=qshots_final,
+        threshold=thresholds[final_qubit],
+        avg_shots=False,
+        amplitude_mode=amplitude_mode,
     )
 
     assert shots_final.shape == keep_prev.shape
@@ -923,10 +927,11 @@ class CliffordAveragerProgram(AveragerProgram):
         else:
             tot_I_vs_us, tot_Q_vs_us, times_us = [None] * 3
 
-        # scale so the same relative amp always gives the same amount of power regardless of what the other amplitudes are specified as
+        # Scale so the same relative amp always gives the same amount of power regardless of what the other amplitudes are specified as
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
         gain = maxv * np.sum(relative_amps) / len(mux_freqs)
+        # print("gain", gain, mask, mux_freqs, mixer_freq)
 
         self.handle_IQ_pulse(
             name=name,
@@ -1287,11 +1292,24 @@ class CliffordAveragerProgram(AveragerProgram):
             full_mux_chs = self.cfg.expt.full_mux_chs
             assert "mask" in self.cfg.expt and self.cfg.expt.mask is not None
             mask = self.cfg.expt.mask
+            assert mask == [
+                0,
+                1,
+                2,
+                3,
+            ], "Most programs assume all ADC chs are triggered so the overall mask should be all qubits!"
 
             lengths = self.cfg.expt.lengths if "lengths" in self.cfg.expt else None
             pulse_I_shapes = self.cfg.expt.pulse_I_shapes if "pulse_I_shapes" in self.cfg.expt else None
             pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes if "pulse_Q_shapes" in self.cfg.expt else None
             times_us = self.cfg.expt.times_us if "times_us" in self.cfg.expt else None
+
+            if lengths is not None:
+                self.readout_lengths_adc = [
+                    self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(lengths, self.adc_chs)
+                ]
+            else:
+                self.readout_lengths_adc = [self.us2cycles(times_us[-1], ro_ch=ro_ch) for ro_ch in self.adc_chs]
 
             mixer_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq)
             # assert np.all(mixer_freqs == mixer_freqs[0])
@@ -1301,64 +1319,18 @@ class CliffordAveragerProgram(AveragerProgram):
                 plot_IQ = False
             mux_freqs = self.cfg.device.readout.frequency
             mux_gains = self.cfg.device.readout.gain
-
-            mask_dict_unique_chs = dict()
-            mixer_dict_unique_chs = dict()
-            mux_freqs_dict_unique_chs = dict()
-            mux_gains_dict_unique_chs = dict()
-            lengths_dict_unique_chs = dict()
-            pulse_I_shapes_dict_unique_chs = dict()
-            pulse_Q_shapes_dict_unique_chs = dict()
-            adc_ch_dict_unique_chs = dict()
-
-            for i_ch, ch in enumerate(full_mux_chs):
-                if ch not in mux_freqs_dict_unique_chs.keys():
-                    mask_dict_unique_chs[ch] = []
-                    mixer_dict_unique_chs[ch] = mixer_freqs[i_ch]
-                    # print(f"setting mixer freq for full_mux_ch {ch}", mixer_freqs[i_ch])
-                    mux_freqs_dict_unique_chs[ch] = []
-                    mux_gains_dict_unique_chs[ch] = []
-                    lengths_dict_unique_chs[ch] = None if lengths is None else []
-                    pulse_I_shapes_dict_unique_chs[ch] = None if pulse_I_shapes is None else []
-                    pulse_Q_shapes_dict_unique_chs[ch] = None if pulse_Q_shapes is None else []
-                    adc_ch_dict_unique_chs[ch] = []
-                if i_ch in mask:
-                    mask_dict_unique_chs[ch].append(len(mask_dict_unique_chs[ch]))
-                assert (
-                    mixer_freqs[i_ch] == mixer_dict_unique_chs[ch]
-                ), f"All mixer freqs that use the same full_mux_ch should be the same but mixer for qubit {i_ch} is {mixer_freqs[i_ch]} and previous mixer_freq is {mixer_dict_unique_chs[ch]} on full mux ch {ch}"
-                mux_freqs_dict_unique_chs[ch].append(mux_freqs[i_ch])
-                mux_gains_dict_unique_chs[ch].append(mux_gains[i_ch])
-                if lengths is not None:
-                    lengths_dict_unique_chs[ch].append(lengths[i_ch])
-                if pulse_I_shapes is not None:
-                    pulse_I_shapes_dict_unique_chs[ch].append(pulse_I_shapes[i_ch])
-                if pulse_Q_shapes is not None:
-                    pulse_Q_shapes_dict_unique_chs[ch].append(pulse_Q_shapes[i_ch])
-                adc_ch_dict_unique_chs[ch].append(self.adc_chs[i_ch])
-            # print("mask_dict_unique_chs", mask_dict_unique_chs)
-            # print("mixer_dict_unique_chs", mixer_dict_unique_chs)
-            # print("mux_freqs_dict_unique_chs", mux_freqs_dict_unique_chs)
-            # print("mux_gains_dict_unique_chs", mux_gains_dict_unique_chs)
-            # print("lengths_dict_unique_chs", lengths_dict_unique_chs)
-            # print("pulse_I_shapes_dict_unique_chs", pulse_I_shapes_dict_unique_chs)
-            # print("pulse_Q_shapes_dict_unique_chs", pulse_Q_shapes_dict_unique_chs)
-            # print("adc_ch_dict_unique_chs", adc_ch_dict_unique_chs)
-
-            for full_mux_ch in mux_freqs_dict_unique_chs.keys():
-                self.setup_fullmux_readout(
-                    full_mux_ch=full_mux_ch,
-                    adc_chs=adc_ch_dict_unique_chs[full_mux_ch],
-                    mask=mask_dict_unique_chs[full_mux_ch],
-                    mixer_freq=mixer_dict_unique_chs[full_mux_ch],
-                    mux_freqs=mux_freqs_dict_unique_chs[full_mux_ch],
-                    mux_gains=mux_gains_dict_unique_chs[full_mux_ch],
-                    lengths=lengths_dict_unique_chs[full_mux_ch],
-                    pulse_I_shapes=pulse_I_shapes_dict_unique_chs[full_mux_ch],
-                    pulse_Q_shapes=pulse_Q_shapes_dict_unique_chs[full_mux_ch],
-                    times_us=times_us,
-                    plot_IQ=plot_IQ,
-                )
+            self.setup_fullmux_readout(
+                full_mux_chs=full_mux_chs,
+                mask=mask,
+                mixer_freqs=mixer_freqs,
+                mux_freqs=mux_freqs,
+                mux_gains=mux_gains,
+                lengths=lengths,
+                pulse_I_shapes=pulse_I_shapes,
+                pulse_Q_shapes=pulse_Q_shapes,
+                times_us=times_us,
+                plot_IQ=plot_IQ,
+            )
 
     def setup_mux_gen_readout(self):
         self.f_res_regs = [
@@ -1435,10 +1407,9 @@ class CliffordAveragerProgram(AveragerProgram):
 
     def setup_fullmux_readout(
         self,
-        full_mux_ch,
-        adc_chs,
+        full_mux_chs,
         mask,
-        mixer_freq,
+        mixer_freqs,
         mux_freqs,
         mux_gains,
         mux_nqz=2,
@@ -1448,57 +1419,108 @@ class CliffordAveragerProgram(AveragerProgram):
         times_us=None,
         plot_IQ=False,
     ):
-        # ASSUMES ADC_CH = QUBIT NUMBER FOR THIS FUNCTION!
+        mask_dict_unique_chs = dict()
+        mixer_dict_unique_chs = dict()
 
-        self.declare_gen(ch=full_mux_ch, nqz=mux_nqz, ro_ch=adc_chs[0])
+        for i_ch, ch in enumerate(full_mux_chs):
+            if ch not in mask_dict_unique_chs.keys():
+                mask_dict_unique_chs[ch] = []
+                mixer_dict_unique_chs[ch] = mixer_freqs[i_ch]
+            if i_ch in mask:
+                mask_dict_unique_chs[ch].append(i_ch)
+            assert (
+                mixer_freqs[i_ch] == mixer_dict_unique_chs[ch]
+            ), f"All mixer freqs that use the same full_mux_ch should be the same but mixer for qubit {i_ch} is {mixer_freqs[i_ch]} and previous mixer_freq is {mixer_dict_unique_chs[ch]} on full mux ch {ch}"
 
-        # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
-        real_freqs = mixer_freq + np.array(mux_freqs)
-        orig_mixer_freq = mixer_freq
-        chs_to_round = [self.soccfg["gens"][full_mux_ch]]
-        for ch in adc_chs:
-            chs_to_round.append(self.soccfg["readouts"][ch])
-        rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
-        rounded_mux_freqs = np.array([np.abs(self.roundfreq(f, chs_to_round)) for f in mux_freqs])
-        rounded_freqs = rounded_mixer_freq + rounded_mux_freqs
+        self.f_res_regs = [0] * 4
+        rounded_mux_freqs = [0] * 4
+        rounded_freqs = [0] * 4
+        rounded_mixer_freq_dict_unique_chs = dict()
+        for q in range(self.num_qubits_sample):
+            # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
+            full_mux_ch = full_mux_chs[q]
+            orig_mixer_freq = mixer_freqs[q]
+            chs_to_round = [self.soccfg["gens"][full_mux_ch]]
 
-        self.res_chs.append(full_mux_ch for _ in range(len(mux_freqs)))
-        self.f_res_regs = [
-            self.freq2reg(f, gen_ch=full_mux_ch, ro_ch=adc_ch) for f, adc_ch in zip(rounded_mux_freqs, adc_chs)
-        ]
+            mask_ch = mask_dict_unique_chs[full_mux_ch]
+            adc_chs_ch = [self.adc_chs[qq] for qq in mask_ch]
+            for ch in adc_chs_ch:
+                chs_to_round.append(self.soccfg["readouts"][ch])
 
-        self.handle_full_mux_pulse(
-            name=f"measure",
-            ch=full_mux_ch,
-            mask=mask,
-            mux_freqs=rounded_mux_freqs,
-            mixer_freq=rounded_mixer_freq,
-            # mixer_freq=0,
-            relative_amps=mux_gains,
-            lengths=lengths,
-            pulse_I_shapes=pulse_I_shapes,
-            pulse_Q_shapes=pulse_Q_shapes,
-            times_us=times_us,
-            phase_deg=0,
-            plot_IQ=plot_IQ,
-            # ro_ch=self.adc_chs[0],  # don't need this since we already rounded the freq I guess
-            reload=True,
-            play=False,
-            set_reg=True,
-        )
-        self.measure_chs.append(full_mux_ch)
-        self.meas_ch_types.append("full")
-        for q in adc_chs:
-            self.meas_ch_qs.append(q)
+            rounded_mixer_freq = self.roundfreq(orig_mixer_freq, chs_to_round)
+            rounded_mixer_freq_dict_unique_chs[full_mux_ch] = rounded_mixer_freq
+            # rounded_mux_freqs[q] = np.abs(self.roundfreq(mux_freqs[q], chs_to_round))
+            rounded_mux_freqs[q] = self.roundfreq(mux_freqs[q], chs_to_round)
+            rounded_freqs[q] = rounded_mixer_freq + rounded_mux_freqs[q]
 
-        for i_ch, adc_ch in enumerate(adc_chs):
-            if adc_ch not in self.ro_chs:
+            self.f_res_regs[q] = self.freq2reg(rounded_mux_freqs[q], gen_ch=full_mux_ch, ro_ch=self.adc_chs[q])
+            self.res_chs[q] = full_mux_ch
+
+        for full_mux_ch in mask_dict_unique_chs.keys():
+            qubits_ch = mask_dict_unique_chs[full_mux_ch]
+            mixer_freq_ch = mixer_dict_unique_chs[full_mux_ch]
+            adc_chs_ch = [self.adc_chs[q] for q in qubits_ch]
+            self.declare_gen(ch=full_mux_ch, nqz=mux_nqz, ro_ch=adc_chs_ch[0])
+
+            mask_ch = [i for i in range(len(qubits_ch))]
+            mux_freqs_ch = [rounded_mux_freqs[q] for q in qubits_ch]
+            rounded_mixer_freq = rounded_mixer_freq_dict_unique_chs[full_mux_ch]
+            mux_gains_ch = [mux_gains[q] for q in qubits_ch]
+            lengths_ch = [lengths[q] for q in qubits_ch] if lengths is not None else None
+            pulse_I_shapes_ch = [pulse_I_shapes[q] for q in qubits_ch] if pulse_I_shapes is not None else None
+            pulse_Q_shapes_ch = [pulse_Q_shapes[q] for q in qubits_ch] if pulse_Q_shapes is not None else None
+
+            # print(
+            #     "mask",
+            #     mask_ch,
+            #     "adc_chs",
+            #     adc_chs_ch,
+            #     "mixer_freq",
+            #     mixer_freq_ch,
+            #     "mux_freqs",
+            #     mux_freqs_ch,
+            #     "mux_gains",
+            #     mux_gains_ch,
+            #     "lengths",
+            #     lengths_ch,
+            #     "pulse_I_shapes",
+            #     pulse_I_shapes_ch,
+            # )
+
+            self.handle_full_mux_pulse(
+                name=f"measure",
+                ch=full_mux_ch,
+                mask=mask_ch,
+                mux_freqs=mux_freqs_ch,
+                mixer_freq=rounded_mixer_freq,
+                relative_amps=mux_gains_ch,
+                lengths=lengths_ch,
+                pulse_I_shapes=np.array(pulse_I_shapes_ch),
+                pulse_Q_shapes=-1
+                * np.array(
+                    pulse_Q_shapes_ch
+                ),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
+                times_us=times_us,
+                phase_deg=0,
+                plot_IQ=plot_IQ,
+                # ro_ch=self.adc_chs[0],  # don't need this since we already rounded the freq I guess
+                reload=True,
+                play=False,
+                set_reg=True,
+            )
+            self.measure_chs.append(full_mux_ch)
+            self.meas_ch_types.append("full")
+
+        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
+        for q in range(self.num_qubits_sample):
+            if self.adc_chs[q] not in self.ro_chs:
                 self.declare_readout(
-                    ch=adc_ch,
-                    length=self.readout_lengths_adc[adc_ch],
-                    freq=rounded_freqs[i_ch],
-                    # gen_ch=full_mux_ch,
+                    ch=self.adc_chs[q],
+                    length=self.readout_lengths_adc[q],
+                    freq=rounded_freqs[q],
+                    gen_ch=self.res_chs[q],
                 )
+                # print(f"adc {self.adc_chs[q]} freq {rounded_freqs[q]}")
 
     def measure_readout_cool(
         self, n_init_readout=None, n_trig=None, init_read_wait_us=None, extended_readout_delay_cycles=3
