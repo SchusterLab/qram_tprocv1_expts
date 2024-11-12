@@ -171,8 +171,9 @@ class ResonatorSpectroscopyExperiment(Experiment):
         plt.axvline(minfreq, c="k", ls="--")  # |0>|1>
         plt.axvline(minfreq - 0.1, c="k", ls="--")  # |0>|1>
 
-        f0, Qi, Qe, phi, slope, a0 = data["fit"]
-        plt.axvline(f0, c="r", ls="--")  # |0>|1>
+        if fit:
+            f0, Qi, Qe, phi, slope, a0 = data["fit"]
+            plt.axvline(f0, c="r", ls="--")  # |0>|1>
 
         plt.subplot(312, xlabel="Readout Frequency [MHz]", ylabel="I [ADC units]")
         plt.plot(xpts, data["avgi"][1:-1], ".-")
