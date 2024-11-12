@@ -389,6 +389,9 @@ def general_hist(
         return_data += [popts, pcovs]
     if check_qnd:
         return_data += [n_diff_qnd]
+        
+    print(len(return_data))
+    print(return_data)
 
     return return_data
 
@@ -558,7 +561,7 @@ class HistogramProgram(QutritAveragerProgram):
             adcs=self.adc_chs,
             adc_trig_offset=cfg.device.readout.trig_offset[0],
             wait=True,
-            syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(4)])),
+            syncdelay=self.us2cycles(max([cfg.device.readout.relax_delay[q] for q in range(self.num_qubits_sample)])),
         )
 
     def collect_shots(self, qubit=None, angle=None, threshold=None, avg_shots=False, verbose=False):
@@ -1181,202 +1184,217 @@ class MultiReadoutExperiment(Experiment):
         )
 
         if not fit:
-            fids, thresholds, angle = multihist_results
-            data["fids"] = fids
-            data["angle"] = angle
-            data["thresholds"] = thresholds
+            return_data = multihist_results
+            
+            data["fids"] = return_data[0]
+            data["angle"] = return_data[2]
+            data["thresholds"] = return_data[1]
+            if check_qnd:
+                data["n_diff_qnd"] = return_data[-1]
         else:
-            fids, thresholds, angle, popts, pcovs = multihist_results
-            data["fids"] = fids
-            data["angle"] = angle
-            data["thresholds"] = thresholds
-            data["popts"] = popts
-            data["pcovs"] = pcovs
+            return_data = multihist_results
+            
+            data["fids"] = return_data[0]
+            data["angle"] = return_data[2]
+            data["thresholds"] = return_data[1]
+            data["popts"] = return_data[3]
+            data["pcovs"] = return_data[4]
+            if check_qnd:
+                data["n_diff_qnd"] = return_data[-1]
 
-            if post_select:
-                # for each readout after first readout, post-select the g state preparation based on all previous measurements being in the g state
-                # truth array saying whether this shot will be eliminated for the next iteration
+        if post_select:
+            print("Post-selecting")
+            # for each readout after first readout, post-select the g state preparation based on all previous measurements being in the g state
+            # truth array saying whether this shot will be eliminated for the next iteration
 
-                if ps_adjust is None:
-                    ps_threshold = thresholds[0]
+            if ps_adjust is None:
+                ps_threshold = data["thresholds"][0]
+            else:
+                thresholds_allq = [0] * num_qubits_sample
+                thresholds_allq[qTest] = data["thresholds"][0]
+                angles_allq = [0] * num_qubits_sample
+                angles_allq[qTest] = data["angle"]
+                ge_avgs_allq = np.zeros((num_qubits_sample, 4))
+                ge_avgs_allq[qTest] = data["ge_avgs"] if not self.cfg.expt.check_f else data["ge_avgs"]
+
+                if not (opti_post_select):
+                    print('not opti post select')
+                    ps_threshold = ps_threshold_adjust(
+                        ps_thresholds_init=thresholds_allq,
+                        adjust=ps_adjust,
+                        ge_avgs=ge_avgs_allq,
+                        angles=angles_allq,
+                    )[qTest]
+                    print("ps_threshold", ps_threshold)
+                    data["ps_threshold"] = ps_threshold
+
+                    keep_prev = np.ones_like(data["Ig"][qTest, 0, :])
+                    for i_readout in range(self.cfg.expt.n_init_readout + 1):
+                        Ig_readout = data["Ig"][qTest, i_readout, :]
+                        Qg_readout = data["Qg"][qTest, i_readout, :]
+                        if i_readout > 0:
+                            data[f"Ig_select{i_readout}"] = Ig_readout[keep_prev]
+                            data[f"Qg_select{i_readout}"] = Qg_readout[keep_prev]
+                        Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout, Qg_readout, data["angle"])
+                        keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
+
                 else:
-                    thresholds_allq = [0] * num_qubits_sample
-                    thresholds_allq[qTest] = thresholds[0]
-                    angles_allq = [0] * num_qubits_sample
-                    angles_allq[qTest] = angle
-                    ge_avgs_allq = np.zeros((num_qubits_sample, 4))
-                    ge_avgs_allq[qTest] = data["ge_avgs"] if not self.cfg.expt.check_f else data["ge_avgs"]
+                    print('opti post select')
+                    ps_adjust = [0] * num_qubits_sample
+                    ps_adjust_qb = np.linspace(-2.3, 2, 20)
+                    n_diff_vec = np.zeros_like(ps_adjust_qb)
+                    threshold_vec = np.zeros_like(ps_adjust_qb)
+                    percent_kept_vec = np.zeros_like(ps_adjust_qb)
+                    n_bins = 200
 
-                    if not (opti_post_select):
+                    Ig_readout_base = data["Ig"][qTest, 0, :]
+                    Qg_readout_base = data["Qg"][qTest, 0, :]
+                    Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout_base, Qg_readout_base, data["angle"])
+                    span = (np.max(Ig_readout_rot) - np.min(Ig_readout_rot)) / 2
+                    midpoint = (np.max(Ig_readout_rot) + np.min(Ig_readout_rot)) / 2
+                    xlims = [midpoint - span, midpoint + span]
+                    n, bins = np.histogram(Ig_readout_base, bins=n_bins, range=xlims)
+                    n_scaled = n / np.sum(n)
+
+                    n_ps_tab = []
+
+                    if plot:
+                        x_plot = np.linspace(xlims[0], xlims[1], n_bins)
+                        color_vec = plt.cm.Dark2(np.linspace(0, 1, len(ps_adjust_qb)))
+
+                    for idx, ps in enumerate(ps_adjust_qb):
+
+                        ps_adjust[qTest] = ps
                         ps_threshold = ps_threshold_adjust(
                             ps_thresholds_init=thresholds_allq,
                             adjust=ps_adjust,
                             ge_avgs=ge_avgs_allq,
                             angles=angles_allq,
                         )[qTest]
-                        print("ps_threshold", ps_threshold)
-                        data["ps_threshold"] = ps_threshold
+                        threshold_vec[idx] = ps_threshold
+                        keep_prev = np.ones_like(Ig_readout_rot)
 
-                        keep_prev = np.ones_like(data["Ig"][qTest, 0, :])
-                        for i_readout in range(self.cfg.expt.n_init_readout + 1):
-                            Ig_readout = data["Ig"][qTest, i_readout, :]
-                            Qg_readout = data["Qg"][qTest, i_readout, :]
-                            if i_readout > 0:
-                                data[f"Ig_select{i_readout}"] = Ig_readout[keep_prev]
-                                data[f"Qg_select{i_readout}"] = Qg_readout[keep_prev]
-                            Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout, Qg_readout, angle)
+                        for i_readout in range(1, self.cfg.expt.n_init_readout + 1):
+
+                            if idx == 0:
+                                Ig_temp = data["Ig"][qTest, i_readout, :]
+                                Qg_temp = data["Qg"][qTest, i_readout, :]
+                                Ig_temp_rot, Qg_temp_rot = self.rot_iq_data(Ig_temp, Qg_temp, data["angle"])
+                                n_prev, bins_prev = np.histogram(Ig_temp_rot, bins=n_bins, range=xlims)
+                                n_prev_cum = np.cumsum(n_prev) / np.sum(n_prev)
+
                             keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
+                            Ig_ps = Ig_temp_rot[keep_prev]
+                            Qg_ps = Qg_temp_rot[keep_prev]
+                            percent_kept_vec[idx] = np.sum(keep_prev) / len(keep_prev)
 
-                    else:
-                        ps_adjust = [0] * num_qubits_sample
-                        ps_adjust_qb = np.linspace(-2.3, 2, 20)
-                        n_diff_vec = np.zeros_like(ps_adjust_qb)
-                        threshold_vec = np.zeros_like(ps_adjust_qb)
-                        percent_kept_vec = np.zeros_like(ps_adjust_qb)
-                        n_bins = 200
+                            n_ps, bins_ps = np.histogram(Ig_ps, bins=n_bins, range=xlims)
+                            n_ps_cum = np.cumsum(n_ps) / np.sum(n_ps)
 
-                        Ig_readout_base = data["Ig"][qTest, 0, :]
-                        Qg_readout_base = data["Qg"][qTest, 0, :]
-                        print("angle", angle)
-                        Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout_base, Qg_readout_base, angle)
-                        span = (np.max(Ig_readout_rot) - np.min(Ig_readout_rot)) / 2
-                        midpoint = (np.max(Ig_readout_rot) + np.min(Ig_readout_rot)) / 2
-                        xlims = [midpoint - span, midpoint + span]
-                        n, bins = np.histogram(Ig_readout_base, bins=n_bins, range=xlims)
-                        n_scaled = n / np.sum(n)
+                            n_diff = np.sum(np.abs(n_prev / np.sum(n_prev) - n_ps / np.sum(n_ps))) / 2
+                            n_diff_vec[idx] += n_diff
 
-                        n_ps_tab = []
+                            n_ps_tab.append(n_ps)
 
-                        if plot:
-                            x_plot = np.linspace(xlims[0], xlims[1], n_bins)
-                            color_vec = plt.cm.Dark2(np.linspace(0, 1, len(ps_adjust_qb)))
+                            # compute the pop bins in e or g given thresholdq
 
-                        for idx, ps in enumerate(ps_adjust_qb):
+                    # print('n_diff_vec', n_diff_vec)
+                    # print('percent_kept_vec', percent_kept_vec)
+                    figure_of_merite = n_diff_vec * percent_kept_vec
+                    idx_max = np.argmax(figure_of_merite)
+                    print(idx_max)
+                    thres_opt = threshold_vec[idx_max]
+                    print(threshold_vec)
+                    print("optimal threshold", thres_opt)
+                    data["ps_threshold"] = thres_opt
+                    data["n_diff_opt"] = n_diff_vec[idx_max]
 
-                            ps_adjust[qTest] = ps
-                            ps_threshold = ps_threshold_adjust(
-                                ps_thresholds_init=thresholds_allq,
-                                adjust=ps_adjust,
-                                ge_avgs=ge_avgs_allq,
-                                angles=angles_allq,
-                            )[qTest]
-                            threshold_vec[idx] = ps_threshold
-                            keep_prev = np.ones_like(Ig_readout_rot)
+                    _bin = bins
+                    _n_ps = n_ps_tab[idx_max]
 
-                            for i_readout in range(1, self.cfg.expt.n_init_readout + 1):
+                    # idx_bin = np.where(_bin > thresholds_allq[qTest])[0][0]
+                    thresh = thresholds_allq[qTest]
+                    idx_bin = np.where(_bin > thresh)[0][0]
+                    n_e = np.sum(_n_ps[idx_bin:]) / np.sum(_n_ps)
+                    n_g = np.sum(_n_ps[:idx_bin]) / np.sum(_n_ps)
 
-                                if idx == 0:
-                                    Ig_temp = data["Ig"][qTest, i_readout, :]
-                                    Qg_temp = data["Qg"][qTest, i_readout, :]
-                                    Ig_temp_rot, Qg_temp_rot = self.rot_iq_data(Ig_temp, Qg_temp, angle)
-                                    n_prev, bins_prev = np.histogram(Ig_temp_rot, bins=n_bins, range=xlims)
-                                    n_prev_cum = np.cumsum(n_prev) / np.sum(n_prev)
+                    n_e_prev = np.sum(n_prev[idx_bin:]) / np.sum(n_prev)
+                    n_g_prev = np.sum(n_prev[:idx_bin]) / np.sum(n_prev)
 
-                                keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
-                                Ig_ps = Ig_temp_rot[keep_prev]
-                                Qg_ps = Qg_temp_rot[keep_prev]
-                                percent_kept_vec[idx] = np.sum(keep_prev) / len(keep_prev)
+                    print("n_e", n_e)
+                    print("n_g", n_g)
 
-                                n_ps, bins_ps = np.histogram(Ig_ps, bins=n_bins, range=xlims)
-                                n_ps_cum = np.cumsum(n_ps) / np.sum(n_ps)
+                    print("n_e_prev", n_e_prev)
+                    print("n_g_prev", n_g_prev)
 
-                                n_diff = np.sum(np.abs(n_prev / np.sum(n_prev) - n_ps / np.sum(n_ps))) / 2
-                                n_diff_vec[idx] += n_diff
+                    data["n_no_ps"] = [n_g_prev, n_e_prev]
+                    data["n_ps"] = [n_g, n_e]
+                    
+                    
+                    data['ncounts_no_ps'] = n_prev/np.sum(n_prev)
+                    data['ncounts_ps'] = _n_ps/np.sum(n_ps)
 
-                                n_ps_tab.append(n_ps)
 
-                                # compute the pop bins in e or g given thresholdq
+                    if plot:
 
-                        # print('n_diff_vec', n_diff_vec)
-                        # print('percent_kept_vec', percent_kept_vec)
-                        figure_of_merite = n_diff_vec * percent_kept_vec
-                        idx_max = np.argmax(figure_of_merite) - 3
-                        print(idx_max)
-                        thres_opt = threshold_vec[idx_max]
-                        print(threshold_vec)
-                        print("optimal threshold", thres_opt)
-                        data["ps_threshold"] = thres_opt
-                        data["n_diff_opt"] = n_diff_vec[idx_max]
-                        print(data["n_diff_opt"])
+                        fig, ax = plt.subplots(1, 2, figsize=(9, 4))
+                        n_ps_plot = n_ps_tab[idx_max]
+                        n_ps_cum = np.cumsum(n_ps_plot) / np.sum(n_ps_plot)
 
-                        _bin = bins
-                        _n_ps = n_ps_tab[idx_max]
+                        ax[0].plot(x_plot, n_prev_cum, color="black", alpha=0.5)
+                        ax[1].plot(
+                            x_plot,
+                            n_prev / np.sum(n_prev),
+                            color="black",
+                            label=f"{ps:.2f}",
+                            alpha=0.5,
+                        )
 
-                        # idx_bin = np.where(_bin > thresholds_allq[qTest])[0][0]
-                        thresh = thresholds_allq[qTest]
-                        idx_bin = np.where(_bin > thresh)[0][0]
-                        n_e = np.sum(_n_ps[idx_bin:]) / np.sum(_n_ps)
-                        n_g = np.sum(_n_ps[:idx_bin]) / np.sum(_n_ps)
+                        ax[0].plot(x_plot, n_ps_cum, color="black")
+                        ax[1].plot(
+                            x_plot,
+                            n_ps_plot / np.sum(n_ps_plot),
+                            color="black",
+                            label=f"{ps_adjust_qb[idx_max]:.2f}",
+                        )
+                        ax[1].set_yscale("log")
+                        ax[0].vlines(thres_opt, 0, 1, color="black", linestyle="--")
+                        ax[1].vlines(
+                            thres_opt,
+                            0,
+                            np.max(n_ps_plot / np.sum(n_ps_plot)),
+                            color="black",
+                            linestyle="--",
+                        )
+                        ax[1].vlines(
+                            thresh,
+                            0,
+                            np.max(n_ps_plot / np.sum(n_ps_plot)),
+                            color="black",
+                        )
 
-                        n_e_prev = np.sum(n_prev[idx_bin:]) / np.sum(n_prev)
-                        n_g_prev = np.sum(n_prev[:idx_bin]) / np.sum(n_prev)
-
-                        print("n_e", n_e)
-                        print("n_g", n_g)
-
-                        print("n_e_prev", n_e_prev)
-                        print("n_g_prev", n_g_prev)
-
-                        data["n_no_ps"] = [n_g_prev, n_e_prev]
-                        data["n_ps"] = [n_g, n_e]
-
-                        if plot:
-
-                            fig, ax = plt.subplots(1, 2, figsize=(9, 4))
-                            n_ps_plot = n_ps_tab[idx_max]
-                            n_ps_cum = np.cumsum(n_ps_plot) / np.sum(n_ps_plot)
-
-                            ax[0].plot(x_plot, n_prev_cum, color="black", alpha=0.5)
-                            ax[1].plot(
-                                x_plot,
-                                n_prev / np.sum(n_prev),
-                                color="black",
-                                label=f"{ps:.2f}",
-                                alpha=0.5,
-                            )
-
-                            ax[0].plot(x_plot, n_ps_cum, color="black")
-                            ax[1].plot(
-                                x_plot,
-                                n_ps_plot / np.sum(n_ps_plot),
-                                color="black",
-                                label=f"{ps_adjust_qb[idx_max]:.2f}",
-                            )
-                            ax[0].vlines(thres_opt, 0, 1, color="black", linestyle="--")
-                            ax[1].vlines(
-                                thres_opt,
-                                0,
-                                np.max(n_ps_plot / np.sum(n_ps_plot)),
-                                color="black",
-                                linestyle="--",
-                            )
-                            ax[1].vlines(
-                                thresh,
-                                0,
-                                np.max(n_ps_plot / np.sum(n_ps_plot)),
-                                color="black",
-                            )
-
-                            fig1, ax1 = plt.subplots(1, 2, figsize=(9, 4))
-                            ax1[0].scatter(ps_adjust_qb, n_diff_vec * 100, color=color_vec)
-                            ax1[1].scatter(ps_adjust_qb, percent_kept_vec, color=color_vec)
-                            ax1[1].scatter(
-                                ps_adjust_qb,
-                                figure_of_merite / figure_of_merite.max(),
-                                color=color_vec,
-                            )
-                            ax1[1].vlines(
-                                ps_adjust_qb[idx_max],
-                                0,
-                                np.max(figure_of_merite),
-                                color="black",
-                                linestyle="--",
-                            )
-                            ax1[0].set_xlabel("PS threshold adjustment")
-                            ax1[0].set_ylabel("Difference in Pop (%)")
-                            ax1[1].set_xlabel("PS threshold adjustment")
-                            ax1[1].set_ylabel("Percent Kept x Diff Pop")
-                            fig1.tight_layout()
+                        fig1, ax1 = plt.subplots(1, 2, figsize=(9, 4))
+                        ax1[0].scatter(ps_adjust_qb, n_diff_vec * 100, color=color_vec)
+                        ax1[1].scatter(ps_adjust_qb, percent_kept_vec, color=color_vec)
+                        ax1[1].scatter(
+                            ps_adjust_qb,
+                            figure_of_merite / figure_of_merite.max(),
+                            color=color_vec,
+                        )
+                        ax1[1].vlines(
+                            ps_adjust_qb[idx_max],
+                            0,
+                            np.max(figure_of_merite),
+                            color="black",
+                            linestyle="--",
+                        )
+                        ax1[0].set_xlabel("PS threshold adjustment")
+                        ax1[0].set_ylabel("Difference in Pop (%)")
+                        ax1[1].set_xlabel("PS threshold adjustment")
+                        ax1[1].set_ylabel("Percent Kept x Diff Pop")
+                        fig1.tight_layout()
+                            
+        
 
         return data
 
