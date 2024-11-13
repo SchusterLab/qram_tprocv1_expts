@@ -484,8 +484,8 @@ class ResonatorVoltSweepSpectroscopyExperiment(Experiment):
         print(f"Saving {self.fname}")
         super().save_data(data=data)
         return self.fname
-    
-    
+
+
 class ResonatorRingDownExperiment(Experiment):
     """Resonator Ring Down Experiment
     Experimental Config
@@ -497,23 +497,22 @@ class ResonatorRingDownExperiment(Experiment):
         "gain": gain of the readout,
         "reps": number of reps,
     """
-    
+
     def __init__(self, soccfg=None, path="", prefix="ResonatorRingDown", config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
-    
+
     def acquire(self, progress=False):
-        xpts = self.cfg.expt["start_time"] + self.cfg.expt["step_time"] * np.arange(self.cfg.expt["expts"])
+        xpts = self.cfg.expt.start_time + self.cfg.expt.step_time * np.arange(self.cfg.expt.expts)
         qTest = self.cfg.expt.qTest
-        
-        if "freq" in self.cfg.expt and self.cfg.expt["freq"] is not None:
-            self.cfg.device.readout.frequency[qTest] = self.cfg.expt["freq"]
-            
-        if "gain" in self.cfg.expt and self.cfg.expt["gain"] is not None:
-            self.cfg.device.readout.gain[qTest] = self.cfg.expt["gain"]
-            
-        if "readout_length" in self.cfg.expt and self.cfg.expt["readout_length"] is not None:
-            self.cfg.expt.len_readout_adc = self.cfg.expt["readout_length"]
-    
+
+        if "freq" in self.cfg.expt and self.cfg.expt.freq is not None:
+            self.cfg.device.readout.frequency[qTest] = self.cfg.expt.freq
+
+        if "gain" in self.cfg.expt and self.cfg.expt.gain is not None:
+            self.cfg.device.readout.gain[qTest] = self.cfg.expt.gain
+
+        assert "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None
+
         num_qubits_sample = len(self.cfg.device.readout.frequency)
         for subcfg in (self.cfg.device.readout, self.cfg.device.qubit, self.cfg.hw.soc):
             for key, value in subcfg.items():
@@ -529,17 +528,26 @@ class ResonatorRingDownExperiment(Experiment):
         data = {"xpts": [], "avgi": [], "avgq": [], "amps": [], "phases": []}
         for t in tqdm(xpts, disable=not progress):
             cfg = AttrDict(deepcopy(self.cfg))
-            
+
+            # Time to play the readout pulse
             t_readout = min(t, self.cfg.device.readout.readout_length[qTest])
+
+            # If requested is past the end of the (original) readout length, figure out the offset time for the trigger
             t_offset = max(t, t_readout)
-            cycles_off_baseline = cfg.device.readout.trig_offset[0] 
-            
-            cfg.device.readout.trig_offset[0] = self.soc.us2cycles(t_offset) + cycles_off_baseline
-            cfg.device.readout.readout_length[qTest] = t_readout
+            cycles_off_baseline = cfg.device.readout.trig_offset[0]
+            cfg.device.readout.trig_offset = [self.soc.us2cycles(t_offset) + cycles_off_baseline] * 4
+            print(cfg.device.readout.trig_offset)
+            cfg.device.readout.readout_length = [t_readout] * num_qubits_sample  # set for all qubits
+
+            # Handle slicing IQ pulses
+            if "full_mux_expt" in self.cfg and self.cfg.expt.full_mux_expt:
+                if self.cfg.expt.pulse_I_shapes is not None:
+                    t_index = np.argmin(np.abs(t - self.cfg.expt.times_us))
+                    cfg.device.readout.pulse_I_shapes = self.cfg.expt.pulse_I_shapes[:, :t_index]
+                    cfg.device.readout.pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes[:, :t_index]
+
             print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
-            
-            
-            
+
             rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             datai, dataq = rspec.collect_shots()
@@ -557,10 +565,10 @@ class ResonatorRingDownExperiment(Experiment):
 
         for k, a in data.items():
             data[k] = np.array(a)
-            
+
         self.data = data
         return data
-    
+
     def analyze(self, data=None, fit=True, **kwargs):
         if data is None:
             data = self.data
@@ -576,11 +584,11 @@ class ResonatorRingDownExperiment(Experiment):
         return data
 
     def display(self, data=None, **kwargs):
-        
+
         if data is None:
             data = self.data
         qTest = self.cfg.expt.qTest
-        
+
         fig, ax = plt.subplots(4, 1, figsize=(10, 10))
         ax[0].plot(data["xpts"], data["amps"], '.-')
         if "fit_amp" in data:
@@ -591,15 +599,16 @@ class ResonatorRingDownExperiment(Experiment):
         ax[0].set_title(f"Resonator Ring Down Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
         ax[0].set_ylabel("Amps [ADC units]")
         ax[0].set_xlabel("Time [us]")
-        ax[1].plot(data["xpts"], data["avgi"], '.-')
+        ax[1].plot(data["xpts"], data["avgi"], ".-")
         ax[1].set_ylabel("I [ADC units]")
-        ax[2].plot(data["xpts"], data["avgq"], '.-')
+        ax[2].plot(data["xpts"], data["avgq"], ".-")
         ax[2].set_ylabel("Q [ADC units]")
-        ax[3].plot(data["xpts"], data["phases"], '.-')
+        ax[3].plot(data["xpts"], data["phases"], ".-")
         ax[3].set_ylabel("Phase [radians]")
         ax[3].set_xlabel("Time [us]")
         fig.tight_layout()
-        
+        plt.show()
+
         # plot the IQ trajectory in the complex plane
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         # enforce the same scale for both axes
@@ -609,10 +618,4 @@ class ResonatorRingDownExperiment(Experiment):
     def save_data(self, data=None):
         print(f"Saving {self.fname}")
         super().save_data(data=data)
-        return self.fname   
-    
-            
-        
-        
-    
-    
+        return self.fname
