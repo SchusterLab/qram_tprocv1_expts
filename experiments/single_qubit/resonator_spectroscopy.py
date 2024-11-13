@@ -566,6 +566,13 @@ class ResonatorRingDownExperiment(Experiment):
             data = self.data
         qTest = self.cfg.expt.qTest
         
+        if fit: 
+            # fit it with an exponential decay
+            fitparams = fitter.fitexp(data["xpts"], data["amps"])
+            print(fitparams)
+            data["fit_amp"], data["fit_err_amp"]  = fitparams
+            
+        
         return data
 
     def display(self, data=None, **kwargs):
@@ -576,6 +583,11 @@ class ResonatorRingDownExperiment(Experiment):
         
         fig, ax = plt.subplots(4, 1, figsize=(10, 10))
         ax[0].plot(data["xpts"], data["amps"], '.-')
+        if "fit_amp" in data:
+            ax[0].plot(data["xpts"], fitter.expfunc(data["xpts"], *data["fit_amp"]))
+            # add the decay time to the plot
+            kappa = 1/data["fit_amp"][-1]/2/np.pi
+            ax[0].text(0.5, 0.5, f"kappa_ext: {kappa:.2f} MHz", transform=ax[0].transAxes)
         ax[0].set_title(f"Resonator Ring Down Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
         ax[0].set_ylabel("Amps [ADC units]")
         ax[0].set_xlabel("Time [us]")
@@ -590,6 +602,8 @@ class ResonatorRingDownExperiment(Experiment):
         
         # plot the IQ trajectory in the complex plane
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        # enforce the same scale for both axes
+        ax.set_aspect('equal', adjustable='datalim')
         ax.plot(data["avgi"], data["avgq"], '.-')
         
     def save_data(self, data=None):
