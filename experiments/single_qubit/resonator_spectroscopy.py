@@ -530,32 +530,53 @@ class ResonatorRingDownExperiment(Experiment):
             cfg = AttrDict(deepcopy(self.cfg))
 
             # Time to play the readout pulse
+            if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+                if "pulse_I_shapes" in self.cfg.expt and self.cfg.expt.pulse_I_shapes is not None:
+                    self.cfg.device.readout.readout_length = [self.cfg.expt.times_us[-1]] * num_qubits_sample
+
             t_readout = min(t, self.cfg.device.readout.readout_length[qTest])
 
             # If requested is past the end of the (original) readout length, figure out the offset time for the trigger
             t_offset = max(t, t_readout)
             cycles_off_baseline = cfg.device.readout.trig_offset[0]
-            cfg.device.readout.trig_offset = [self.soc.us2cycles(t_offset) + cycles_off_baseline] * 4
-            print(cfg.device.readout.trig_offset)
+            cfg.device.readout.trig_offset = [self.soc.us2cycles(t_offset) + cycles_off_baseline] * num_qubits_sample
+            # print(cfg.device.readout.trig_offset)
             cfg.device.readout.readout_length = [t_readout] * num_qubits_sample  # set for all qubits
 
             # Handle slicing IQ pulses
-            if "full_mux_expt" in self.cfg and self.cfg.expt.full_mux_expt:
-                if self.cfg.expt.pulse_I_shapes is not None:
+            if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+                if "pulse_I_shapes" in self.cfg.expt and self.cfg.expt.pulse_I_shapes is not None:
                     t_index = np.argmin(np.abs(t - self.cfg.expt.times_us))
-                    cfg.device.readout.pulse_I_shapes = self.cfg.expt.pulse_I_shapes[:, :t_index]
-                    cfg.device.readout.pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes[:, :t_index]
+                    cfg.expt.pulse_I_shapes = self.cfg.expt.pulse_I_shapes[:, :t_index]
+                    cfg.expt.pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes[:, :t_index]
+                    cfg.expt.times_us = self.cfg.expt.times_us[:t_index]
+                else:
+                    cfg.expt.lengths = cfg.device.readout.readout_length
 
-            print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
+            # print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
 
             rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             datai, dataq = rspec.collect_shots()
             avgi = np.average(datai)
             avgq = np.average(dataq)
+            # amp = np.abs((avgi + 1j * avgq))  # Calculating the magnitude
             amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
             phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
+            # plt.figure()
+            # plt.plot(datai, label="I")
+            # plt.axhline(np.average(datai))
+            # plt.plot(dataq, label="Q")
+            # plt.plot(np.abs(datai + 1j * dataq), label="Amp")
+            # plt.axhline(np.average(datai), color="b", label="I")
+            # plt.axhline(np.average(dataq), color="g", label="Q")
+            # plt.axhline(np.average(np.abs(datai + 1j * dataq)), label="Amp")
+            # plt.axhline(np.abs(avgi + 1j * avgq), color="r", label="Amp")
+            # plt.legend()
+            # plt.show()
+
             self.prog = rspec
+            # print("i", datai[50], dataq[50], np.abs((datai[50] + 1j * dataq[50])))  # Calculating the magnitude
 
             data["xpts"].append(t)
             data["avgi"].append(avgi)

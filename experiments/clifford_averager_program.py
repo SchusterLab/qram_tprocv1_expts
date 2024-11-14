@@ -484,6 +484,7 @@ class CliffordAveragerProgram(AveragerProgram):
         iamps = I_func(times_samps)
         qamps = Q_func(times_samps)
 
+        # plot_IQ = True
         if plot_IQ:
             plt.figure()
             plt.title(f"Pulse on ch{ch}, waveform {name}")
@@ -1311,6 +1312,12 @@ class CliffordAveragerProgram(AveragerProgram):
             else:
                 self.readout_lengths_adc = [self.us2cycles(times_us[-1], ro_ch=ro_ch) for ro_ch in self.adc_chs]
 
+            if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
+                self.readout_lengths_adc = [
+                    self.us2cycles(length, ro_ch=ro_ch)
+                    for length, ro_ch in zip(self.cfg.expt.len_readout_adc, self.adc_chs)
+                ]
+
             mixer_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq)
             # assert np.all(mixer_freqs == mixer_freqs[0])
             if "plot_IQ" in self.cfg.expt:
@@ -1495,8 +1502,10 @@ class CliffordAveragerProgram(AveragerProgram):
                 mixer_freq=rounded_mixer_freq,
                 relative_amps=mux_gains_ch,
                 lengths=lengths_ch,
-                pulse_I_shapes=np.array(pulse_I_shapes_ch),
-                pulse_Q_shapes=-1
+                pulse_I_shapes=None if pulse_I_shapes_ch is None else np.array(pulse_I_shapes_ch),
+                pulse_Q_shapes=None
+                if pulse_Q_shapes_ch is None
+                else -1
                 * np.array(
                     pulse_Q_shapes_ch
                 ),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
@@ -1776,18 +1785,38 @@ class CliffordAveragerProgram(AveragerProgram):
 
         self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs]  # get register page for qubit_ch
 
-        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.f_ges_robust = np.reshape(self.cfg.device.qubit.f_ge_robust, ( self.num_qubits_sample,  self.num_qubits_sample))
-        self.pihalf_gain_robust = np.reshape(self.cfg.device.qubit.pulses.pihalf_ge_robust.gain, ( self.num_qubits_sample,  self.num_qubits_sample))
+        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (self.num_qubits_sample, self.num_qubits_sample))
+        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (self.num_qubits_sample, self.num_qubits_sample))
+        self.pi_ge_gains = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ge.gain, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ge_sigmas = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ge.sigma, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ge_half_gains = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ge.half_gain, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ge_half_gain_pi_sigmas = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ef_gains = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ef.gain, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ef_sigmas = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ef.sigma, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ef_half_gains = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ef.half_gain, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pi_ef_half_gain_pi_sigmas = np.reshape(
+            self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.f_ges_robust = np.reshape(
+            self.cfg.device.qubit.f_ge_robust, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pihalf_gain_robust = np.reshape(
+            self.cfg.device.qubit.pulses.pihalf_ge_robust.gain, (self.num_qubits_sample, self.num_qubits_sample)
+        )
         self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
         self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type
 
@@ -1800,17 +1829,14 @@ class CliffordAveragerProgram(AveragerProgram):
             self.us2cycles(length, gen_ch=gen_ch)
             for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)
         ]
-        
-        
+
         if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
             _ro_lengths_adc = self.cfg.expt.len_readout_adc
         else:
             _ro_lengths_adc = self.cfg.device.readout.readout_length
-            
-            
+
         self.readout_lengths_adc = [
-            self.us2cycles(length, ro_ch=ro_ch)
-            for length, ro_ch in zip(_ro_lengths_adc, self.adc_chs)
+            self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(_ro_lengths_adc, self.adc_chs)
         ]
 
         # add IQ pulses
