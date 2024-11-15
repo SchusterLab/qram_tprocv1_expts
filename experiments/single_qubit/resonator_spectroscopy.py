@@ -595,9 +595,14 @@ class ResonatorRingDownExperiment(Experiment):
             data = self.data
         qTest = self.cfg.expt.qTest
 
+        fit_start = np.argmin(np.abs(data["xpts"] - self.cfg.device.readout.readout_length[qTest]))
+        xpts = data["xpts"][fit_start:]
+        ypts_fit = data["amps"][fit_start:]
+        data["fit_amps"], data["fit_err_amps"] = fitter.fitexp(xpts, ypts_fit, fitparams=None)
+
         return data
 
-    def display(self, data=None, **kwargs):
+    def display(self, data=None, fit=False, **kwargs):
 
         if data is None:
             data = self.data
@@ -605,6 +610,18 @@ class ResonatorRingDownExperiment(Experiment):
 
         fig, ax = plt.subplots(4, 1, figsize=(10, 10))
         ax[0].plot(data["xpts"], data["amps"], ".-")
+        if fit:
+            fit_start = np.argmin(np.abs(data["xpts"] - self.cfg.device.readout.readout_length[qTest]))
+            p = data["fit_amps"]
+            pCov = data["fit_err_amps"]
+            decay_time = p[3]
+            kappa_kHz = 1 / decay_time / 2 / np.pi * 1e3
+            kappa_err = 1 / kappa_kHz**2 * np.sqrt(pCov[3][3]) / decay_time / 2 / np.pi * 1e3
+            captionStr = f"$\kappa$ fit [linear kHz]: {kappa_kHz:.3} $\pm$ {kappa_err:.3}"
+            fit_xpts = data["xpts"][fit_start:]
+            ax[0].plot(fit_xpts, fitter.expfunc(fit_xpts, *data["fit_amps"]), label=captionStr)
+            plt.sca(ax[0])
+            plt.legend()
         ax[0].set_title(f"Resonator Ring Down Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
         ax[0].set_ylabel("Amps [ADC units]")
         ax[0].set_xlabel("Time [us]")
@@ -620,8 +637,10 @@ class ResonatorRingDownExperiment(Experiment):
 
         # plot the IQ trajectory in the complex plane
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        plt.title(f"IQ trajectory Q{qTest}")
+        plt.title(f"IQ trajectory Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
         ax.plot(data["avgi"], data["avgq"], ".-")
+        plt.plot(data["avgi"][0], data["avgq"][0], marker="o", markerfacecolor="g", markersize=5)
+        plt.plot(data["avgi"][-1], data["avgq"][-1], marker="o", markerfacecolor="r", markersize=5)
         plt.xlabel("I [ADC units]")
         plt.ylabel("Q [ADC units]")
         plt.tight_layout()
