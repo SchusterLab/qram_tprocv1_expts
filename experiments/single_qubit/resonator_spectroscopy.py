@@ -530,13 +530,17 @@ class ResonatorRingDownExperiment(Experiment):
             cfg = AttrDict(deepcopy(self.cfg))
 
             # Time to play the readout pulse
+            if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+                if "pulse_I_shapes" in self.cfg.expt and self.cfg.expt.pulse_I_shapes is not None:
+                    self.cfg.device.readout.readout_length = [self.cfg.expt.times_us[-1]] * num_qubits_sample
+
             t_readout = min(t, self.cfg.device.readout.readout_length[qTest])
 
             # If requested is past the end of the (original) readout length, figure out the offset time for the trigger
             t_offset = max(t, t_readout)
             cycles_off_baseline = cfg.device.readout.trig_offset[0]
-            cfg.device.readout.trig_offset = [self.soc.us2cycles(t_offset) + cycles_off_baseline] * 4
-            print(cfg.device.readout.trig_offset)
+            cfg.device.readout.trig_offset = [self.soc.us2cycles(t_offset) + cycles_off_baseline] * num_qubits_sample
+            # print(cfg.device.readout.trig_offset)
             cfg.device.readout.readout_length = [t_readout] * num_qubits_sample  # set for all qubits
 
             # Handle slicing IQ pulses
@@ -549,18 +553,30 @@ class ResonatorRingDownExperiment(Experiment):
                 else:
                     cfg.expt.lengths = cfg.device.readout.readout_length
 
-
-            print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
+            # print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
 
             rspec = HistogramProgram(soccfg=self.soccfg, cfg=cfg)
             avgi, avgq = rspec.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
             datai, dataq = rspec.collect_shots()
             avgi = np.average(datai)
             avgq = np.average(dataq)
-            # amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
-            amp = np.abs((avgi + 1j * avgq))  # Calculating the magnitude
+            # amp = np.abs((avgi + 1j * avgq))  # Calculating the magnitude
+            amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
             phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
+            # plt.figure()
+            # plt.plot(datai, label="I")
+            # plt.axhline(np.average(datai))
+            # plt.plot(dataq, label="Q")
+            # plt.plot(np.abs(datai + 1j * dataq), label="Amp")
+            # plt.axhline(np.average(datai), color="b", label="I")
+            # plt.axhline(np.average(dataq), color="g", label="Q")
+            # plt.axhline(np.average(np.abs(datai + 1j * dataq)), label="Amp")
+            # plt.axhline(np.abs(avgi + 1j * avgq), color="r", label="Amp")
+            # plt.legend()
+            # plt.show()
+
             self.prog = rspec
+            # print("i", datai[50], dataq[50], np.abs((datai[50] + 1j * dataq[50])))  # Calculating the magnitude
 
             data["xpts"].append(t)
             data["avgi"].append(avgi)
@@ -578,29 +594,34 @@ class ResonatorRingDownExperiment(Experiment):
         if data is None:
             data = self.data
         qTest = self.cfg.expt.qTest
-        
-        if fit: 
-            # fit it with an exponential decay
-            fitparams = fitter.fitexp(data["xpts"], data["amps"])
-            print(fitparams)
-            data["fit_amp"], data["fit_err_amp"]  = fitparams
-            
-        
+
+        fit_start = np.argmin(np.abs(data["xpts"] - self.cfg.device.readout.readout_length[qTest]))
+        xpts = data["xpts"][fit_start:]
+        ypts_fit = data["amps"][fit_start:]
+        data["fit_amps"], data["fit_err_amps"] = fitter.fitexp(xpts, ypts_fit, fitparams=None)
+
         return data
 
-    def display(self, data=None, **kwargs):
+    def display(self, data=None, fit=False, **kwargs):
 
         if data is None:
             data = self.data
         qTest = self.cfg.expt.qTest
 
         fig, ax = plt.subplots(4, 1, figsize=(10, 10))
-        ax[0].plot(data["xpts"], data["amps"], '.-')
-        if "fit_amp" in data:
-            ax[0].plot(data["xpts"], fitter.expfunc(data["xpts"], *data["fit_amp"]))
-            # add the decay time to the plot
-            kappa = 1/data["fit_amp"][-1]/2/np.pi
-            ax[0].text(0.5, 0.5, f"kappa_ext: {kappa:.2f} MHz", transform=ax[0].transAxes)
+        ax[0].plot(data["xpts"], data["amps"], ".-")
+        if fit:
+            fit_start = np.argmin(np.abs(data["xpts"] - self.cfg.device.readout.readout_length[qTest]))
+            p = data["fit_amps"]
+            pCov = data["fit_err_amps"]
+            decay_time = p[3]
+            kappa_kHz = 1 / decay_time / 2 / np.pi * 1e3
+            kappa_err = 1 / kappa_kHz**2 * np.sqrt(pCov[3][3]) / decay_time / 2 / np.pi * 1e3
+            captionStr = f"$\kappa$ fit [linear kHz]: {kappa_kHz:.3} $\pm$ {kappa_err:.3}"
+            fit_xpts = data["xpts"][fit_start:]
+            ax[0].plot(fit_xpts, fitter.expfunc(fit_xpts, *data["fit_amps"]), label=captionStr)
+            plt.sca(ax[0])
+            plt.legend()
         ax[0].set_title(f"Resonator Ring Down Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
         ax[0].set_ylabel("Amps [ADC units]")
         ax[0].set_xlabel("Time [us]")
@@ -616,10 +637,15 @@ class ResonatorRingDownExperiment(Experiment):
 
         # plot the IQ trajectory in the complex plane
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        # enforce the same scale for both axes
-        ax.set_aspect('equal', adjustable='datalim')
-        ax.plot(data["avgi"], data["avgq"], '.-')
-        
+        plt.title(f"IQ trajectory Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}")
+        ax.plot(data["avgi"], data["avgq"], ".-")
+        plt.plot(data["avgi"][0], data["avgq"][0], marker="o", markerfacecolor="g", markersize=5)
+        plt.plot(data["avgi"][-1], data["avgq"][-1], marker="o", markerfacecolor="r", markersize=5)
+        plt.xlabel("I [ADC units]")
+        plt.ylabel("Q [ADC units]")
+        plt.tight_layout()
+        plt.show()
+
     def save_data(self, data=None):
         print(f"Saving {self.fname}")
         super().save_data(data=data)
