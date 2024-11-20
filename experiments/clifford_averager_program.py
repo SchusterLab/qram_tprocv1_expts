@@ -206,6 +206,29 @@ def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles, amplitude_m
     return ps_thresholds
 
 
+
+def filter(t, kappa_ext, kappa_int, chi, func, kerr=0, **kwargs):
+    """
+    Find the drive function to get a resonator response of func,
+    given that the response function occurs when the resonator has intrinsic frequency
+    that is chi away from the drive.
+    """
+    # _f1 = (kappa/2 + 1j*chi)*func(t, **kwargs)
+    _f1 = ((kappa_ext + kappa_int)/2 + 1j*chi)*func(t, **kwargs)
+    _f2 = (func(t + 1e-7, **kwargs) - func(t - 1e-7, **kwargs))/(2e-7)
+    
+    a_in = -np.sqrt(2/kappa_ext)*(_f1 + _f2)
+    if kerr != 0:
+        _f1 =  ((kappa_ext + kappa_int)/2 +
+                1j*(chi + 4*kerr*np.abs(a_in)**2))*func(t, **kwargs)
+        a_in = -np.sqrt(2/kappa_ext)*(_f1 + _f2)
+    return a_in
+
+
+
+
+
+
 """
 Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2
 """
@@ -1265,6 +1288,16 @@ class CliffordAveragerProgram(AveragerProgram):
 
     def sync_all(self, t=0):
         super().sync_all(t=t, gen_t0=self.gen_delays)
+        
+    def flat_top(self, t, **kwargs):
+        # look for Tp in kwargs
+        Tp = kwargs['Tp']
+        t_rise = kwargs['t_rise']
+        # zero if t < 0 or t > Tp else 1
+        rise = np.where((t > 0) & (t < t_rise), np.sin(np.pi*t/t_rise/2)**2, 0)
+        flat = np.where((t >= t_rise) & (t <= Tp - t_rise), 1, 0)
+        fall = np.where(t > Tp - t_rise, np.sin(np.pi*(Tp-t)/t_rise/2)**2, 0)
+        return np.where((t > 0) & (t < Tp), rise + flat + fall, 0)
 
     def setup_readout(self):
         """
@@ -1282,6 +1315,42 @@ class CliffordAveragerProgram(AveragerProgram):
         pulse_Q_shapes
         times_us (should be just a 1d array that is the same for all channels in full_mux_chs)
         """
+        
+        if "resonator_reset" in self.cfg.expt and self.cfg.expt.resonator_reset:
+                        
+            kappa_ext = self.cfg.device.readout.kappa_ext
+            kerr = self.cfg.device.readout.kerr
+            t_rise = self.cfg.device.readout.t_rise_reset
+            readout_length = self.cfg.device.readout.readout_length
+            self.cfg.expt.full_mux_chs = self.cfg.hw.soc.dacs.readout.full_mux_chs
+            self.cfg.expt.mask = [0, 1, 2, 3]
+            
+            # check that all readout lengths are the same
+            assert len(set(readout_length)) == 1, "All readout lengths must be the same"
+            Tp = readout_length[0]
+            t_vec = np.linspace(0, Tp, int(Tp/1e-5))
+            
+            filters = []
+            
+            for q in range(self.num_qubits_sample):
+                filter_params = dict(Tp=Tp, t_rise=t_rise[q], kerr=kerr[q]*2*np.pi)
+                filters.append(filter(t_vec,
+                                      kappa_ext=2*np.pi*kappa_ext[q],
+                                      kappa_int=0,
+                                      chi=0,
+                                      func=self.flat_top,
+                                      **filter_params))
+                
+                
+            filters = np.array(filters)
+            pulse_I_shapes = np.real(filters)
+            pulse_Q_shapes = np.imag(filters)
+            times_us = t_vec
+            
+            self.cfg.expt.pulse_I_shapes = pulse_I_shapes
+            self.cfg.expt.pulse_Q_shapes = pulse_Q_shapes
+            self.cfg.expt.times_us = times_us
+        
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
@@ -1304,7 +1373,6 @@ class CliffordAveragerProgram(AveragerProgram):
             pulse_I_shapes = self.cfg.expt.pulse_I_shapes if "pulse_I_shapes" in self.cfg.expt else None
             pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes if "pulse_Q_shapes" in self.cfg.expt else None
             times_us = self.cfg.expt.times_us if "times_us" in self.cfg.expt else None
-
             if lengths is not None:
                 self.readout_lengths_adc = [
                     self.us2cycles(length, ro_ch=ro_ch) for length, ro_ch in zip(lengths, self.adc_chs)
@@ -2369,3 +2437,52 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
                     ch=self.swap_Q_chs[q], nqz=self.cfg.hw.soc.dacs.swap_Q.nyquist[q], mixer_freq=mixer_freq
                 )
         self.sync_all(100)
+
+
+class ReadoutResetPulser:
+    def initialize(self, kappa_ext_MHz, kappa_int_MHz, chi_MHz=0, kerr_MHz=0):
+        self.kappa_ext_MHz = kappa_ext_MHz
+        self.kappa_int_MHz = kappa_int_MHz
+        self.chi_MHz = chi_MHz
+        self.kerr_MHz = kerr_MHz
+
+    def filter(self, t, response_func, **kwargs):
+        """
+        Find the drive function to get a resonator response of response_func,
+        given that the response function occurs when the resonator has intrinsic frequency
+        that is chi away from the drive.
+        """
+        # _f1 = (kappa/2 + 1j*chi)*func(t, **kwargs)
+        _f1 = ((self.kappa_ext_MHz + self.kappa_int_MHz) / 2 + 1j * self.chi_MHz) * response_func(t, **kwargs)
+        _f2 = (response_func(t + 1e-7, **kwargs) - response_func(t - 1e-7, **kwargs)) / (2e-7)
+
+        a_in = -np.sqrt(2 / self.kappa_ext_MHz) * (_f1 + _f2)
+        if self.kerr_MHz != 0:
+            _f1 = (
+                (self.kappa_ext_MHz + self.kappa_int_MHz) / 2
+                + 1j * (self.chi_MHz + 4 * self.kerr_MHz * np.abs(a_in) ** 2)
+            ) * response_func(t, **kwargs)
+            a_in = -np.sqrt(2 / self.kappa_ext_MHz) * (_f1 + _f2)
+        return a_in
+
+    def sin_sqrd_func(self, t, Tp):
+        # zero if t < 0 or t > Tp else np.sin(np.pi*t/Tp)**2
+        return np.where((t < 0) | (t > Tp), 0, np.sin(np.pi * t / Tp) ** 2)
+
+    def flat_top(self, t, Tp, t_rise):
+        # zero if t < 0 or t > Tp else 1
+        rise = np.where((t > 0) & (t < t_rise), np.sin(np.pi * t / t_rise / 2) ** 2, 0)
+        flat = np.where((t >= t_rise) & (t <= Tp - t_rise), 1, 0)
+        fall = np.where(t > Tp - t_rise, np.sin(np.pi * (Tp - t) / t_rise / 2) ** 2, 0)
+
+        return np.where((t > 0) & (t < Tp), rise + flat + fall, 0)
+
+    def cavity_response(self, t, drive_func, **kwargs):
+        integrand = (
+            lambda t: (np.sqrt(self.kappa_ext_MHz) - self.kappa_MHz_ext / 2) ** 2
+            + self.chi_MHz**2 * drive_func(t, **kwargs) ** 2
+        )
+        return np.exp(-t / self.kappa_MHz_ext) * np.array([sp.integrate.quad(integrand, 0, t_i)[0] for t_i in t])
+
+    def steady_state_cavity_response(self):
+        return self.kappa_ext_MHz / ((self.kappa_ext_MHz / 2) ** 2 + self.chi_MHz**2)

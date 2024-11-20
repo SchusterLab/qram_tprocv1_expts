@@ -524,6 +524,11 @@ class NPulseExperiment(Experiment):
         if not self.cfg.expt.readout_ge:
             self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
             self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length_ef
+            
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+        
 
         # ================= #
         # Get single shot calibration for 1 qubit
@@ -577,7 +582,7 @@ class NPulseExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
-                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
                 ge_avgs_q[qTest] = [
                     np.average(Ig[qTest]),
@@ -593,7 +598,8 @@ class NPulseExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, 
+                                                                        amplitude_mode=full_mux_expt)
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -633,6 +639,7 @@ class NPulseExperiment(Experiment):
                     threshold=thresholds_q,
                     ge_avgs=ge_avgs_q,
                     post_process=self.cfg.expt.post_process,
+                    amplitude_mode=full_mux_expt,
                     progress=False,
                     verbose=False,
                 )
@@ -735,7 +742,13 @@ class NPulseExperiment(Experiment):
         current_gain = self.cfg.expt.gain
 
         plt.figure(figsize=(8, 5))
-        label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{"+ (str(2) if self.cfg.expt.test_pi_half else "") +"n}$)"
+        label = (
+            "($X_{\pi/2}, X_{"
+            + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2")
+            + "}^{"
+            + (str(2) if self.cfg.expt.test_pi_half else "")
+            + "n}$)"
+        )
         plt.subplot(
             111,
             title=title,
@@ -873,6 +886,9 @@ class PiMinusPiExperiment(Experiment):
             qZZ = qTest
 
         self.cfg.expt.pi_minuspi = True
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
 
         data = dict()
 
@@ -939,7 +955,7 @@ class PiMinusPiExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
-                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
                 ge_avgs_q[qTest] = [
                     np.average(Ig[qTest]),
@@ -955,7 +971,8 @@ class PiMinusPiExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, 
+                                                                        amplitude_mode=full_mux_expt)
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -1024,6 +1041,7 @@ class PiMinusPiExperiment(Experiment):
                         threshold=thresholds_q,
                         ge_avgs=ge_avgs_q,
                         post_process=self.cfg.expt.post_process,
+                        amplitude_mode=full_mux_expt,
                         progress=False,
                         verbose=False,
                     )
@@ -1508,7 +1526,7 @@ class PreSelectionPiMinusPiExperiment(Experiment):
 
                     counts_raw = tomo_analysis.sort_counts([shots_ps])
                     counts_ge_corrected = tomo_analysis.correct_readout_err([counts_raw], counts_calib)
-                    print(counts_calib, counts_raw, counts_ge_corrected)
+                    # print(counts_calib, counts_raw, counts_ge_corrected)
                     data["popln"][loop, icycle, itau] = counts_ge_corrected[0][1]
         data["popln"] = np.average(data["popln"], axis=0)
 
@@ -1549,7 +1567,8 @@ class PreSelectionPiMinusPiExperiment(Experiment):
         plt.figure(figsize=(7 * cols, 6))
         plt.suptitle(title)
 
-        if post_process is None: post_process = self.cfg.expt.post_process
+        if post_process is None:
+            post_process = self.cfg.expt.post_process
         if post_process == "threshold":
             data_name = "popln"
         else:
@@ -1643,6 +1662,10 @@ class CDistortPiMinusPiExperiment(Experiment):
         data["angles"] = None
         data["ge_avgs"] = None
         data["counts_calib"] = []
+        
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
 
         thresholds_q = ge_avgs_q = angles_q = fids_q = None
         if "post_process" not in self.cfg.expt.keys():  # threshold or scale
@@ -1692,7 +1715,7 @@ class CDistortPiMinusPiExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
-                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
                 ge_avgs_q[qTest] = [
                     np.average(Ig[qTest]),
@@ -1708,7 +1731,8 @@ class CDistortPiMinusPiExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q,
+                                                                          amplitude_mode=full_mux_expt)
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -1780,6 +1804,7 @@ class CDistortPiMinusPiExperiment(Experiment):
                         threshold=thresholds_q,
                         ge_avgs=ge_avgs_q,
                         post_process=self.cfg.expt.post_process,
+                        amplitude_mode=full_mux_expt,
                         progress=False,
                         verbose=False,
                     )
@@ -1984,6 +2009,10 @@ class IDistortDelayExperiment(Experiment):
         data["angles"] = None
         data["ge_avgs"] = None
         data["counts_calib"] = []
+        
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
 
         thresholds_q = ge_avgs_q = angles_q = fids_q = None
         if "post_process" not in self.cfg.expt.keys():  # threshold or scale
@@ -2033,7 +2062,7 @@ class IDistortDelayExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
-                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
                 ge_avgs_q[qTest] = [
                     np.average(Ig[qTest]),
@@ -2049,7 +2078,8 @@ class IDistortDelayExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, 
+                                                                        amplitude_mode=full_mux_expt)
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -2122,6 +2152,7 @@ class IDistortDelayExperiment(Experiment):
                         threshold=thresholds_q,
                         ge_avgs=ge_avgs_q,
                         post_process=self.cfg.expt.post_process,
+                        amplitude_mode=full_mux_expt,
                         progress=False,
                         verbose=False,
                     )
