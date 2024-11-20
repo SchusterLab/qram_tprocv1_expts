@@ -1336,13 +1336,18 @@ class CliffordAveragerProgram(AveragerProgram):
             filters = []
             
             for q in range(self.num_qubits_sample):
-                filter_params = dict(Tp=Tp, t_rise=t_rise[q], kerr=kerr[q]*2*np.pi)
-                filters.append(filter(t_vec,
-                                      kappa_ext=2*np.pi*kappa_ext[q],
-                                      kappa_int=0,
-                                      chi=0,
-                                      func=self.flat_top,
-                                      **filter_params))
+                if q != 1: 
+                    filter_params = dict(Tp=Tp, t_rise=t_rise[q], kerr=kerr[q]*2*np.pi)
+                    filters.append(filter(t_vec,
+                                        kappa_ext=2*np.pi*kappa_ext[q],
+                                        kappa_int=0,
+                                        chi=0,
+                                        func=self.flat_top,
+                                        **filter_params))
+                else:
+                    filters.append(np.ones_like(t_vec))
+                
+
                 
                 
             filters = np.array(filters)
@@ -1564,7 +1569,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 relative_amps=mux_gains_ch,
                 lengths=lengths_ch,
                 pulse_I_shapes=np.array(pulse_I_shapes_ch),
-                pulse_Q_shapes=-1* np.array(pulse_Q_shapes_ch) if pulse_Q_shapes is not None else None),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
+                pulse_Q_shapes=(-1* np.array(pulse_Q_shapes_ch) if pulse_Q_shapes is not None else None),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
                 times_us=times_us,
                 phase_deg=0,
                 plot_IQ=plot_IQ,
