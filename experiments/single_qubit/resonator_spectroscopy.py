@@ -608,15 +608,15 @@ class ResonatorRingDownExperiment(Experiment):
             data = self.data
         qTest = self.cfg.expt.qTest
 
-        fig, ax = plt.subplots(4, 1, figsize=(10, 10))
+        fig, ax = plt.subplots(4, 1, figsize=(8, 11))
         ax[0].plot(data["xpts"], data["amps"], ".-")
         if fit:
             fit_start = np.argmin(np.abs(data["xpts"] - self.cfg.device.readout.readout_length[qTest]))
             p = data["fit_amps"]
             pCov = data["fit_err_amps"]
             decay_time = p[3]
-            kappa_kHz = 1 / decay_time / 2 / np.pi * 1e3
-            kappa_err = 1 / kappa_kHz**2 * np.sqrt(pCov[3][3]) / decay_time / 2 / np.pi * 1e3
+            kappa_kHz = 1e3 / (decay_time * 2 * np.pi)
+            kappa_err = (1 / p[3] ** 2) * np.sqrt(pCov[3][3]) * 1e3 / (2 * np.pi)
             captionStr = f"$\kappa$ fit [linear kHz]: {kappa_kHz:.3} $\pm$ {kappa_err:.3}"
             fit_xpts = data["xpts"][fit_start:]
             ax[0].plot(fit_xpts, fitter.expfunc(fit_xpts, *data["fit_amps"]), label=captionStr)

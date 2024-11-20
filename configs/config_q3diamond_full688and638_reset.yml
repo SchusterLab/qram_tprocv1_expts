@@ -1,35 +1,45 @@
 device:
 
     readout:
-        trig_offset: 145 # [Clock ticks]
+        trig_offset: 150 # [Clock ticks]
         lo_sideband: [1, 1, 1, 1] # whether taking the +/- sideband after LO [we no longer have a readout LO]
 
         # HIGH POWER
         # frequency: [-392.35, 5794.5, 500, -230.5]
+        # frequency: [-390.96524283, 5795.0365011,  501.38662963, -229.45463576] # optimized for e readout
         # gain: [0.5, 0.12, 0.5, 0.2]
         # readout_length: [5, 5, 5, 5]
 
-        # frequency: [-391.0252717544333, 5794.5, 500, -229.94910723]
-        # gain: [0.04, 0.12, 0.5, 0.035]
-        # readout_length: [15, 5, 5, 15]
-
         # LOW POWER
-        # frequency: [-391.0252717544333, 5794.961666663333, 501.288233333334, -229.94910723]
-        frequency: [-391.0252717544333, -1405.0383334, 501.288233333334, -229.94910723]
-        gain: [0.04, 0.03, 0.18, 0.035]
-        readout_length: [15.0, 10.0, 5.0, 15.0]
-        frequency_ef: [-392.9315036040767, 5794.925333329999, 499.41074988962544, -231.40888647944814]
+        # frequency: [-389.975, 5795.76166666333297, 502.368233333334, -228.9] # g freq
+        # gain: [0.3, 0.06, 0.85, 0.75]
+        # # frequency: [-390.96524283, 5795.0365011, 501.38662963, -229.70463576] # chi shift from resonator g freq
+        # readout_length: [4, 4, 4, 4]
+
+        # Readout reset params
+        frequency: [-439.97500000000036, 0.0, 452.3682333333336, -278.89999999999964] # g freq
+        gain: [0.17, 0.05, 0.25, 0.17] # for use with the readout reset pulse
+        kappa_ext: [0.157, 0.065, 0.182, 0.104] # linear MHz
+        kerr: [-0.0045, 0, 0.008, -0.003] # linear MHz
+        t_rise_reset: [0.5, 1, 0.5, 0.5]
+        readout_length: [4, 4, 4, 4]
+
+        frequency_ef: [-391.80446161500305, 5794.287237348879, 500.35983051204073, -230.41370987900663]
         readout_length_ef: [10.0, 7.0, 4.0, 8.0] # [us]
 
         relax_delay: [450, 450, 450, 450] # [us]
         # readout_cool_trig_stack: [2, 2, 2, 2]
     qubit:
-        # f_ge: [4110.4080251717705, 4105.048189664584, 4110.198576889643, 4109.870151106654, 3442.8095108490056, 3448.190366688296, 3447.0857887636976, 3446.8874200312653, 4762.060705219546, 4761.102749662887, 4762.201572322125, 4761.678033261405, 4381.14185795623, 4380.370331938204, 4381.142621732222, 4381.679544300405] # these are the ramsey freqs
-        f_ge: [4111.128316516939, 4105.867592682015, 4110.994688934281, 4110.579369837695, 3443.482349236793, 3448.8244761496476, 3447.706823169816, 3447.5052085761054, 4762.743580751455, 4761.745710010409, 4762.873962226965, 4762.370786469688, 4380.292461267258, 4379.535103914169, 4380.328267473819, 4380.978717756275]
-        f_ef: [3885.0150973325517, 0.0, 0.0, 0.0, 0.0, 3348.490547076936, 0.0, 0.0, 4571.9056482340775, 4570.996526541673, 4572.845483074933, 0.0, 4209.8719428597715, 4205.61697813965, 0.0, 4208.228379127735]
+        f_ge: [4111.097866562327, 4105.838904759637, 4110.958153299016, 4110.546407850519, 3442.8755721075536, 3448.47856222815, 3447.060317317807, 3446.4929792801067, 4762.761504132457, 4761.823567235975, 4762.909473544484, 4762.369813422167, 4380.698604555338, 4379.604868123916, 4380.717837106693, 4381.248121020163]
+        
+        f_ge_robust: [4114.332017402744, 4114.332017402744, 4114.332017402744, 4114.332017402744, 3450.0540893078382, 3450.0540893078382, 3450.0540893078382, 3450.0540893078382, 4763.941, 4763.941, 4763.941, 4763.941, 4384.25034225973, 4384.25034225973, 4384.25034225973, 4384.25034225973]
+        # f_ge_half_robust:  [4111.097866562327, 4105.838904759637, 4110.958153299016, 4110.546407850519, 3442.8755721075536, 3448.1402562265434, 3447.060317317807, 3446.4929792801067, 4762.761504132457, 4761.823567235975, 4762.909473544484, 4762.369813422167, 4380.698604555338, 4379.604868123916, 4380.717837106693, 4381.248121020163]
+
+        f_ef: [3884.6269161242526, 0.0, 0.0, 0.0, 0.0, 3348.085433174199, 0.0, 0.0, 4571.9056482340775, 4570.996526541673, 4573.280687567687, 0.0, 4210.604799929417, 4205.61697813965, 0.0, 4208.990881064611]
+
         f_EgGf: [2686.53594683, 0, 2017.3, 2414.92850999] # [MHz] expect to be ge_1 + ef_1 - ge_0; drive on Q1 to perform a swap with Qx
 
-        f_EgGf_Q: [0, 0, 5883.653411964549, 5141.717729722623]
+        f_EgGf_Q: [0, 0, 5885.676294721705, 5145.713528156371]
         # drive on Qx to perform a swap with Q1. For Q2: set Q0 in g before starting. For Q3: set Q0 in e before starting
 
         # f_f0g1: [1185.65, 998.45, 1642.2333333333333, 1613.44860993] # [MHz] expect to be ge_1 + ef_1 - ge_0; drive on QX to perform a swap with resX
@@ -40,20 +50,15 @@ device:
         pulses:
             pi_ge:
                 sigma: [0.02, 0.02, 0.02, 0.02, 0.025, 0.025, 0.025, 0.025, 0.015, 0.015, 0.015, 0.015, 0.025, 0.025, 0.025, 0.025] # [us]
-                gain: [1859, 1914, 0, 1855, 2834, 2628, 2648, 2631, 14489, 14572, 14389, 14639, 963, 959, 974, 963]
-                half_gain: [1864, 1867, 1871, 1873, 2511, 2319, 2341, 2320, 14796, 14866, 14631, 14805, 856, 852, 858, 856] # calibrate by using half of the sigma in us, then recalibrate the gain
-                # half_gain: [1866, 1870, 1872, 1873, 2497, 2311, 0, 0, 14468, 0, 14615, 14464, 852, 0, 855, 856] # ramsey
+                gain: [1849, 1914, 0, 1855, 2834, 2504, 2648, 2631, 14489, 14572, 14736, 14639, 963, 959, 974, 935]
+                half_gain: [1856, 1835, 1873, 1867, 2382, 2201, 2248, 2289, 14616, 14662, 14508, 14535, 819, 819, 816, 819] # calibrate by using half of the sigma in us, then recalibrate the gain
                 half_correction_phase: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
                 half_gain_pi_sigma: [927, 0, 0, 0, 0, 1315, 0, 0, 0, 0, 7212, 0, 0, 0, 0, 460] # calibrate using same sigma, recalibrate the gain
-                # sigma: [0.02, 0.02, 0.02, 0.02, 0.025, 0.036, 0.025, 0.025, 0.015, 0.015, 0.015, 0.015, 0.025, 0.025, 0.025, 0.025] # [us]
-                # gain: [1859, 1914, 0, 1855, 2834, 2628, 2648, 2631, 14489, 14572, 14389, 14639, 963, 959, 974, 963]
-                # half_gain: [1858, 1858, 0, 0, 0, 1828, 0, 0, 0, 0, 14615, 0, 855, 0, 859, 856] # calibrate by using half of the sigma in us, then recalibrate the gain
-                # half_gain_pi_sigma: [927, 0, 0, 0, 0, 1315, 0, 0, 0, 0, 7212, 0, 0, 0, 0, 460] # calibrate using same sigma, recalibrate the gain
                 type: 'gauss'
             pi_ef:
                 sigma: [0.02, 0.02, 0.02, 0.02, 0.025, 0.025, 0.025, 0.025, 0.015, 0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.03] # [us]
-                gain: [1346, 0, 0, 0, 0, 1951, 0, 0, 10000, 10079, 10041, 0, 734, 718, 0, 717]
-                half_gain: [1261, 0, 0, 0, 0, 1941, 0, 0, 0, 10147, 10121, 9979, 535, 528, 0, 529] # calibrate by using half of the sigma in us, then recalibrate the gain
+                gain: [1280, 0, 0, 0, 0, 1912, 0, 0, 10000, 10079, 10015, 0, 734, 718, 0, 523]
+                half_gain: [1261, 0, 0, 0, 0, 1941, 0, 0, 0, 10147, 9845, 9979, 528, 528, 0, 518] # calibrate by using half of the sigma in us, then recalibrate the gain
                 half_gain_pi_sigma: [673, 0, 0, 0, 0, 975, 0, 0, 0, 0, 5049, 0, 350, 0, 0, 337] # calibrate by using half of the sigma in us, then recalibrate the gain
                 type: 'gauss'
             pi_EgGf: # drive on Q1 to perform a swap with Qx
@@ -61,11 +66,8 @@ device:
                 sigma: [0.586, 0, 0.8, 0.44643] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
                 type: 'flat_top'
             pi_EgGf_Q: # drive on Qx to perform a swap with Q1. For Q2: set Q0 in g before starting. For Q3: set Q0 in e before starting
-                gain: [0, 0, 19655, 15344]
-                sigma: [0, 0, 0.4361071627609746, 0.2878957887434301] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
-
-                # gain: [0, 0, 30000, 15607]
-                # sigma: [0, 0, 0.3261001701564052, 0.3047974366625188] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
+                gain: [0, 0, 19500, 15088]
+                sigma: [0, 0, 0.4524085976144402, 0.3229981046477775] # [us], assume 3 clock cycle * 4 sigma ramp, this is the "total length" for a flat top pulse
 
                 phase: [0, 0, 18.0, 24.0] # in degrees, this should be the 2x the phase that shows up in the tomo
                 half_sigma: [0, 0, 0.212, 0.172]
@@ -88,11 +90,8 @@ device:
                 filename: '240920_qram_4q_2qubit_+egg'
             
             pihalf_ge_robust:
-                gain_q0: [0, 0, 0, 0]
-                gain_q1: [0, 0, 0, 0]
-                gain_q2: [0, 0, 0, 0]
-                gain_q3: [0, 0, 0, 0]
-                filename: ['', '', '', '']
+                gain: [7553, 7553, 7553, 7553, 4957, 4957, 4957, 4957, 31856, 31856, 31856, 31856, 3580, 3580, 3580, 3580]
+                filename: ['X_2_Q0', 'X_2_Q1', 'X_2_Q2', 'X_2_Q3']
 
             # pi_ge_crosstalk: # pulse to apply on Qx to cancel drive crosstalk during simultaneous pi_EgGf_Q pulses on Q2, Q3
             #     delta: [0, 50, 0, 0] # f_crosstalk - f_ge
@@ -144,9 +143,10 @@ hw:
                 mixer_freq: 0
             readout:
                 ch: [6, 4, 6, 6]
+                full_mux_chs: [5, 4, 5, 5]
                 type: ['mux4', 'full', 'mux4', 'mux4']
+                mixer_freq: [7250, 5795.8115578931565, 7250, 7250] # [MHz] freq to mix up
                 # mixer_freq: [7200, 0, 7200, 7200] # [MHz] freq to mix up
-                mixer_freq: [7200, 7200, 7200, 7200] # [MHz] freq to mix up
                 nyquist: [2, 2, 2, 2]
             res_pump:
                 ch: 4
@@ -155,20 +155,21 @@ hw:
                 nyquist: 2
             delay_chs:
                 ch: [0, 1, 2, 3, 4, 5, 6]
-                # delay_ns: [8.7, 8.5, 0, 7.6, 24, 20, 74.5]
-                delay_ns: [8.7, 8.5, 0, 7.6, 24, 20, 104.5]
+                delay_ns: [4.0, 0.0, 5.0, 3.0, 25, 60, 71]
         adcs:
             readout:
                 ch: [0, 1, 2, 3]
     lo:
         twpa:
             # # OPT FOR ALL
-            # frequency: 8180.0e6
-            # power: -1.8846153846153846 # min -40, max +15 dBm
+            frequency: 8210.0e6
+            # frequency: 8240.0e6
+            power: -1.5 # min -40, max +15 dBm
+            # power: -0.65 # min -40, max +15 dBm
 
             # OPT FOR Q2, Q3
-            frequency: 8170.0e6
-            power: -1.0 # min -40, max +15 dBm
+            # frequency: 8170.0e6
+            # power: -1.0 # min -40, max +15 dBm
 
             # # OPT FOR Q1
             # frequency: 8270.0e6
