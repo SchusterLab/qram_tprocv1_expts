@@ -83,6 +83,8 @@ def general_hist(
     title=None,
     export=False,
     check_qnd=False,
+    log_mode=False,
+    check_temp=False,
 ):
 
     """
@@ -183,6 +185,9 @@ def general_hist(
     Loop over check states
     """
     y_max = 0
+    if check_temp:
+        assert "g_1" in state_labels and "g_s1" in state_labels
+    print("using amplitude mode", amplitude_mode)
     for check_i, data_check in enumerate(iqshots):
         state_label = state_labels[check_i]
 
@@ -292,6 +297,12 @@ def general_hist(
             if state_label == "g_1":
                 n_g_1 = n
 
+        if check_temp:
+            if state_label == "g_1":
+                n_g_1 = n
+            if state_label == "g_s1":
+                n_g_s1 = n
+
     if check_qnd:
         n_diff = np.abs((n_g_0 - n_g_1))
         n_diff_qnd = np.sum(n_diff) / 2 / np.sum(n_g_0)
@@ -331,7 +342,6 @@ def general_hist(
             if plot:
                 y = fitter.double_gaussian(bins[:-1], *popt)
                 y_norm = y / y.sum()
-
                 axs[1, 0].plot(
                     bins[:-1],
                     y_norm,
@@ -357,6 +367,16 @@ def general_hist(
         # (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
         fids.append(0.5 * (1 - n_tot_g[tind:].sum() / n_tot_g.sum() + 1 - n_tot_e[:tind].sum() / n_tot_e.sum()))
 
+    if check_temp:
+        no_ps_gg = n_g_1[:tind].sum()
+        no_ps_ge = n_g_1[tind:].sum()
+        ps_gg = n_g_s1[:tind].sum()
+        ps_ge = n_g_s1[tind:].sum()
+        print("no_ps_gg", no_ps_gg)
+        print("no_ps_ge", no_ps_ge)
+        print("ps_gg", ps_gg)
+        print("ps_ge", ps_ge)
+
     if plot:
         axs[0, 1].set_title(f"Rotated ($\\theta={theta*180/np.pi:.5}^\\circ$)", fontsize=13)
 
@@ -374,6 +394,9 @@ def general_hist(
         axs[0, 0].legend(prop=prop)
         axs[0, 1].legend(prop=prop)
         axs[1, 0].legend(prop=prop)
+        if log_mode:
+            axs[1, 0].set_yscale("log")
+            axs[1, 0].set_ylim(0.0001, 1.1 * y_max)
         axs[1, 1].legend(prop=prop)
 
         if export:
@@ -389,7 +412,7 @@ def general_hist(
         return_data += [popts, pcovs]
     if check_qnd:
         return_data += [n_diff_qnd]
-        
+
     print(len(return_data))
     print(return_data)
 
@@ -471,6 +494,8 @@ def multihist(
     title=None,
     export=False,
     check_qnd=False,
+    log_mode=False,
+    check_temp=False,
 ):
     """
     Assumes data is passed in via data["iqshots"] = [(idata, qdata)]*len(check_states), idata=[... *num_shots]*num_qubits_sample
@@ -516,6 +541,8 @@ def multihist(
         title=title,
         export=export,
         check_qnd=check_qnd,
+        log_mode=log_mode,
+        check_temp=check_temp,
     )
     if check_qnd:
         data["n_diff_qnd"] = return_data[-1]
@@ -1102,19 +1129,35 @@ class MultiReadoutExperiment(Experiment):
                 check_states.append(f"f")  # indexed as 1 in data['iqshots] to match with e_states specification below
             data["iqshots"].append((data["Ie_baseline"][:, 0, :], data["Qe_baseline"][:, 0, :]))
             check_states.append(f"e")
-            data["ge_avgs"] = [
-                np.average(data["Ig_baseline"][qTest, 0, :]),
-                np.average(data["Qg_baseline"][qTest, 0, :]),
-                np.average(data["Ie_baseline"][qTest, 0, :]),
-                np.average(data["Qe_baseline"][qTest, 0, :]),
-            ]
-            if self.cfg.expt.check_f:
-                data["gf_avgs"] = [
+            if amplitude_mode:
+                data["ge_avgs"] = [
+                    np.average(np.abs(data["Ig_baseline"][qTest, 0, :] + 1j * data["Qg_baseline"][qTest, 0, :])),
+                    np.zeros_like(data["Qg_baseline"][qTest, 0, :]),
+                    np.average(np.abs(data["Ie_baseline"][qTest, 0, :] + 1j * data["Qe_baseline"][qTest, 0, :])),
+                    np.zeros_like(data["Qe_baseline"][qTest, 0, :]),
+                ]
+            else:
+                data["ge_avgs"] = [
                     np.average(data["Ig_baseline"][qTest, 0, :]),
                     np.average(data["Qg_baseline"][qTest, 0, :]),
-                    np.average(data["If_baseline"][qTest, 0, :]),
-                    np.average(data["Qf_baseline"][qTest, 0, :]),
+                    np.average(data["Ie_baseline"][qTest, 0, :]),
+                    np.average(data["Qe_baseline"][qTest, 0, :]),
                 ]
+            if self.cfg.expt.check_f:
+                if amplitude_mode:
+                    data["ge_avgs"] = [
+                        np.average(np.abs(data["Ig_baseline"][qTest, 0, :] + 1j * data["Qg_baseline"][qTest, 0, :])),
+                        np.zeros_like(data["Qg_baseline"][qTest, 0, :]),
+                        np.average(np.abs(data["If_baseline"][qTest, 0, :] + 1j * data["Qf_baseline"][qTest, 0, :])),
+                        np.zeros_like(data["Qf_baseline"][qTest, 0, :]),
+                    ]
+                else:
+                    data["gf_avgs"] = [
+                        np.average(data["Ig_baseline"][qTest, 0, :]),
+                        np.average(data["Qg_baseline"][qTest, 0, :]),
+                        np.average(data["If_baseline"][qTest, 0, :]),
+                        np.average(data["Qf_baseline"][qTest, 0, :]),
+                    ]
 
         if "n_trig" not in self.cfg.expt:
             n_trig = 1
@@ -1181,11 +1224,12 @@ class MultiReadoutExperiment(Experiment):
             verbose=verbose,
             check_qnd=check_qnd,
             amplitude_mode=amplitude_mode,
+            plot=plot,
         )
 
         if not fit:
             return_data = multihist_results
-            
+
             data["fids"] = return_data[0]
             data["angle"] = return_data[2]
             data["thresholds"] = return_data[1]
@@ -1193,7 +1237,7 @@ class MultiReadoutExperiment(Experiment):
                 data["n_diff_qnd"] = return_data[-1]
         else:
             return_data = multihist_results
-            
+
             data["fids"] = return_data[0]
             data["angle"] = return_data[2]
             data["thresholds"] = return_data[1]
@@ -1218,7 +1262,7 @@ class MultiReadoutExperiment(Experiment):
                 ge_avgs_allq[qTest] = data["ge_avgs"] if not self.cfg.expt.check_f else data["ge_avgs"]
 
                 if not (opti_post_select):
-                    print('not opti post select')
+                    print("not opti post select")
                     ps_threshold = ps_threshold_adjust(
                         ps_thresholds_init=thresholds_allq,
                         adjust=ps_adjust,
@@ -1232,16 +1276,25 @@ class MultiReadoutExperiment(Experiment):
                     for i_readout in range(self.cfg.expt.n_init_readout + 1):
                         Ig_readout = data["Ig"][qTest, i_readout, :]
                         Qg_readout = data["Qg"][qTest, i_readout, :]
+                        if amplitude_mode:
+                            amp_g_readout = np.abs(Ig_readout + 1j * Qg_readout)
                         if i_readout > 0:
                             data[f"Ig_select{i_readout}"] = Ig_readout[keep_prev]
                             data[f"Qg_select{i_readout}"] = Qg_readout[keep_prev]
                         Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout, Qg_readout, data["angle"])
-                        keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
+
+                        if amplitude_mode:
+                            keep_prev = np.logical_and(keep_prev, amp_g_readout < ps_threshold)
+                        else:
+                            keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
 
                 else:
-                    print('opti post select')
+                    print("opti post select")
                     ps_adjust = [0] * num_qubits_sample
-                    ps_adjust_qb = np.linspace(-2.3, 2, 20)
+                    if amplitude_mode:
+                        ps_adjust_qb = np.linspace(0, 0.5, 20)
+                    else:
+                        ps_adjust_qb = np.linspace(-2.3, 2, 20)
                     n_diff_vec = np.zeros_like(ps_adjust_qb)
                     threshold_vec = np.zeros_like(ps_adjust_qb)
                     percent_kept_vec = np.zeros_like(ps_adjust_qb)
@@ -1249,11 +1302,25 @@ class MultiReadoutExperiment(Experiment):
 
                     Ig_readout_base = data["Ig"][qTest, 0, :]
                     Qg_readout_base = data["Qg"][qTest, 0, :]
-                    Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout_base, Qg_readout_base, data["angle"])
-                    span = (np.max(Ig_readout_rot) - np.min(Ig_readout_rot)) / 2
-                    midpoint = (np.max(Ig_readout_rot) + np.min(Ig_readout_rot)) / 2
+                    if amplitude_mode:
+                        amp_g_readout_base = np.abs(Ig_readout_base + 1j * Qg_readout_base)
+                    else:
+                        Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(
+                            Ig_readout_base, Qg_readout_base, data["angle"]
+                        )
+
+                    if amplitude_mode:
+                        span = (np.max(amp_g_readout_base) - np.min(amp_g_readout_base)) / 2
+                        midpoint = (np.max(amp_g_readout_base) + np.min(amp_g_readout_base)) / 2
+                    else:
+                        span = (np.max(Ig_readout_rot) - np.min(Ig_readout_rot)) / 2
+                        midpoint = (np.max(Ig_readout_rot) + np.min(Ig_readout_rot)) / 2
+
                     xlims = [midpoint - span, midpoint + span]
-                    n, bins = np.histogram(Ig_readout_base, bins=n_bins, range=xlims)
+                    if amplitude_mode:
+                        n, bins = np.histogram(amp_g_readout_base, bins=n_bins, range=xlims)
+                    else:
+                        n, bins = np.histogram(Ig_readout_base, bins=n_bins, range=xlims)
                     n_scaled = n / np.sum(n)
 
                     n_ps_tab = []
@@ -1272,7 +1339,10 @@ class MultiReadoutExperiment(Experiment):
                             angles=angles_allq,
                         )[qTest]
                         threshold_vec[idx] = ps_threshold
-                        keep_prev = np.ones_like(Ig_readout_rot)
+                        if amplitude_mode:
+                            keep_prev = np.ones_like(amp_g_readout_base)
+                        else:
+                            keep_prev = np.ones_like(Ig_readout_rot)
 
                         for i_readout in range(1, self.cfg.expt.n_init_readout + 1):
 
@@ -1280,15 +1350,27 @@ class MultiReadoutExperiment(Experiment):
                                 Ig_temp = data["Ig"][qTest, i_readout, :]
                                 Qg_temp = data["Qg"][qTest, i_readout, :]
                                 Ig_temp_rot, Qg_temp_rot = self.rot_iq_data(Ig_temp, Qg_temp, data["angle"])
-                                n_prev, bins_prev = np.histogram(Ig_temp_rot, bins=n_bins, range=xlims)
+
+                                if amplitude_mode:
+                                    amp_g_temp = np.abs(Ig_temp_rot + 1j * Qg_temp_rot)
+                                    n_prev, bins_prev = np.histogram(amp_g_temp, bins=n_bins, range=xlims)
+                                else:
+                                    n_prev, bins_prev = np.histogram(Ig_temp_rot, bins=n_bins, range=xlims)
                                 n_prev_cum = np.cumsum(n_prev) / np.sum(n_prev)
 
-                            keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
+                            if amplitude_mode:
+                                keep_prev = np.logical_and(keep_prev, amp_g_readout_base < ps_threshold)
+                            else:
+                                keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
                             Ig_ps = Ig_temp_rot[keep_prev]
                             Qg_ps = Qg_temp_rot[keep_prev]
                             percent_kept_vec[idx] = np.sum(keep_prev) / len(keep_prev)
 
-                            n_ps, bins_ps = np.histogram(Ig_ps, bins=n_bins, range=xlims)
+                            if amplitude_mode:
+                                amp_g_ps = np.abs(Ig_ps + 1j * Ig_ps)
+                                n_ps, bins_ps = np.histogram(amp_g_ps, bins=n_bins, range=xlims)
+                            else:
+                                n_ps, bins_ps = np.histogram(Ig_ps, bins=n_bins, range=xlims)
                             n_ps_cum = np.cumsum(n_ps) / np.sum(n_ps)
 
                             n_diff = np.sum(np.abs(n_prev / np.sum(n_prev) - n_ps / np.sum(n_ps))) / 2
@@ -1303,6 +1385,7 @@ class MultiReadoutExperiment(Experiment):
                     figure_of_merite = n_diff_vec * percent_kept_vec
                     idx_max = np.argmax(figure_of_merite)
                     print(idx_max)
+                    print("threshold", threshold_vec)
                     thres_opt = threshold_vec[idx_max]
                     print(threshold_vec)
                     print("optimal threshold", thres_opt)
@@ -1329,11 +1412,9 @@ class MultiReadoutExperiment(Experiment):
 
                     data["n_no_ps"] = [n_g_prev, n_e_prev]
                     data["n_ps"] = [n_g, n_e]
-                    
-                    
-                    data['ncounts_no_ps'] = n_prev/np.sum(n_prev)
-                    data['ncounts_ps'] = _n_ps/np.sum(n_ps)
 
+                    data["ncounts_no_ps"] = n_prev / np.sum(n_prev)
+                    data["ncounts_ps"] = _n_ps / np.sum(n_ps)
 
                     if plot:
 
@@ -1393,8 +1474,6 @@ class MultiReadoutExperiment(Experiment):
                         ax1[1].set_xlabel("PS threshold adjustment")
                         ax1[1].set_ylabel("Percent Kept x Diff Pop")
                         fig1.tight_layout()
-                            
-        
 
         return data
 
@@ -1412,6 +1491,8 @@ class MultiReadoutExperiment(Experiment):
         verbose=True,
         export=False,
         amplitude_mode=False,
+        log_mode=False,
+        check_temp=False,
     ):
         """
         check_readouts should be a list of integers indicating which readout indices to check; use -1 to indicate the standard (last) readout
@@ -1458,6 +1539,8 @@ class MultiReadoutExperiment(Experiment):
             plot=True,
             export=export,
             amplitude_mode=amplitude_mode,
+            log_mode=log_mode,
+            check_temp=check_temp,
         )
 
         if fit:
@@ -1553,11 +1636,11 @@ class MultiReadoutOptExperiment(Experiment):
         for i_f, f in enumerate(tqdm(fpts, disable=not progress)):
             for i_g, g in enumerate(gainpts):
                 for i_l, l in enumerate(lenpts):
-                    multihist = MultiReadoutExperiment(soccfg=self.soccfg, config_file=self.config_file)
-                    multihist.cfg = deepcopy(self.cfg)
-                    multihist.cfg.device.readout.frequency[qTest] = f
-                    multihist.cfg.device.readout.gain[qTest] = g
-                    multihist.cfg.expt = deepcopy(self.cfg.expt)
+                    multihist_prog = MultiReadoutExperiment(soccfg=self.soccfg, config_file=self.config_file)
+                    multihist_prog.cfg = deepcopy(self.cfg)
+                    multihist_prog.cfg.device.readout.frequency[qTest] = f
+                    multihist_prog.cfg.device.readout.gain[qTest] = g
+                    multihist_prog.cfg.expt = deepcopy(self.cfg.expt)
 
                     check_e = True
                     if "check_f" in self.cfg.expt:
@@ -1567,22 +1650,22 @@ class MultiReadoutOptExperiment(Experiment):
                         check_e = not check_f
 
                     if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
-                        multihist.cfg.expt.lengths = [l] * 4
-                        multihist.cfg.device.readout.readout_length = [l] * 4
+                        multihist_prog.cfg.expt.lengths = [l] * 4
+                        multihist_prog.cfg.device.readout.readout_length = [l] * 4
                     else:
-                        multihist.cfg.device.readout.readout_length[qTest] = l
+                        multihist_prog.cfg.device.readout.readout_length[qTest] = l
 
-                    multihist.cfg.expt.check_e = check_e
+                    multihist_prog.cfg.expt.check_e = check_e
                     amplitude_mode = False
                     if "amplitude_mode" in self.cfg.expt:
                         amplitude_mode = self.cfg.expt.amplitude_mode
 
-                    multihist.go(analyze=False, display=False, progress=False, save=False)
-                    result = multihist.analyze(
+                    multihist_prog.go(analyze=False, display=False, progress=False, save=False)
+                    result = multihist_prog.analyze(
                         check_readouts=[0],
                         fit=False,
                         post_select=False,
-                        data=multihist.data,
+                        data=multihist_prog.data,
                         verbose=False,
                         amplitude_mode=amplitude_mode,
                         plot=False,

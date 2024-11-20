@@ -13,15 +13,14 @@ import experiments.fitting as fitter
 logger = logging.getLogger("qick.qick_asm")
 logger.setLevel(logging.ERROR)
 
-"""
-Takes ishots, qshots, angle, threshold all specified for 1 qubit only (so angle, threshold are both numbers)
-If angle is not None, applies the rotation to ishots, qshots
-If threshold is not None, bins shots into 0/1 if less than/greater than threshold
-If avg shots is True, returns the average value of ishots (qshots if specified)
-"""
-
 
 def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, amplitude_mode=False, avg_shots=False):
+    """
+    Takes ishots, qshots, angle, threshold all specified for 1 qubit only (so angle, threshold are both numbers)
+    If angle is not None, applies the rotation to ishots, qshots
+    If threshold is not None, bins shots into 0/1 if less than/greater than threshold
+    If avg shots is True, returns the average value of ishots (qshots if specified)
+    """
     if amplitude_mode:
         assert qshots_1q is not None
     ishots_1q = np.array(ishots_1q)
@@ -56,20 +55,6 @@ def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, 
     return ifinal, qfinal
 
 
-"""
-final_qubit: qubit whose final, post selected shots should be returned
-all_ishots_raw_q: ishots for each qubit, shape should be (adc_chs, n_init_readout + 1, reps)
-all_qshots_raw_q: optional qshots if ishots was not already rotated
-angles: if specified, combines ishots_raw and qshots_raw to get the rotated shots
-ps_thresholds: post selection thresholds for all qubits. Make sure these have been calibrated for each of ps_qubits!
-ps_qubits: qubits to do post selection on
-post_process: post processing on the final readout, 'threshold' or 'scale'
-thresholds: thresholding for all qubits. Only uses the value for the final readout, and only does so if post_process='threshold (1 qubit only)
-    
-returns: shots_final for final_qubit only, post processed as requested
-"""
-
-
 def post_select_shots(
     final_qubit,
     all_ishots_raw_q,
@@ -84,6 +69,20 @@ def post_select_shots(
     verbose=False,
     return_keep_indices=False,
 ):
+
+    """
+    final_qubit: qubit whose final, post selected shots should be returned
+    all_ishots_raw_q: ishots for each qubit, shape should be (adc_chs, n_init_readout + 1, reps)
+    all_qshots_raw_q: optional qshots if ishots was not already rotated
+    angles: if specified, combines ishots_raw and qshots_raw to get the rotated shots
+    ps_thresholds: post selection thresholds for all qubits. Make sure these have been calibrated for each of ps_qubits!
+    ps_qubits: qubits to do post selection on
+    post_process: post processing on the final readout, 'threshold' or 'scale'
+    thresholds: thresholding for all qubits. Only uses the value for the final readout, and only does so if post_process='threshold (1 qubit only)
+
+    returns: shots_final for final_qubit only, post processed as requested
+    """
+
     assert len(all_ishots_raw_q.shape) == 3
     if angles is not None:
         assert all_qshots_raw_q is not None
@@ -147,17 +146,16 @@ def post_select_shots(
     return shots_final[keep_prev]
 
 
-"""
-Given a set of ps_thresholds_init for all qubits, adjust by ratio. The ratio is defined relative to the
-ge_avgs provided as [Ig, Qg, Ie, Qe]*num_qubits, which will be rotated by angles for each of the qubits;
-Adjust should be specified for each qubit
-Adjust = 0 indicates keep the ps_threshold as the default threshold point
-Adjust < 0: adjust = -1 indicates to set the ps_threshold to the (rotated) g avg value, linear scaling between 0 and -1
-Adjust > 0: adjust = +1 indicates to set the ps_threshold to the (rotated) e avg value, linear scaling between 0 and 1
-"""
-
-
 def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles, amplitude_mode=False):
+    """
+    Given a set of ps_thresholds_init for all qubits, adjust by ratio. The ratio is defined relative to the
+    ge_avgs provided as [Ig, Qg, Ie, Qe]*num_qubits, which will be rotated by angles for each of the qubits;
+    Adjust should be specified for each qubit
+    Adjust = 0 indicates keep the ps_threshold as the default threshold point
+    Adjust < 0: adjust = -1 indicates to set the ps_threshold to the (rotated) g avg value, linear scaling between 0 and -1
+    Adjust > 0: adjust = +1 indicates to set the ps_threshold to the (rotated) e avg value, linear scaling between 0 and 1
+    """
+
     num_qubits_sample = 4
     ps_thresholds_init = np.array(ps_thresholds_init)
     ge_avgs = np.array(ge_avgs)
@@ -206,35 +204,11 @@ def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles, amplitude_m
     return ps_thresholds
 
 
-
-def filter(t, kappa_ext, kappa_int, chi, func, kerr=0, **kwargs):
-    """
-    Find the drive function to get a resonator response of func,
-    given that the response function occurs when the resonator has intrinsic frequency
-    that is chi away from the drive.
-    """
-    # _f1 = (kappa/2 + 1j*chi)*func(t, **kwargs)
-    _f1 = ((kappa_ext + kappa_int)/2 + 1j*chi)*func(t, **kwargs)
-    _f2 = (func(t + 1e-7, **kwargs) - func(t - 1e-7, **kwargs))/(2e-7)
-    
-    a_in = -np.sqrt(2/kappa_ext)*(_f1 + _f2)
-    if kerr != 0:
-        _f1 =  ((kappa_ext + kappa_int)/2 +
-                1j*(chi + 4*kerr*np.abs(a_in)**2))*func(t, **kwargs)
-        a_in = -np.sqrt(2/kappa_ext)*(_f1 + _f2)
-    return a_in
-
-
-
-
-
-
-"""
-Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2
-"""
-
-
 class CliffordAveragerProgram(AveragerProgram):
+    """
+    Averager program that takes care of the standard pulse loading for basic X, Y, Z +/- pi and pi/2
+    """
+
     # def update(self):
     #     pass
 
@@ -836,10 +810,12 @@ class CliffordAveragerProgram(AveragerProgram):
         # print("pulse_I", pulse_I_shapes)
         # print("pulse_Q", pulse_Q_shapes)
 
-        tot_I_vs_us = np.zeros_like(times_us)
-        tot_Q_vs_us = np.zeros_like(times_us)
-        modulated_Is = np.zeros((len(mux_freqs), len(times_us)))
-        modulated_Qs = np.zeros((len(mux_freqs), len(times_us)))
+        modulated_times_us = np.linspace(0, times_us[-1], int(times_us[-1] / dt_us))
+
+        tot_I_vs_us = np.zeros_like(modulated_times_us)
+        tot_Q_vs_us = np.zeros_like(modulated_times_us)
+        modulated_Is = np.zeros((len(mux_freqs), len(modulated_times_us)))
+        modulated_Qs = np.zeros((len(mux_freqs), len(modulated_times_us)))
         if relative_amps is None:
             relative_amps = np.ones(len(mux_freqs))
         relative_amps = np.array(relative_amps)
@@ -847,24 +823,27 @@ class CliffordAveragerProgram(AveragerProgram):
         relative_amps *= bool_mask
         for q in mask:
             if use_const_lengths:
-                mask_func = relative_amps[q] * np.heaviside(lengths[q] - times_us, 0)
+                mask_func = relative_amps[q] * np.heaviside(lengths[q] - modulated_times_us, 0)
                 # print(relative_amps[q])
             else:
-                mask_func = relative_amps[q] * np.ones_like(times_us)
+                mask_func = relative_amps[q] * np.ones_like(modulated_times_us)
             mask_func[0] = 0
             mask_func[-1] = 0
-            pulse_I_shape = mask_func * pulse_I_shapes[q]
-            pulse_Q_shape = mask_func * pulse_Q_shapes[q]
 
-            modulated_I = pulse_I_shape * np.cos(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.sin(
-                mux_freqs[q] * 2 * np.pi * times_us
-            )
+            I_func = sp.interpolate.interp1d(times_us, pulse_I_shapes[q], kind="linear", fill_value=0)
+            Q_func = sp.interpolate.interp1d(times_us, pulse_Q_shapes[q], kind="linear", fill_value=0)
+            pulse_I_shape = mask_func * I_func(modulated_times_us)
+            pulse_Q_shape = mask_func * Q_func(modulated_times_us)
+
+            modulated_I = pulse_I_shape * np.cos(
+                mux_freqs[q] * 2 * np.pi * modulated_times_us
+            ) + pulse_Q_shape * np.sin(mux_freqs[q] * 2 * np.pi * modulated_times_us)
             modulated_Is[q] = modulated_I
             tot_I_vs_us += modulated_I
 
-            modulated_Q = -pulse_I_shape * np.sin(mux_freqs[q] * 2 * np.pi * times_us) + pulse_Q_shape * np.cos(
-                mux_freqs[q] * 2 * np.pi * times_us
-            )
+            modulated_Q = -pulse_I_shape * np.sin(
+                mux_freqs[q] * 2 * np.pi * modulated_times_us
+            ) + pulse_Q_shape * np.cos(mux_freqs[q] * 2 * np.pi * modulated_times_us)
             modulated_Qs[q] = modulated_Q
             tot_Q_vs_us += modulated_Q
 
@@ -872,13 +851,13 @@ class CliffordAveragerProgram(AveragerProgram):
         if plot_IQ:
             assert mixer_freq is not None
             plt.figure()
-            xpts = times_us
+            xpts = modulated_times_us
             for q in mask:
                 fourier = np.fft.fftshift(
                     np.abs(
                         np.fft.fft(
-                            modulated_Is[q] * np.cos(mixer_freq * 2 * np.pi * times_us)
-                            + modulated_Qs[q] * np.sin(mixer_freq * 2 * np.pi * times_us)
+                            modulated_Is[q] * np.cos(mixer_freq * 2 * np.pi * modulated_times_us)
+                            + modulated_Qs[q] * np.sin(mixer_freq * 2 * np.pi * modulated_times_us)
                         )
                     )
                 )
@@ -893,15 +872,15 @@ class CliffordAveragerProgram(AveragerProgram):
 
             plt.figure()
             for q in mask:
-                plt.plot(times_us, modulated_Is[q], label=f"I{q}")
-                plt.plot(times_us, modulated_Qs[q], label=f"Q{q}")
+                plt.plot(modulated_times_us, modulated_Is[q], label=f"I{q}")
+                plt.plot(modulated_times_us, modulated_Qs[q], label=f"Q{q}")
             plt.xlabel("Time [us]")
             plt.ylabel("Amplitude [a.u.]")
             plt.legend()
             plt.title(f"Pulse Envelopes")
             plt.show()
 
-        return tot_I_vs_us, tot_Q_vs_us, times_us
+        return tot_I_vs_us, tot_Q_vs_us, modulated_times_us
 
     def handle_full_mux_pulse(
         self,
@@ -955,6 +934,7 @@ class CliffordAveragerProgram(AveragerProgram):
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
         gain = maxv * np.sum(relative_amps) / len(mux_freqs)
+        assert times_us[-1] > 0, f"Full mux pulse length on gen ch {ch} must be greater than 0"
         # print("gain", gain, mask, mux_freqs, mixer_freq)
 
         self.handle_IQ_pulse(
@@ -1288,16 +1268,6 @@ class CliffordAveragerProgram(AveragerProgram):
 
     def sync_all(self, t=0):
         super().sync_all(t=t, gen_t0=self.gen_delays)
-        
-    def flat_top(self, t, **kwargs):
-        # look for Tp in kwargs
-        Tp = kwargs['Tp']
-        t_rise = kwargs['t_rise']
-        # zero if t < 0 or t > Tp else 1
-        rise = np.where((t > 0) & (t < t_rise), np.sin(np.pi*t/t_rise/2)**2, 0)
-        flat = np.where((t >= t_rise) & (t <= Tp - t_rise), 1, 0)
-        fall = np.where(t > Tp - t_rise, np.sin(np.pi*(Tp-t)/t_rise/2)**2, 0)
-        return np.where((t > 0) & (t < Tp), rise + flat + fall, 0)
 
     def setup_readout(self):
         """
@@ -1314,50 +1284,85 @@ class CliffordAveragerProgram(AveragerProgram):
         pulse_I_shapes
         pulse_Q_shapes
         times_us (should be just a 1d array that is the same for all channels in full_mux_chs)
+
+        To automatically set up readout reset using the cfg params, the minimal you need to specify is
+        full_mux_expt: True
+        resonator_reset: list of qubits to generate a reset pulse on the full_mux_chs
+        (other qubits will get a constant pulse)
         """
-        
-        if "resonator_reset" in self.cfg.expt and self.cfg.expt.resonator_reset:
-                        
-            kappa_ext = self.cfg.device.readout.kappa_ext
-            kerr = self.cfg.device.readout.kerr
-            t_rise = self.cfg.device.readout.t_rise_reset
-            readout_length = self.cfg.device.readout.readout_length
-            self.cfg.expt.full_mux_chs = self.cfg.hw.soc.dacs.readout.full_mux_chs
-            self.cfg.expt.mask = [0, 1, 2, 3]
-            
-            # check that all readout lengths are the same
-            assert len(set(readout_length)) == 1, "All readout lengths must be the same"
-            Tp = readout_length[0]
-            t_vec = np.linspace(0, Tp, int(Tp/1e-5))
-            
-            filters = []
-            
-            for q in range(self.num_qubits_sample):
-                filter_params = dict(Tp=Tp, t_rise=t_rise[q], kerr=kerr[q]*2*np.pi)
-                filters.append(filter(t_vec,
-                                      kappa_ext=2*np.pi*kappa_ext[q],
-                                      kappa_int=0,
-                                      chi=0,
-                                      func=self.flat_top,
-                                      **filter_params))
-                
-                
-            filters = np.array(filters)
-            pulse_I_shapes = np.real(filters)
-            pulse_Q_shapes = np.imag(filters)
-            times_us = t_vec
-            
-            self.cfg.expt.pulse_I_shapes = pulse_I_shapes
-            self.cfg.expt.pulse_Q_shapes = pulse_Q_shapes
-            self.cfg.expt.times_us = times_us
-        
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
 
+        if "resonator_reset" in self.cfg.expt and self.cfg.expt.resonator_reset is not None:
+            assert (
+                full_mux_expt
+            ), "Warning: you are trying to do resonator reset but have not specified cfg.full_mux_expt = True"
+
         if not full_mux_expt:
             self.setup_mux_gen_readout()
         else:
+            if "resonator_reset" in self.cfg.expt and self.cfg.expt.resonator_reset is not None:
+                assert (
+                    len(np.array(self.cfg.expt.resonator_reset)) > 0
+                ), "resonator_reset must be a list of qubits to apply reset pulse to; other qubits will receive a constant pulse of the same length as the reset pulse"
+
+                kappa_ext = self.cfg.device.readout.kappa_ext
+                kerr = self.cfg.device.readout.kerr
+                t_rise = self.cfg.device.readout.t_rise_reset
+                readout_length = self.cfg.device.readout.readout_length
+                self.cfg.expt.full_mux_chs = self.cfg.hw.soc.dacs.readout.full_mux_chs
+                self.cfg.expt.mask = [0, 1, 2, 3]
+
+                # check that all readout lengths are the same
+                assert len(set(readout_length)) == 1, "All readout lengths must be the same"
+                Tp = readout_length[0]
+                nstep = 500
+                times_us = np.linspace(0, Tp, nstep)
+                assert Tp > 0, "Readout pulse length must be greater than 0"
+
+                pulse_I_shapes = []
+                pulse_Q_shapes = []
+
+                if "plot_IQ" in self.cfg.expt and self.cfg.expt.plot_IQ:
+                    plt.figure(figsize=(5, 4))
+                    plt.suptitle(f"Readout Reset Pulses Masking {self.cfg.expt.resonator_reset}")
+
+                for q in range(self.num_qubits_sample):
+                    if q in self.cfg.expt.resonator_reset:
+                        readout_pulser = ReadoutResetPulser(
+                            kappa_ext_MHz=2 * np.pi * kappa_ext[q],
+                            kappa_int_MHz=0,
+                            chi_MHz=0,
+                            kerr_MHz=2 * np.pi * kerr[q],
+                        )
+                        _, (I_pulse, Q_pulse) = readout_pulser.flat_top_kerr_drive(
+                            t_rise=t_rise[q], Tp=Tp, num_filter=1, nstep=nstep
+                        )
+                    else:
+                        I_pulse, Q_pulse = np.ones((2, nstep))
+                    pulse_I_shapes.append(I_pulse)
+                    pulse_Q_shapes.append(Q_pulse)
+
+                    if "plot_IQ" in self.cfg.expt and self.cfg.expt.plot_IQ:
+                        plt.plot(times_us, I_pulse, label=f"I{q}")
+                        plt.plot(times_us, Q_pulse, label=f"Q{q}")
+
+                pulse_I_shapes = np.array(pulse_I_shapes)
+                pulse_Q_shapes = np.array(pulse_Q_shapes)
+
+                if "plot_IQ" in self.cfg.expt and self.cfg.expt.plot_IQ:
+                    plt.legend()
+                    plt.xlabel("Time [us]")
+                    plt.tight_layout()
+                    plt.show()
+
+                self.cfg.expt.pulse_I_shapes = pulse_I_shapes
+                self.cfg.expt.pulse_Q_shapes = pulse_Q_shapes
+                self.cfg.expt.times_us = times_us
+                self.cfg.expt.lengths = None
+
             assert "full_mux_chs" in self.cfg.expt and self.cfg.expt.full_mux_chs is not None
             full_mux_chs = self.cfg.expt.full_mux_chs
             assert "mask" in self.cfg.expt and self.cfg.expt.mask is not None
@@ -1562,6 +1567,8 @@ class CliffordAveragerProgram(AveragerProgram):
             #     pulse_I_shapes_ch,
             # )
 
+            assert max(mux_gains_ch) > 0, f"All mux gains are 0 for gen ch {full_mux_ch}"
+            assert len(mask_ch) > 0, f"Len of mask is 0 for gen_ch {full_mux_ch}"
             self.handle_full_mux_pulse(
                 name=f"measure",
                 ch=full_mux_ch,
@@ -2439,50 +2446,80 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
         self.sync_all(100)
 
 
+def sin_sqrd_func(t, Tp):
+    # zero if t < 0 or t > Tp else np.sin(np.pi*t/Tp)**2
+    return np.where((t < 0) | (t > Tp), 0, np.sin(np.pi * t / Tp) ** 2)
+
+
+def flat_top(t, Tp, t_rise):
+    # zero if t < 0 or t > Tp else 1
+    rise = np.where((t > 0) & (t < t_rise), np.sin(np.pi * t / t_rise / 2) ** 2, 0)
+    flat = np.where((t >= t_rise) & (t <= Tp - t_rise), 1, 0)
+    fall = np.where(t > Tp - t_rise, np.sin(np.pi * (Tp - t) / t_rise / 2) ** 2, 0)
+
+    return np.where((t > 0) & (t < Tp), rise + flat + fall, 0)
+
+
 class ReadoutResetPulser:
-    def initialize(self, kappa_ext_MHz, kappa_int_MHz, chi_MHz=0, kerr_MHz=0):
+    def __init__(self, kappa_ext_MHz, kappa_int_MHz, chi_MHz=0, kerr_MHz=0):
+        """
+        All frequencies should be provided as angular frequencies!
+        Each ReadoutResetPulser has private variables for resonator paramaters (kappa, chi, kerr)
+        """
         self.kappa_ext_MHz = kappa_ext_MHz
         self.kappa_int_MHz = kappa_int_MHz
         self.chi_MHz = chi_MHz
         self.kerr_MHz = kerr_MHz
 
-    def filter(self, t, response_func, **kwargs):
+    def filter(self, times_us, response_func, **kwargs):
         """
         Find the drive function to get a resonator response of response_func,
         given that the response function occurs when the resonator has intrinsic frequency
         that is chi away from the drive.
+
+        times_us can either be a single time or a np array
+
+        kwargs are any additional arguments for the desired response function
         """
         # _f1 = (kappa/2 + 1j*chi)*func(t, **kwargs)
-        _f1 = ((self.kappa_ext_MHz + self.kappa_int_MHz) / 2 + 1j * self.chi_MHz) * response_func(t, **kwargs)
-        _f2 = (response_func(t + 1e-7, **kwargs) - response_func(t - 1e-7, **kwargs)) / (2e-7)
+        _f1 = ((self.kappa_ext_MHz + self.kappa_int_MHz) / 2 + 1j * self.chi_MHz) * response_func(times_us, **kwargs)
+        _f2 = (response_func(times_us + 1e-7, **kwargs) - response_func(times_us - 1e-7, **kwargs)) / (2e-7)
 
         a_in = -np.sqrt(2 / self.kappa_ext_MHz) * (_f1 + _f2)
         if self.kerr_MHz != 0:
             _f1 = (
                 (self.kappa_ext_MHz + self.kappa_int_MHz) / 2
                 + 1j * (self.chi_MHz + 4 * self.kerr_MHz * np.abs(a_in) ** 2)
-            ) * response_func(t, **kwargs)
+            ) * response_func(times_us, **kwargs)
             a_in = -np.sqrt(2 / self.kappa_ext_MHz) * (_f1 + _f2)
         return a_in
 
-    def sin_sqrd_func(self, t, Tp):
-        # zero if t < 0 or t > Tp else np.sin(np.pi*t/Tp)**2
-        return np.where((t < 0) | (t > Tp), 0, np.sin(np.pi * t / Tp) ** 2)
-
-    def flat_top(self, t, Tp, t_rise):
-        # zero if t < 0 or t > Tp else 1
-        rise = np.where((t > 0) & (t < t_rise), np.sin(np.pi * t / t_rise / 2) ** 2, 0)
-        flat = np.where((t >= t_rise) & (t <= Tp - t_rise), 1, 0)
-        fall = np.where(t > Tp - t_rise, np.sin(np.pi * (Tp - t) / t_rise / 2) ** 2, 0)
-
-        return np.where((t > 0) & (t < Tp), rise + flat + fall, 0)
-
-    def cavity_response(self, t, drive_func, **kwargs):
+    def cavity_response(self, times_us, drive_func, **kwargs):
         integrand = (
             lambda t: (np.sqrt(self.kappa_ext_MHz) - self.kappa_MHz_ext / 2) ** 2
             + self.chi_MHz**2 * drive_func(t, **kwargs) ** 2
         )
-        return np.exp(-t / self.kappa_MHz_ext) * np.array([sp.integrate.quad(integrand, 0, t_i)[0] for t_i in t])
+        return np.exp(-times_us / self.kappa_MHz_ext) * np.array(
+            [sp.integrate.quad(integrand, 0, t_i)[0] for t_i in times_us]
+        )
 
-    def steady_state_cavity_response(self):
-        return self.kappa_ext_MHz / ((self.kappa_ext_MHz / 2) ** 2 + self.chi_MHz**2)
+    def kerr_drive(self, times_us, response_func, num_filter=1, **kwargs):
+        """
+        kwargs are any additional arguments for the desired response function
+        returns I and Q for the drive that will give the target response_func
+        """
+
+        assert num_filter in [1, 2], "Only implemnted filtering 1x or 2x"
+        if num_filter == 2:
+            assert abs(chi_MHz) > 0, "You are filtering twice but chi is 0, make sure this is right!"
+
+        drive_values = self.filter(times_us, response_func, **kwargs)
+        if num_filter > 1:
+            drive_values = self.filter(times_us, lambda t, **kwargs: self.filter(t, response_func, **kwargs), **kwargs)
+
+        return np.real(drive_values), np.imag(drive_values)
+
+    def flat_top_kerr_drive(self, t_rise, Tp, nstep=500, num_filter=1):
+        times_us = np.linspace(0, Tp, nstep)
+        kwargs = dict(Tp=Tp, t_rise=t_rise)
+        return times_us, self.kerr_drive(times_us, flat_top, num_filter=num_filter, **kwargs)
