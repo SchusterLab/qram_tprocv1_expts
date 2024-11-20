@@ -903,7 +903,7 @@ class MultiReadoutProgram(QutritAveragerProgram):
             adcs=self.adc_chs,
             adc_trig_offset=self.cfg.device.readout.trig_offset[0],
             wait=True,
-            syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in self.qubits])),
+            syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in range(self.num_qubits_sample)])),
         )
 
 
@@ -1219,6 +1219,7 @@ class MultiReadoutExperiment(Experiment):
 
                 if not (opti_post_select):
                     print('not opti post select')
+                    print('amplitude mode', amplitude_mode)
                     ps_threshold = ps_threshold_adjust(
                         ps_thresholds_init=thresholds_allq,
                         adjust=ps_adjust,
@@ -1229,14 +1230,25 @@ class MultiReadoutExperiment(Experiment):
                     data["ps_threshold"] = ps_threshold
 
                     keep_prev = np.ones_like(data["Ig"][qTest, 0, :])
-                    for i_readout in range(self.cfg.expt.n_init_readout + 1):
-                        Ig_readout = data["Ig"][qTest, i_readout, :]
-                        Qg_readout = data["Qg"][qTest, i_readout, :]
-                        if i_readout > 0:
-                            data[f"Ig_select{i_readout}"] = Ig_readout[keep_prev]
-                            data[f"Qg_select{i_readout}"] = Qg_readout[keep_prev]
-                        Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout, Qg_readout, data["angle"])
-                        keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
+                    print(amplitude_mode)
+                    if not(amplitude_mode):
+                        for i_readout in range(self.cfg.expt.n_init_readout + 1):
+                            Ig_readout = data["Ig"][qTest, i_readout, :]
+                            Qg_readout = data["Qg"][qTest, i_readout, :]
+                            if i_readout > 0:
+                                data[f"Ig_select{i_readout}"] = Ig_readout[keep_prev]
+                                data[f"Qg_select{i_readout}"] = Qg_readout[keep_prev]
+                            Ig_readout_rot, Qg_readout_rot = self.rot_iq_data(Ig_readout, Qg_readout, data["angle"])
+                            keep_prev = np.logical_and(keep_prev, Ig_readout_rot < ps_threshold)
+                            
+                    else: 
+                        print('amplitude mode')
+                        for i_readout in range(self.cfg.expt.n_init_readout + 1):
+                            amp_g_readout = np.abs(data["Ig"][qTest, i_readout, :] + 1j*data["Qg"][qTest, i_readout, :])
+                            if i_readout > 0:
+                                data[f"amp_g_select{i_readout}"] = amp_g_readout[keep_prev]
+                            keep_prev = np.logical_and(keep_prev, amp_g_readout < ps_threshold)
+  
 
                 else:
                     print('opti post select')

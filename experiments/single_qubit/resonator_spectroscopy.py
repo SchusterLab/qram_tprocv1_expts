@@ -540,11 +540,15 @@ class ResonatorRingDownExperiment(Experiment):
             cfg.device.readout.readout_length = [t_readout] * num_qubits_sample  # set for all qubits
 
             # Handle slicing IQ pulses
-            if "full_mux_expt" in self.cfg and self.cfg.expt.full_mux_expt:
-                if self.cfg.expt.pulse_I_shapes is not None:
+            if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+                if "pulse_I_shapes" in self.cfg.expt and self.cfg.expt.pulse_I_shapes is not None:
                     t_index = np.argmin(np.abs(t - self.cfg.expt.times_us))
-                    cfg.device.readout.pulse_I_shapes = self.cfg.expt.pulse_I_shapes[:, :t_index]
-                    cfg.device.readout.pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes[:, :t_index]
+                    cfg.expt.pulse_I_shapes = self.cfg.expt.pulse_I_shapes[:, :t_index]
+                    cfg.expt.pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes[:, :t_index]
+                    cfg.expt.times_us = self.cfg.expt.times_us[:t_index]
+                else:
+                    cfg.expt.lengths = cfg.device.readout.readout_length
+
 
             print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
 
@@ -553,7 +557,8 @@ class ResonatorRingDownExperiment(Experiment):
             datai, dataq = rspec.collect_shots()
             avgi = np.average(datai)
             avgq = np.average(dataq)
-            amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
+            # amp = np.average(np.abs((datai + 1j * dataq)))  # Calculating the magnitude
+            amp = np.abs((avgi + 1j * avgq))  # Calculating the magnitude
             phase = np.average(np.angle(datai + 1j * dataq))  # Calculating the phase
             self.prog = rspec
 

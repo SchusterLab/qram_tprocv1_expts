@@ -612,7 +612,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 params["gain"] = gain
             if ro_ch is not None:
                 params["ro_ch"] = ro_ch
-
+                
             assert params["freq_MHz"] > 0, "IQ pulse may not be calibrated for frequency"
             assert params["gain"] > 0, "IQ pulse may not be calibrated for gain"
             self.set_pulse_registers(
@@ -807,10 +807,13 @@ class CliffordAveragerProgram(AveragerProgram):
             times_us = np.linspace(0, tot_length_us, int(tot_length_us / dt_us))
             pulse_I_shapes = np.ones((len(mux_freqs), len(times_us)))
             pulse_Q_shapes = np.zeros((len(mux_freqs), len(times_us)))
+        
+        
+        print(pulse_I_shapes.shape)
+        print(pulse_Q_shapes.shape)
+        print(times_us.shape)   
+            
 
-        # print("times_us", times_us)
-        # print("pulse_I", pulse_I_shapes)
-        # print("pulse_Q", pulse_Q_shapes)
 
         tot_I_vs_us = np.zeros_like(times_us)
         tot_Q_vs_us = np.zeros_like(times_us)
@@ -824,7 +827,6 @@ class CliffordAveragerProgram(AveragerProgram):
         for q in mask:
             if use_const_lengths:
                 mask_func = relative_amps[q] * np.heaviside(lengths[q] - times_us, 0)
-                # print(relative_amps[q])
             else:
                 mask_func = relative_amps[q] * np.ones_like(times_us)
             mask_func[0] = 0
@@ -931,7 +933,8 @@ class CliffordAveragerProgram(AveragerProgram):
         gencfg = self.soccfg["gens"][ch]
         maxv = gencfg["maxv"] * gencfg["maxv_scale"] - 1
         gain = maxv * np.sum(relative_amps) / len(mux_freqs)
-        # print("gain", gain, mask, mux_freqs, mixer_freq)
+        print('gain', gain)
+        print('ch', ch)
 
         self.handle_IQ_pulse(
             name=name,
@@ -1310,6 +1313,12 @@ class CliffordAveragerProgram(AveragerProgram):
                 ]
             else:
                 self.readout_lengths_adc = [self.us2cycles(times_us[-1], ro_ch=ro_ch) for ro_ch in self.adc_chs]
+                
+            if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
+                self.readout_lengths_adc = [
+                    self.us2cycles(length, ro_ch=ro_ch)
+                    for length, ro_ch in zip(self.cfg.expt.len_readout_adc, self.adc_chs)
+                ]
 
             mixer_freqs = np.array(self.cfg.hw.soc.dacs.readout.mixer_freq)
             # assert np.all(mixer_freqs == mixer_freqs[0])
@@ -1432,9 +1441,9 @@ class CliffordAveragerProgram(AveragerProgram):
                 mixer_freqs[i_ch] == mixer_dict_unique_chs[ch]
             ), f"All mixer freqs that use the same full_mux_ch should be the same but mixer for qubit {i_ch} is {mixer_freqs[i_ch]} and previous mixer_freq is {mixer_dict_unique_chs[ch]} on full mux ch {ch}"
 
-        self.f_res_regs = [0] * 4
-        rounded_mux_freqs = [0] * 4
-        rounded_freqs = [0] * 4
+        self.f_res_regs = [0] * self.num_qubits_sample
+        rounded_mux_freqs = [0] * self.num_qubits_sample
+        rounded_freqs = [0] * self.num_qubits_sample
         rounded_mixer_freq_dict_unique_chs = dict()
         for q in range(self.num_qubits_sample):
             # Need mixer_mux_rounded + mux_rounded = adc_rounded = mixer_full_rounded + full_rounded
@@ -1469,23 +1478,7 @@ class CliffordAveragerProgram(AveragerProgram):
             lengths_ch = [lengths[q] for q in qubits_ch] if lengths is not None else None
             pulse_I_shapes_ch = [pulse_I_shapes[q] for q in qubits_ch] if pulse_I_shapes is not None else None
             pulse_Q_shapes_ch = [pulse_Q_shapes[q] for q in qubits_ch] if pulse_Q_shapes is not None else None
-
-            # print(
-            #     "mask",
-            #     mask_ch,
-            #     "adc_chs",
-            #     adc_chs_ch,
-            #     "mixer_freq",
-            #     mixer_freq_ch,
-            #     "mux_freqs",
-            #     mux_freqs_ch,
-            #     "mux_gains",
-            #     mux_gains_ch,
-            #     "lengths",
-            #     lengths_ch,
-            #     "pulse_I_shapes",
-            #     pulse_I_shapes_ch,
-            # )
+            
 
             self.handle_full_mux_pulse(
                 name=f"measure",
@@ -1495,11 +1488,11 @@ class CliffordAveragerProgram(AveragerProgram):
                 mixer_freq=rounded_mixer_freq,
                 relative_amps=mux_gains_ch,
                 lengths=lengths_ch,
-                pulse_I_shapes=np.array(pulse_I_shapes_ch),
-                pulse_Q_shapes=-1
+                pulse_I_shapes=(np.array(pulse_I_shapes_ch) if pulse_I_shapes is not None else None),
+                pulse_Q_shapes=(-1
                 * np.array(
                     pulse_Q_shapes_ch
-                ),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
+                ) if pulse_Q_shapes is not None else None),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
                 times_us=times_us,
                 phase_deg=0,
                 plot_IQ=plot_IQ,
@@ -1513,6 +1506,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
+            print('ADC readout length', self.readout_lengths_adc[q])
             if self.adc_chs[q] not in self.ro_chs:
                 self.declare_readout(
                     ch=self.adc_chs[q],
@@ -1804,6 +1798,7 @@ class CliffordAveragerProgram(AveragerProgram):
         
         if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
             _ro_lengths_adc = self.cfg.expt.len_readout_adc
+            print('using custom readout lengths', _ro_lengths_adc)
         else:
             _ro_lengths_adc = self.cfg.device.readout.readout_length
             
