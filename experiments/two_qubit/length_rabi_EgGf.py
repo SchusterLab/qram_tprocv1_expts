@@ -326,7 +326,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
         if self.sigma_test > 0:
             if "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None:
                 n_cycles = self.cfg.expt.n_cycles
-                n_pulse_per_cycle = 2 # (pi, +/- pi)^N
+                n_pulse_per_cycle = 2  # (pi, +/- pi)^N
 
                 if not self.pi_minuspi:
                     # play the pihalf initialization for the error amplification
@@ -367,9 +367,9 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     self.sync_all()
             else:
                 n_cycles = 1
-                n_pulse_per_cycle = 1 # (pi/2 or pi)^1
+                n_pulse_per_cycle = 1  # (pi/2 or pi)^1
             if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
-                n_pulse_per_cycle = 2 # (pi/2, +/- pi/2)^N
+                n_pulse_per_cycle = 2  # (pi/2, +/- pi/2)^N
 
             # set pulse regs to save memory for iteration
             pulse_type = cfg.expt.pulse_type.lower()
@@ -476,9 +476,6 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     if pulse_type == "flat_top" and flat_length_cycles <= 3:
                         play_pulse = False
                     num_test_pulses = 1
-                    if self.use_pi2_for_pi:
-                        num_test_pulses = 2
-
                     # print('play pulses', play_pulse, num_test_pulses)
 
                     self.safe_regwi(
@@ -671,6 +668,10 @@ class LengthRabiEgGfExperiment(Experiment):
             else:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
         # ================= #
         # Get single shot calibration for 2 qubits
         # ================= #
@@ -728,7 +729,9 @@ class LengthRabiEgGfExperiment(Experiment):
                         Ie, Qe = e_prog.get_shots(verbose=False)
                         shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                         print(f"Qubit ({q}) ge")
-                        fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                        fid, threshold, angle = hist(
+                            data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                        )
                         thresholds_q[q] = threshold[0]
                         ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                         angles_q[q] = angle
@@ -739,7 +742,9 @@ class LengthRabiEgGfExperiment(Experiment):
 
                     # Process the shots taken for the confusion matrix with the calibration angles
                     for iprep, prep_state in enumerate(calib_order):
-                        counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                        counts = calib_prog_dict[prep_state].collect_counts(
+                            angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                        )
                         counts_calib.append(counts)
                         (
                             data[f"calib_ishots_raw_loops"][loop, 0, iprep, :, :, :],
@@ -777,7 +782,9 @@ class LengthRabiEgGfExperiment(Experiment):
                             Ie, Qe = e_prog.get_shots(verbose=False)
                             shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                             print(f"Qubit ({q}) ge")
-                            fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                            fid, threshold, angle = hist(
+                                data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                            )
                             thresholds_q[q] = threshold[0]
                             angles_q[q] = angle
                             ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -819,6 +826,7 @@ class LengthRabiEgGfExperiment(Experiment):
                     post_process=self.cfg.expt.post_process,
                     progress=False,
                     verbose=False,
+                    amplitude_mode=full_mux_expt,
                 )
 
                 # in Eg (swap failed) or Gf (swap succeeded)
@@ -830,8 +838,8 @@ class LengthRabiEgGfExperiment(Experiment):
                     adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
                     data["avgi"][i_q].append(avgi[adc_ch])
                     data["avgq"][i_q].append(avgq[adc_ch])
-                    data["amps"][i_q].append(np.abs(avgi[adc_ch] + 1j * avgq[adc_ch]))
-                    data["phases"][i_q].append(np.angle(avgi[adc_ch] + 1j * avgq[adc_ch]))
+                    data["amps"][i_q].append(np.average(np.abs(ishots[adc_ch] + 1j * qshots[adc_ch])))
+                    data["phases"][i_q].append(np.average(np.angle(ishots[adc_ch] + 1j * qshots[adc_ch])))
 
             # ================= #
             # Measure the same thing with g/f distinguishing
@@ -891,7 +899,9 @@ class LengthRabiEgGfExperiment(Experiment):
                     If, Qf = f_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=If[q], Qe=Qf[q])
                     print(f'Qubit ({q}){f" gf" if q == q_measure_f else " ge"}')
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    fid, threshold, angle = hist(
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                    )
                     thresholds_f_q[q] = threshold[0]
                     gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(If[q]), np.average(Qf[q])]
                     angles_f_q[q] = angle
@@ -902,7 +912,9 @@ class LengthRabiEgGfExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for iprep, prep_state in enumerate(calib_order):
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_f_q, threshold=thresholds_f_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_f_q, threshold=thresholds_f_q, amplitude_mode=full_mux_expt
+                    )
                     # print('counts', prep_state)
                     # print(counts)
                     # 00, 02, 10, 12
@@ -942,7 +954,9 @@ class LengthRabiEgGfExperiment(Experiment):
                         Ie, Qe = e_prog.get_shots(verbose=False)
                         shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                         print(f"Qubit ({q}) ge")
-                        fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                        fid, threshold, angle = hist(
+                            data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                        )
                         thresholds_f_q[q] = threshold[0]
                         angles_f_q[q] = angle
                         gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -1002,6 +1016,7 @@ class LengthRabiEgGfExperiment(Experiment):
                         post_process=self.cfg.expt.post_process,
                         progress=False,
                         verbose=False,
+                        amplitude_mode=full_mux_expt,
                     )
 
                     ishots, qshots = lengthrabi.get_multireadout_shots()
@@ -1085,6 +1100,10 @@ class LengthRabiEgGfExperiment(Experiment):
         if "readout_cool" in self.cfg.expt:
             self.readout_cool = self.cfg.expt.readout_cool
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
         tomo_analysis = TomoAnalysis(nb_qubits=2)
 
         if self.cfg.expt.post_process is not None:
@@ -1104,12 +1123,14 @@ class LengthRabiEgGfExperiment(Experiment):
                             qshots_1q=data[f"qshots_raw_{imeasure}"][loop, ilen, qA, -1, :],
                             angle=angles[qA],
                             threshold=thresholds[qA],
+                            amplitude_mode=full_mux_expt,
                         )
                         shotsB, _ = rotate_and_threshold(
                             ishots_1q=data[f"ishots_raw_{imeasure}"][loop, ilen, qB, -1, :],
                             qshots_1q=data[f"qshots_raw_{imeasure}"][loop, ilen, qB, -1, :],
                             angle=angles[qB],
                             threshold=thresholds[qB],
+                            amplitude_mode=full_mux_expt,
                         )
 
                         data["counts_raw"][imeasure, loop, ilen, :] = tomo_analysis.sort_counts([shotsA, shotsB])
@@ -1144,12 +1165,14 @@ class LengthRabiEgGfExperiment(Experiment):
                             qshots_1q=data["calib_qshots_raw_loops"][loop, imeasure, iprep, qA, -1, :],
                             angle=angles[qA],
                             threshold=thresholds[qA],
+                            amplitude_mode=full_mux_expt,
                         )
                         shotsB, _ = rotate_and_threshold(
                             ishots_1q=data["calib_ishots_raw_loops"][loop, imeasure, iprep, qB, -1, :],
                             qshots_1q=data["calib_qshots_raw_loops"][loop, imeasure, iprep, qB, -1, :],
                             angle=angles[qB],
                             threshold=thresholds[qB],
+                            amplitude_mode=full_mux_expt,
                         )
 
                         counts = tomo_analysis.sort_counts([shotsA, shotsB])
@@ -1182,7 +1205,11 @@ class LengthRabiEgGfExperiment(Experiment):
                             ps_thresholds = thresholds
                         else:
                             ps_thresholds = ps_threshold_adjust(
-                                ps_thresholds_init=thresholds, adjust=ps_adjust, ge_avgs=ge_avgs, angles=angles
+                                ps_thresholds_init=thresholds,
+                                adjust=ps_adjust,
+                                ge_avgs=ge_avgs,
+                                angles=angles,
+                                amplitude_mode=full_mux_expt,
                             )
                     else:
                         thresholds = data["thresholds_f_loops"][loop]
@@ -1192,7 +1219,11 @@ class LengthRabiEgGfExperiment(Experiment):
                             ps_thresholds = thresholds
                         else:
                             ps_thresholds = ps_threshold_adjust(
-                                ps_thresholds_init=thresholds, adjust=ps_adjust_f, ge_avgs=ge_avgs, angles=angles
+                                ps_thresholds_init=thresholds,
+                                adjust=ps_adjust_f,
+                                ge_avgs=ge_avgs,
+                                angles=angles,
+                                amplitude_mode=full_mux_expt,
                             )
 
                     # Post select calibration matrix
@@ -1212,6 +1243,7 @@ class LengthRabiEgGfExperiment(Experiment):
                             n_init_readout=self.cfg.expt.n_init_readout,
                             post_process=post_process,
                             verbose=verbose,
+                            amplitude_mode=full_mux_expt,
                         )
 
                         shots_B_ps = post_select_shots(
@@ -1225,6 +1257,7 @@ class LengthRabiEgGfExperiment(Experiment):
                             n_init_readout=self.cfg.expt.n_init_readout,
                             post_process=post_process,
                             verbose=verbose,
+                            amplitude_mode=full_mux_expt,
                         )
 
                         assert shots_A_ps.shape == shots_B_ps.shape
@@ -1272,7 +1305,11 @@ class LengthRabiEgGfExperiment(Experiment):
                             ps_thresholds = thresholds
                         else:
                             ps_thresholds = ps_threshold_adjust(
-                                ps_thresholds_init=thresholds, adjust=ps_adjust, ge_avgs=ge_avgs, angles=angles
+                                ps_thresholds_init=thresholds,
+                                adjust=ps_adjust,
+                                ge_avgs=ge_avgs,
+                                angles=angles,
+                                amplitude_mode=full_mux_expt,
                             )
                     else:
                         thresholds = data["thresholds_f_loops"][loop]
@@ -1282,7 +1319,11 @@ class LengthRabiEgGfExperiment(Experiment):
                             ps_thresholds = thresholds
                         else:
                             ps_thresholds = ps_threshold_adjust(
-                                ps_thresholds_init=thresholds, adjust=ps_adjust_f, ge_avgs=ge_avgs, angles=angles
+                                ps_thresholds_init=thresholds,
+                                adjust=ps_adjust_f,
+                                ge_avgs=ge_avgs,
+                                angles=angles,
+                                amplitude_mode=full_mux_expt,
                             )
 
                     for ilen, length in enumerate(data["xpts"]):
@@ -1300,6 +1341,7 @@ class LengthRabiEgGfExperiment(Experiment):
                             n_init_readout=self.cfg.expt.n_init_readout,
                             post_process=post_process,
                             verbose=verbose,
+                            amplitude_mode=full_mux_expt,
                         )
 
                         shots_B_ps = post_select_shots(
@@ -1313,6 +1355,7 @@ class LengthRabiEgGfExperiment(Experiment):
                             n_init_readout=self.cfg.expt.n_init_readout,
                             post_process=post_process,
                             verbose=verbose,
+                            amplitude_mode=full_mux_expt,
                         )
 
                         assert shots_A_ps.shape == shots_B_ps.shape
@@ -2175,6 +2218,10 @@ class NPulseEgGfExperiment(Experiment):
             data["phases"].append([])
             data["counts_raw"].append([])
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
         # ================= #
         # Get single shot calibration for 2 qubits
         # ================= #
@@ -2230,7 +2277,9 @@ class NPulseEgGfExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f"Qubit  ({q})")
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    fid, threshold, angle = hist(
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                    )
                     thresholds_q[q] = threshold[0]
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     angles_q[q] = angle
@@ -2241,7 +2290,9 @@ class NPulseEgGfExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_calib"].append(counts)
                 # print(data['counts_calib'])
 
@@ -2292,6 +2343,7 @@ class NPulseEgGfExperiment(Experiment):
                     post_process=self.cfg.expt.post_process,
                     progress=False,
                     verbose=False,
+                    amplitude_mode=full_mux_expt,
                 )
                 for i_q, q in enumerate(self.cfg.expt.measure_qubits):
                     adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
@@ -2483,6 +2535,10 @@ class PiMinusPiEgGfExperiment(Experiment):
 
         data = dict()
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
         # ================= #
         # Get single shot calibration for 2 qubits
         # ================= #
@@ -2539,7 +2595,9 @@ class PiMinusPiEgGfExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f"Qubit  ({q})")
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    fid, threshold, angle = hist(
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                    )
                     thresholds_q[q] = threshold[0]
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
                     angles_q[q] = angle
@@ -2550,7 +2608,9 @@ class PiMinusPiEgGfExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     counts_calib.append(counts)
                 # print(data['counts_calib'])
 
@@ -2635,6 +2695,7 @@ class PiMinusPiEgGfExperiment(Experiment):
                         post_process=self.cfg.expt.post_process,
                         progress=False,
                         verbose=False,
+                        amplitude_mode=full_mux_expt,
                     )
                     for i_q, q in enumerate(self.cfg.expt.measure_qubits):
                         adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
@@ -2670,17 +2731,20 @@ class PiMinusPiEgGfExperiment(Experiment):
 
         # Amps shape: (measure_qubits, cycles, freqs)
         prods = np.zeros((len(self.cfg.expt.measure_qubits), len(data["freq_sweep"])))
+        data_name = "amps"
+        if self.cfg.expt.full_mux_expt:
+            data_name = "avgi"
         for iq, q in enumerate(self.cfg.expt.measure_qubits):
-            scaled_e = np.max(data["amps"][iq])
-            scaled_g = np.min(data["amps"][iq])
-            scale = np.max(data["amps"][iq]) - np.min(data["amps"][iq])
+            scaled_e = np.max(data[data_name][iq])
+            scaled_g = np.min(data[data_name][iq])
+            scale = np.max(data[data_name][iq]) - np.min(data[data_name][iq])
             if q == qDrive:
                 prods[iq] = np.sqrt(
-                    np.prod((scaled_e - data["amps"][iq]) / scale, axis=0)
+                    np.prod((scaled_e - data[data_name][iq]) / scale, axis=0)
                 )  # product over g population in all cycles
             else:
                 prods[iq] = np.sqrt(
-                    np.prod((data["amps"][iq] - scaled_g) / scale, axis=0)
+                    np.prod((data[data_name][iq] - scaled_g) / scale, axis=0)
                 )  # expect to end in e, so we compare relative to e
 
         label = "($X_{\pi}, X_{-\pi})^N$"
@@ -2719,6 +2783,7 @@ class PiMinusPiEgGfExperiment(Experiment):
                 plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt), label="Fit")
                 plt.axvline(fit_freq, color="r", linestyle="--")
                 plt.legend(fontsize=18)
+                print(f"Best freq from pi/-pi on Q{q}", fit_freq)
             data["best_freq"] = np.average([data[f"fit_q{q}"][1] for q in self.cfg.expt.measure_qubits])
 
         plt.tight_layout()
@@ -2756,6 +2821,8 @@ class PiMinusPiEgGfExperiment(Experiment):
         plt.figure(figsize=(8, 9))
         plt.suptitle(title, fontsize=20)
         data_name = "amps"
+        if self.cfg.expt.full_mux_expt:
+            data_name = "avgi"
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
         ax_qA.set_ylabel(f"N", fontsize=18)

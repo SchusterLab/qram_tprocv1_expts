@@ -489,7 +489,7 @@ class CliffordAveragerProgram(AveragerProgram):
             plt.plot(times_samps, I_func(times_samps), ".-", label="I")
             # plt.plot(qamps, '.-')
             plt.plot(times_samps, Q_func(times_samps), ".-", label="Q")
-            print(times_samps.shape, I_func(times_samps).shape)
+            # print(times_samps.shape, I_func(times_samps).shape)
             plt.ylabel("Amplitude [a.u.]")
             plt.xlabel("Sample Index")
             plt.legend()
@@ -1305,7 +1305,12 @@ class CliffordAveragerProgram(AveragerProgram):
         if not full_mux_expt:
             self.setup_mux_gen_readout()
         else:
-            if "resonator_reset" in self.cfg.expt and self.cfg.expt.resonator_reset is not None:
+            override_reset_pulse_shape = "pulse_I_shapes" in self.cfg.expt and self.cfg.expt.pulse_I_shapes is not None
+            if (
+                "resonator_reset" in self.cfg.expt
+                and self.cfg.expt.resonator_reset is not None
+                and not override_reset_pulse_shape
+            ):
                 assert (
                     len(np.array(self.cfg.expt.resonator_reset)) > 0
                 ), "resonator_reset must be a list of qubits to apply reset pulse to; other qubits will receive a constant pulse of the same length as the reset pulse"
@@ -1633,6 +1638,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 # print('sync delay us', self.cycles2us(syncdelay))
                 # Note that by default the mux channel will play the pulse for all frequencies for the max of the pulse times on all channels - but the acquistion may not be happening the entire time.
                 self.measure(
+                    # pulse_ch=self.readout_cool_measure_chs,
                     pulse_ch=self.measure_chs,
                     adcs=self.adc_chs,
                     adc_trig_offset=trig_offset,

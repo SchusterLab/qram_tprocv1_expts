@@ -187,7 +187,7 @@ def general_hist(
     y_max = 0
     if check_temp:
         assert "g_1" in state_labels and "g_s1" in state_labels
-    print("using amplitude mode", amplitude_mode)
+    # print("using amplitude mode", amplitude_mode)
     for check_i, data_check in enumerate(iqshots):
         state_label = state_labels[check_i]
 
@@ -413,8 +413,8 @@ def general_hist(
     if check_qnd:
         return_data += [n_diff_qnd]
 
-    print(len(return_data))
-    print(return_data)
+    # print(len(return_data))
+    # print(return_data)
 
     return return_data
 
@@ -1132,9 +1132,9 @@ class MultiReadoutExperiment(Experiment):
             if amplitude_mode:
                 data["ge_avgs"] = [
                     np.average(np.abs(data["Ig_baseline"][qTest, 0, :] + 1j * data["Qg_baseline"][qTest, 0, :])),
-                    np.zeros_like(data["Qg_baseline"][qTest, 0, :]),
+                    0,
                     np.average(np.abs(data["Ie_baseline"][qTest, 0, :] + 1j * data["Qe_baseline"][qTest, 0, :])),
-                    np.zeros_like(data["Qe_baseline"][qTest, 0, :]),
+                    0,
                 ]
             else:
                 data["ge_avgs"] = [
@@ -1147,9 +1147,9 @@ class MultiReadoutExperiment(Experiment):
                 if amplitude_mode:
                     data["ge_avgs"] = [
                         np.average(np.abs(data["Ig_baseline"][qTest, 0, :] + 1j * data["Qg_baseline"][qTest, 0, :])),
-                        np.zeros_like(data["Qg_baseline"][qTest, 0, :]),
+                        0,
                         np.average(np.abs(data["If_baseline"][qTest, 0, :] + 1j * data["Qf_baseline"][qTest, 0, :])),
-                        np.zeros_like(data["Qf_baseline"][qTest, 0, :]),
+                        0,
                     ]
                 else:
                     data["gf_avgs"] = [
@@ -1259,7 +1259,7 @@ class MultiReadoutExperiment(Experiment):
                 angles_allq = [0] * num_qubits_sample
                 angles_allq[qTest] = data["angle"]
                 ge_avgs_allq = np.zeros((num_qubits_sample, 4))
-                ge_avgs_allq[qTest] = data["ge_avgs"] if not self.cfg.expt.check_f else data["ge_avgs"]
+                ge_avgs_allq[qTest] = data["ge_avgs"] if not self.cfg.expt.check_f else data["gf_avgs"]
 
                 if not (opti_post_select):
                     print("not opti post select")
