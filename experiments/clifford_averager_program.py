@@ -1792,23 +1792,19 @@ class CliffordAveragerProgram(AveragerProgram):
         If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
         """
         avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
-        if post_process == None:
-            avgi_rot, avgq_rot = self.get_shots(
-                angle=angle, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
-            )
-            return avgi_rot, avgq_rot
-        elif post_process == "threshold":
+        if post_process == "threshold":
             assert threshold is not None
-            popln, avgq_rot = self.get_shots(
-                angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
-            )
-            return popln, avgq_rot
         elif post_process == "scale":
+            threshold = None # just to double check nothing gets thresholded in get_shots
             assert ge_avgs is not None
-            avgi_rot, avgq_rot = self.get_shots(
-                angle=angle, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
-            )
 
+        avgi_rot, avgq_rot = self.get_shots(
+            angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+        )
+
+        if post_process == None or post_process == "threshold":
+            return avgi_rot, avgq_rot
+        elif post_process == "scale":
             ge_avgs_rot = [None] * 4
             for q, angle_q in enumerate(angle):
                 if not isinstance(ge_avgs[q], (list, np.ndarray)):
