@@ -552,6 +552,22 @@ def multihist(
 # ====================================================== #
 
 
+def get_ge_avgs(Igs, Qgs, Ies, Qes, amplitude_mode=False):
+    if not amplitude_mode:
+        Ig_avg = np.average(Igs)
+        Qg_avg = np.average(Qgs)
+        Ie_avg = np.average(Ies)
+        Qe_avg = np.average(Qes)
+        return np.array([Ig_avg, Qg_avg, Ie_avg, Qe_avg])
+    else:
+        ampg_avg = np.average(np.abs(Igs + 1j * Qgs))
+        ampe_avg = np.average(np.abs(Ies + 1j * Qes))
+        return np.array([ampg_avg, 0, ampe_avg, 0])
+
+
+# ====================================================== #
+
+
 class HistogramProgram(QutritAveragerProgram):
     def body(self):
         cfg = AttrDict(self.cfg)

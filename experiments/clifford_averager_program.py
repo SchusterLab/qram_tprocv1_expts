@@ -41,11 +41,11 @@ def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, 
         ifinal = ishots_1q * np.cos(np.pi / 180 * angle) - qshots_1q * np.sin(np.pi / 180 * angle)
         qfinal = ishots_1q * np.sin(np.pi / 180 * angle) + qshots_1q * np.cos(np.pi / 180 * angle)
 
+    if amplitude_mode:
+        ifinal = np.abs(ifinal + 1j * qfinal)
+
     if threshold is not None:
-        if amplitude_mode:
-            ifinal = np.heaviside(np.abs(ifinal + 1j * qfinal) - threshold, 0)
-        else:
-            ifinal = np.heaviside(ifinal - threshold, 0)
+        ifinal = np.heaviside(ifinal - threshold, 0)
         qfinal = np.zeros_like(ifinal)
 
     if avg_shots:

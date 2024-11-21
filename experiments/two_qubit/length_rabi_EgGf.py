@@ -16,7 +16,7 @@ from experiments.clifford_averager_program import (
     ps_threshold_adjust,
     rotate_and_threshold,
 )
-from experiments.single_qubit.single_shot import hist
+from experiments.single_qubit.single_shot import get_ge_avgs, hist
 from experiments.two_qubit.twoQ_state_tomography import (
     ErrorMitigationStateTomo1QProgram,
     ErrorMitigationStateTomo2QProgram,
@@ -733,7 +733,9 @@ class LengthRabiEgGfExperiment(Experiment):
                             data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
                         )
                         thresholds_q[q] = threshold[0]
-                        ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                        ge_avgs_q[q] = get_ge_avgs(
+                            Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                        )
                         angles_q[q] = angle
                         fids_q[q] = fid[0]
                         print(
@@ -787,7 +789,9 @@ class LengthRabiEgGfExperiment(Experiment):
                             )
                             thresholds_q[q] = threshold[0]
                             angles_q[q] = angle
-                            ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                            ge_avgs_q[q] = get_ge_avgs(
+                                Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                            )
                             print(
                                 f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}"
                             )
@@ -903,7 +907,9 @@ class LengthRabiEgGfExperiment(Experiment):
                         data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
                     )
                     thresholds_f_q[q] = threshold[0]
-                    gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(If[q]), np.average(Qf[q])]
+                    gf_avgs_q[q] = get_ge_avgs(
+                        Igs=Ig[q], Qgs=Qg[q], Ies=If[q], Qes=Qf[q], amplitude_mode=full_mux_expt
+                    )
                     angles_f_q[q] = angle
                     fids_f_q[q] = fid[0]
                     print(
@@ -959,7 +965,9 @@ class LengthRabiEgGfExperiment(Experiment):
                         )
                         thresholds_f_q[q] = threshold[0]
                         angles_f_q[q] = angle
-                        gf_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                        gf_avgs_q[q] = get_ge_avgs(
+                            Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                        )
                         print(
                             f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_f_q[q]} \t threshold ge: {thresholds_f_q[q]}"
                         )
@@ -1543,6 +1551,10 @@ class LengthRabiEgGfExperiment(Experiment):
 
         pi_lens = []
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
         rows = 3
         cols = len(self.cfg.expt.measure_qubits)
         index = rows * 100 + cols * 10
@@ -1553,11 +1565,18 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.subplot(
             this_idx,
             title=f"Qubit A ({self.cfg.expt.measure_qubits[0]})",
-            ylabel="Population E" if self.cfg.expt.post_process else "I [adc level]",
+            ylabel="Population E"
+            if self.cfg.expt.post_process
+            else ("I [adc level]" if not full_mux_expt else "Amps [adc level]"),
         )
+        data_name = "epop"
+        if not self.measure_f:
+            data_name = "avgi"
+            if full_mux_expt:
+                data_name = "amps"
         pi_len = self.plot_rabi(
             data=data,
-            data_name="epop" if self.measure_f else "avgi",
+            data_name=data_name,
             fit_xpts=data["xpts"],
             plot_xpts=xpts_ns,
             q_index=0,
@@ -1591,12 +1610,10 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.subplot(
             this_idx,
             xlabel="Length [ns]",
-            ylabel="Population G" if self.cfg.expt.post_process else "1 - I - Q [adc level]",
+            ylabel="Population G" if self.cfg.expt.post_process else "None",
         )
-        plt.plot(
-            1e3 * data["xpts"], data["gpop"][0] if self.measure_f else (1 - (data["avgi"][0] + data["avgq"][0])), ".-"
-        )
-        plt.ylabel("Population G")
+        plt.plot(1e3 * data["xpts"], data["gpop"][0] if self.measure_f else np.zeros_like(data["xpts"]), ".-")
+
         if self.cfg.expt.post_process:
             plt.axhline(1.0, linestyle="--", color="k")
             plt.axhline(0.0, linestyle="--", color="k")
@@ -1606,7 +1623,7 @@ class LengthRabiEgGfExperiment(Experiment):
         plt.subplot(this_idx, title=f"Qubit B ({self.cfg.expt.measure_qubits[1]})")
         pi_len = self.plot_rabi(
             data=data,
-            data_name="epop" if self.measure_f else "avgi",
+            data_name="epop" if self.measure_f else data_name,
             fit_xpts=data["xpts"],
             plot_xpts=xpts_ns,
             q_index=1,
@@ -1639,10 +1656,7 @@ class LengthRabiEgGfExperiment(Experiment):
 
         this_idx = index + 2 * cols + 2
         plt.subplot(this_idx, xlabel="Length [ns]")
-        plt.plot(
-            1e3 * data["xpts"], data["gpop"][1] if self.measure_f else (1 - (data["avgi"][1] + data["avgq"][1])), ".-"
-        )
-        plt.ylabel("Population G")
+        plt.plot(1e3 * data["xpts"], data["gpop"][1] if self.measure_f else np.zeros_like(data["xpts"]), ".-")
         if self.cfg.expt.post_process:
             plt.axhline(1.0, linestyle="--", color="k")
             plt.axhline(0.0, linestyle="--", color="k")
@@ -2281,7 +2295,9 @@ class NPulseEgGfExperiment(Experiment):
                         data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
                     )
                     thresholds_q[q] = threshold[0]
-                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    ge_avgs_q[q] = get_ge_avgs(
+                        Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                    )
                     angles_q[q] = angle
                     fids_q[q] = fid[0]
                     print(
@@ -2345,12 +2361,13 @@ class NPulseEgGfExperiment(Experiment):
                     verbose=False,
                     amplitude_mode=full_mux_expt,
                 )
+                ishots, qshots = lengthrabi.get_shots()
                 for i_q, q in enumerate(self.cfg.expt.measure_qubits):
                     adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
                     data["avgi"][i_q].append(avgi[adc_ch])
                     data["avgq"][i_q].append(avgq[adc_ch])
-                    data["amps"][i_q].append(np.abs(avgi[adc_ch] + 1j * avgi[adc_ch]))
-                    data["phases"][i_q].append(np.angle(avgi[adc_ch] + 1j * avgi[adc_ch]))
+                    data["amps"][i_q].append(np.average(np.abs(ishots[adc_ch] + 1j * qshots[adc_ch])))
+                    data["phases"][i_q].append(np.average(np.angle(ishots[adc_ch] + 1j * qshots[adc_ch])))
         data["xpts"] = cycles
 
         for k, a in data.items():
@@ -2599,7 +2616,9 @@ class PiMinusPiEgGfExperiment(Experiment):
                         data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
                     )
                     thresholds_q[q] = threshold[0]
-                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    ge_avgs_q[q] = get_ge_avgs(
+                        Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                    )
                     angles_q[q] = angle
                     fids_q[q] = fid[0]
                     print(
@@ -2697,12 +2716,17 @@ class PiMinusPiEgGfExperiment(Experiment):
                         verbose=False,
                         amplitude_mode=full_mux_expt,
                     )
+                    ishots, qshots = lengthrabi.get_shots()
                     for i_q, q in enumerate(self.cfg.expt.measure_qubits):
                         adc_ch = self.cfg.hw.soc.adcs.readout.ch[q]
                         data["avgi"][i_q, loop, i_cycle, ifreq] = avgi[adc_ch]
                         data["avgq"][i_q, loop, i_cycle, ifreq] = avgq[adc_ch]
-                        data["amps"][i_q, loop, i_cycle, ifreq] = np.abs(avgi[adc_ch] + 1j * avgi[adc_ch])
-                        data["phases"][i_q, loop, i_cycle, ifreq] = np.angle(avgi[adc_ch] + 1j * avgi[adc_ch])
+                        data["amps"][i_q, loop, i_cycle, ifreq] = np.average(
+                            np.abs(ishots[adc_ch] + 1j * qshots[adc_ch])
+                        )
+                        data["phases"][i_q, loop, i_cycle, ifreq] = np.average(
+                            np.angle(ishots[adc_ch] + 1j * qshots[adc_ch])
+                        )
         data["xpts"] = cycle_sweep
 
         for k, a in data.items():
@@ -2732,8 +2756,7 @@ class PiMinusPiEgGfExperiment(Experiment):
         # Amps shape: (measure_qubits, cycles, freqs)
         prods = np.zeros((len(self.cfg.expt.measure_qubits), len(data["freq_sweep"])))
         data_name = "amps"
-        if self.cfg.expt.full_mux_expt:
-            data_name = "avgi"
+        # data_name = "avgi"
         for iq, q in enumerate(self.cfg.expt.measure_qubits):
             scaled_e = np.max(data[data_name][iq])
             scaled_g = np.min(data[data_name][iq])
@@ -2821,8 +2844,7 @@ class PiMinusPiEgGfExperiment(Experiment):
         plt.figure(figsize=(8, 9))
         plt.suptitle(title, fontsize=20)
         data_name = "amps"
-        if self.cfg.expt.full_mux_expt:
-            data_name = "avgi"
+        # data_name = "avgi"
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
         ax_qA.set_ylabel(f"N", fontsize=18)
