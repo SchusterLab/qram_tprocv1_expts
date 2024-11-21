@@ -9,6 +9,7 @@ from slab import AttrDict, Experiment, dsfit
 from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
+from experiments.clifford_averager_program import ReadoutResetPulser
 from experiments.single_qubit.single_shot import HistogramProgram
 
 
@@ -526,6 +527,41 @@ class ResonatorRingDownExperiment(Experiment):
                     subcfg.update({key: [value] * num_qubits_sample})
 
         data = {"xpts": [], "avgi": [], "avgq": [], "amps": [], "phases": []}
+
+        if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+            if "resonator_reset" in self.cfg.expt and (
+                "pulse_I_shapes" not in self.cfg.expt or self.cfg.expt.pulse_I_shapes is None
+            ):
+                pulse_I_shapes = []
+                pulse_Q_shapes = []
+                Tp = self.cfg.device.readout.readout_length[0]
+                dt_us = 0.1e-3
+                times_us = np.linspace(0, Tp, int(Tp / dt_us))
+                kappa_ext = self.cfg.device.readout.kappa_ext
+                kerr = self.cfg.device.readout.kerr
+                t_rise = self.cfg.device.readout.t_rise_reset
+                readout_length = self.cfg.device.readout.readout_length
+                self.cfg.expt.full_mux_chs = self.cfg.hw.soc.dacs.readout.full_mux_chs
+                self.cfg.expt.mask = [0, 1, 2, 3]
+                for q in range(num_qubits_sample):
+                    if q in self.cfg.expt.resonator_reset:
+                        readout_pulser = ReadoutResetPulser(
+                            kappa_ext_MHz=2 * np.pi * kappa_ext[q],
+                            kappa_int_MHz=0,
+                            chi_MHz=0,
+                            kerr_MHz=2 * np.pi * kerr[q],
+                        )
+                        _, (I_pulse, Q_pulse) = readout_pulser.flat_top_kerr_drive(
+                            t_rise=t_rise[q], Tp=Tp, num_filter=1, nstep=int(Tp / dt_us)
+                        )
+                    else:
+                        I_pulse, Q_pulse = np.ones((2, int(Tp / dt_us)))
+                    pulse_I_shapes.append(I_pulse)
+                    pulse_Q_shapes.append(Q_pulse)
+                self.cfg.expt.pulse_I_shapes = np.array(pulse_I_shapes)
+                self.cfg.expt.pulse_Q_shapes = np.array(pulse_Q_shapes)
+                self.cfg.expt.times_us = times_us
+
         for t in tqdm(xpts, disable=not progress):
             cfg = AttrDict(deepcopy(self.cfg))
 
@@ -547,10 +583,16 @@ class ResonatorRingDownExperiment(Experiment):
             if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
                 if "pulse_I_shapes" in self.cfg.expt and self.cfg.expt.pulse_I_shapes is not None:
                     t_index = np.argmin(np.abs(t - self.cfg.expt.times_us))
+                    assert (
+                        self.cfg.expt.times_us[t_index] > 0
+                    ), "Trying to run a pulse of total length 0, check the time step size of your pulse shape"
                     cfg.expt.pulse_I_shapes = self.cfg.expt.pulse_I_shapes[:, :t_index]
                     cfg.expt.pulse_Q_shapes = self.cfg.expt.pulse_Q_shapes[:, :t_index]
                     cfg.expt.times_us = self.cfg.expt.times_us[:t_index]
                 else:
+                    assert (
+                        "lengths" in self.cfg.expt and self.cfg.expt.lengths is not None
+                    ), "Need to specify either pulse_I_shapes or lengths for this experiment"
                     cfg.expt.lengths = cfg.device.readout.readout_length
 
             # print(f"Readout time: {t_readout} us, Offset time: {t_offset} us")
