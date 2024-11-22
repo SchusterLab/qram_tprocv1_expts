@@ -948,7 +948,7 @@ class MultiReadoutProgram(QutritAveragerProgram):
             adcs=self.adc_chs,
             adc_trig_offset=self.cfg.device.readout.trig_offset[0],
             wait=True,
-            syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in self.qubits])),
+            syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in range(self.num_qubits_sample)])),
         )
 
 
