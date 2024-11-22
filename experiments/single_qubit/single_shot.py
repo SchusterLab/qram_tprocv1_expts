@@ -35,7 +35,8 @@ def plot_hist(
         color = next(color_cycle)
     hist_data, bin_edges = np.histogram(data, bins=bins, range=xlims)
     if normalize:
-        hist_data = hist_data / hist_data.sum()
+        # hist_data = hist_data / hist_data.sum()
+        hist_data = hist_data / np.max(hist_data)
     for i in range(len(hist_data)):
         if i > 0:
             label = None
@@ -277,6 +278,7 @@ def general_hist(
             axs[1, 1].plot(
                 bins[:-1],
                 np.cumsum(n) / n.sum(),
+                # np.cumsum(n) / max(n),
                 color=default_colors[check_i % len(default_colors)],
                 linestyle=linestyle,
             )
@@ -285,10 +287,10 @@ def general_hist(
             n, bins = np.histogram(I_new if not amplitude_mode else amp, bins=numbins, range=xlims)
 
         if check_i in g_states:
-            n_tot_g += n
+            n_tot_g += n / np.sum(n)
             bins_g = bins
         elif check_i in e_states:
-            n_tot_e += n
+            n_tot_e += n / np.sum(n)
             bins_e = bins
 
         if check_qnd:
@@ -547,6 +549,22 @@ def multihist(
     if check_qnd:
         data["n_diff_qnd"] = return_data[-1]
     return return_data
+
+
+# ====================================================== #
+
+
+def get_ge_avgs(Igs, Qgs, Ies, Qes, amplitude_mode=False):
+    if not amplitude_mode:
+        Ig_avg = np.average(Igs)
+        Qg_avg = np.average(Qgs)
+        Ie_avg = np.average(Ies)
+        Qe_avg = np.average(Qes)
+        return np.array([Ig_avg, Qg_avg, Ie_avg, Qe_avg])
+    else:
+        ampg_avg = np.average(np.abs(Igs + 1j * Qgs))
+        ampe_avg = np.average(np.abs(Ies + 1j * Qes))
+        return np.array([ampg_avg, 0, ampe_avg, 0])
 
 
 # ====================================================== #

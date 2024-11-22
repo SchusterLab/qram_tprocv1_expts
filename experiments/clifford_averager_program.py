@@ -41,11 +41,11 @@ def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, 
         ifinal = ishots_1q * np.cos(np.pi / 180 * angle) - qshots_1q * np.sin(np.pi / 180 * angle)
         qfinal = ishots_1q * np.sin(np.pi / 180 * angle) + qshots_1q * np.cos(np.pi / 180 * angle)
 
+    if amplitude_mode:
+        ifinal = np.abs(ifinal + 1j * qfinal)
+
     if threshold is not None:
-        if amplitude_mode:
-            ifinal = np.heaviside(np.abs(ifinal + 1j * qfinal) - threshold, 0)
-        else:
-            ifinal = np.heaviside(ifinal - threshold, 0)
+        ifinal = np.heaviside(ifinal - threshold, 0)
         qfinal = np.zeros_like(ifinal)
 
     if avg_shots:
@@ -88,16 +88,17 @@ def post_select_shots(
         assert all_qshots_raw_q is not None
         assert len(all_qshots_raw_q.shape) == 3
     if angles is not None:
-        ishots_final, qshots_final = rotate_and_threshold(
-            ishots_1q=all_ishots_raw_q[final_qubit, -1, :],
-            qshots_1q=all_qshots_raw_q[final_qubit, -1, :],
-            angle=angles[final_qubit],
-            threshold=None,
-            amplitude_mode=amplitude_mode,
-            avg_shots=False,
-        )
+        angle = angles[final_qubit]
     else:
-        ishots_final = all_ishots_raw_q[final_qubit, -1, :]
+        angle = None
+    ishots_final, qshots_final = rotate_and_threshold(
+        ishots_1q=all_ishots_raw_q[final_qubit, -1, :],
+        qshots_1q=all_qshots_raw_q[final_qubit, -1, :],
+        angle=angle,
+        threshold=None,
+        amplitude_mode=amplitude_mode,
+        avg_shots=False,
+    )
     reps_orig = len(ishots_final)
 
     keep_prev = np.ones_like(ishots_final, dtype="bool")
@@ -105,16 +106,17 @@ def post_select_shots(
         for ps_qubit in ps_qubits:
             # For initialization readouts, shots_raw is the rotated i value
             if angles is not None:
-                shots_readout, _ = rotate_and_threshold(
-                    ishots_1q=all_ishots_raw_q[ps_qubit, i_readout, :],
-                    qshots_1q=all_qshots_raw_q[ps_qubit, i_readout, :],
-                    angle=angles[ps_qubit],
-                    threshold=None,
-                    amplitude_mode=amplitude_mode,
-                    avg_shots=False,
-                )
+                angle = angles[ps_qubit]
             else:
-                shots_readout = all_ishots_raw_q[ps_qubit, i_readout, :]
+                angle = None
+            shots_readout, _ = rotate_and_threshold(
+                ishots_1q=all_ishots_raw_q[ps_qubit, i_readout, :],
+                qshots_1q=all_qshots_raw_q[ps_qubit, i_readout, :],
+                angle=angle,
+                threshold=None,
+                amplitude_mode=amplitude_mode,
+                avg_shots=False,
+            )
             # print(ps_qubit, np.average(shots_readout))
 
             keep_prev = np.logical_and(keep_prev, shots_readout < ps_thresholds[ps_qubit])
@@ -1800,23 +1802,19 @@ class CliffordAveragerProgram(AveragerProgram):
         If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
         """
         avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
-        if post_process == None:
-            avgi_rot, avgq_rot = self.get_shots(
-                angle=angle, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
-            )
-            return avgi_rot, avgq_rot
-        elif post_process == "threshold":
+        if post_process == "threshold":
             assert threshold is not None
-            popln, avgq_rot = self.get_shots(
-                angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
-            )
-            return popln, avgq_rot
         elif post_process == "scale":
+            threshold = None  # just to double check nothing gets thresholded in get_shots
             assert ge_avgs is not None
-            avgi_rot, avgq_rot = self.get_shots(
-                angle=angle, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
-            )
 
+        avgi_rot, avgq_rot = self.get_shots(
+            angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+        )
+
+        if post_process == None or post_process == "threshold":
+            return avgi_rot, avgq_rot
+        elif post_process == "scale":
             ge_avgs_rot = [None] * 4
             for q, angle_q in enumerate(angle):
                 if not isinstance(ge_avgs[q], (list, np.ndarray)):

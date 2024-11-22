@@ -35,7 +35,7 @@ from PulseSequence import PulseSequence
 from QSwitch import QSwitch
 from scipy.optimize import minimize
 
-# style.use("S:\Connie\prx.mplstyle")
+style.use("S:\Connie\prx.mplstyle")
 
 from experiments.clifford_averager_program import post_select_shots, ps_threshold_adjust
 
@@ -963,7 +963,6 @@ class TomoAnalysis:
                     continue
                 print("evolution ket result")
                 print(evol_ket.full())
-                print(evol_ket)
 
                 if total_length != 0:
                     # ====== PLOT STATE EVOLUTION ====== #
@@ -1293,7 +1292,6 @@ class TomoAnalysis:
         method="L-BFGS-B",
         maxiter=1000000,
     ):
-        print
         if analytical:
             return self.run_MLE_analytical(n_tomo, ZZ_correction=ZZ_correction, evol_mats=evol_mats)
         else:
