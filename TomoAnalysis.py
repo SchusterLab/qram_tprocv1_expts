@@ -952,12 +952,12 @@ class TomoAnalysis:
                     states_inds.append(self.state_name_to_state_ind(psi_name, cutoffs))
                 if debug:
                     print("truncating to states inds", states_inds)
-                evol_ket = evol_ket.extract_states(states_inds, normalize=True)
-                idnq = qt.tensor(*[qt.qeye(2)] * self.nb_qubits)
-                evol_ket = qt.Qobj(evol_ket, dims=idnq.dims, shape=idnq.shape).unit()
-                evol_mats[basis].append(evol_ket)
-
-                # evol_mats[basis].append(evol_ket.unit().full())
+                
+                _evol_ket = evol_ket.full()
+                _evol_ket = _evol_ket[states_inds, :]
+                idnq = qt.tensor(*[qt.basis(2, 0)] * self.nb_qubits)
+                evol_ket = qt.Qobj(_evol_ket, dims=idnq.dims).unit()
+                evol_mats[basis].append(evol_ket.unit().full())
 
                 if not debug:
                     continue
@@ -969,22 +969,23 @@ class TomoAnalysis:
                     # print('from', str(state0) + str(state1) + str(state2))
                     print("from", init_state)
                     ref_states = self.calib_order
+                    fig, ax = plt.subplots()
                     for ref_state in ref_states:
                         if ZZ_qubit is not None:
                             ref_state += "e"
                         state = device.state(ref_state)
                         probs = [np.abs(state.overlap(evol_ket_all_times[t])) ** 2 for t in range(len(times))]
                         print(ref_state, "probabilty", probs[-1])
-                        plt.plot(times, probs, label=f"$|{ref_state}\\rangle_D$")
+                        ax.plot(times, probs, label=f"$|{ref_state}\\rangle_D$")
 
-                    plt.legend(ncol=2)
-                    plt.ylim(-0.05, 1.05)
-                    plt.xlabel("Time (ns)")
-                    plt.ylabel("Probability")
-                    plt.grid(linewidth=0.3)
+                    ax.legend(ncol=2)
+                    ax.set_ylim(-0.05, 1.05)
+                    ax.set_xlabel("Time (ns)")
+                    ax.set_ylabel("Probability")
+                    # ax.grid(linewidth=0.3)
                     # plt.title(f'{basis} start from {str(state0)+str(state1)+str(state2)}')
-                    plt.title(f"{basis} start from {init_state}")
-                    plt.show()
+                    ax.set_title(f"{basis} start from {init_state}")
+                    # plt.show()
 
             evol_mats[basis] = np.hstack(evol_mats[basis])
 
