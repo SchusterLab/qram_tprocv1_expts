@@ -983,12 +983,20 @@ class CliffordAveragerProgram(AveragerProgram):
         pihalf=True,
         **kwargs,
     ):
+
         # q: qubit number in config
         if ZZ_qubit is None:
             ZZ_qubit = q
 
         if special is None and self.use_robust_pulses:  # use robust pulses as the default X/2
             special = "robust"
+            
+        print('qubit', q)
+        print('special', special)
+        
+        
+        
+        
 
         # Get the freq, phase, length, type (assumes using default ge pulse)
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
@@ -1028,6 +1036,9 @@ class CliffordAveragerProgram(AveragerProgram):
             elif special == "robust":
                 type = "robust"
                 name += "_robust"
+            elif special == "gauss":
+                type = "gauss"
+                name += "_gauss"
 
         if ZZ_qubit != q:
             waveformname += f"_ZZ{ZZ_qubit}"
@@ -1182,7 +1193,16 @@ class CliffordAveragerProgram(AveragerProgram):
         sync_after=True,
         **kwargs,
     ):
-
+        
+        # if q==1:
+        #     print('ENFORCING GAUSSIAN PULSE for qubit 1')
+        #     special="gauss"
+            
+        # print('using X_pulse')
+        # print('qubit', q)
+        # print('special', special)
+            
+            
         n_pulse = 1
         if not pihalf:
             n_pulse = 2

@@ -190,6 +190,13 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         assert basis in "IXYZ"
         assert len(basis) == 1
         if basis == "X":
+            print('Warning q1 is using gauss')
+            if qubit ==1:
+                special = 'gauss'
+            else:
+                special = 'robust'
+                
+                
             self.Y_pulse(
                 qubit,
                 pihalf=True,
@@ -198,8 +205,13 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 neg=True,
                 flag=flag,
                 reload=True,
+                special=special
             )  # -Y/2 pulse to get from +X to +Z
         elif basis == "Y":
+            if qubit ==1:
+                special = 'gauss'
+            else:
+                special = 'robust'
             self.X_pulse(
                 qubit,
                 pihalf=True,
@@ -208,6 +220,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 play=play,
                 flag=flag,
                 reload=True,
+                special=special
             )  # X/2 pulse to get from +Y to +Z
         else:
             pass  # measure in I/Z basis
