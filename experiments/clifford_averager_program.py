@@ -1445,7 +1445,7 @@ class CliffordAveragerProgram(AveragerProgram):
                         ch=self.res_chs[q],
                         ro_ch=self.adc_chs[q],
                         length=max(self.readout_lengths_dac),
-                        freq_MHz=self.cfg.device.readout.frequency[q],
+                        freq_MHz=self.cfg.device.readout.frequency[q] + self.cfg.hw.soc.dacs.readout.mixer_freq[q],
                         phase_deg=0,
                         gain=gain,
                         play=False,
