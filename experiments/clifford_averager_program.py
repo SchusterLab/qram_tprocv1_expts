@@ -43,6 +43,7 @@ def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, 
 
     if amplitude_mode:
         ifinal = np.abs(ifinal + 1j * qfinal)
+        qfinal = np.zeros_like(ifinal)
 
     if threshold is not None:
         ifinal = np.heaviside(ifinal - threshold, 0)
@@ -612,7 +613,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 params["gain"] = gain
             if ro_ch is not None:
                 params["ro_ch"] = ro_ch
-                
+
             assert params["freq_MHz"] > 0, "IQ pulse may not be calibrated for frequency"
             assert params["gain"] > 0, "IQ pulse may not be calibrated for gain"
             self.set_pulse_registers(
@@ -807,13 +808,6 @@ class CliffordAveragerProgram(AveragerProgram):
             times_us = np.linspace(0, tot_length_us, int(tot_length_us / dt_us))
             pulse_I_shapes = np.ones((len(mux_freqs), len(times_us)))
             pulse_Q_shapes = np.zeros((len(mux_freqs), len(times_us)))
-        
-        
-        print(pulse_I_shapes.shape)
-        print(pulse_Q_shapes.shape)
-        print(times_us.shape)   
-            
-
 
         modulated_times_us = np.linspace(0, times_us[-1], int(times_us[-1] / dt_us))
 
@@ -992,13 +986,6 @@ class CliffordAveragerProgram(AveragerProgram):
 
         if special is None and self.use_robust_pulses:  # use robust pulses as the default X/2
             special = "robust"
-            
-        print('qubit', q)
-        print('special', special)
-        
-        
-        
-        
 
         # Get the freq, phase, length, type (assumes using default ge pulse)
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
@@ -1195,16 +1182,7 @@ class CliffordAveragerProgram(AveragerProgram):
         sync_after=True,
         **kwargs,
     ):
-        
-        # if q==1:
-        #     print('ENFORCING GAUSSIAN PULSE for qubit 1')
-        #     special="gauss"
-            
-        # print('using X_pulse')
-        # print('qubit', q)
-        # print('special', special)
-            
-            
+
         n_pulse = 1
         if not pihalf:
             n_pulse = 2
@@ -1413,7 +1391,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 ]
             else:
                 self.readout_lengths_adc = [self.us2cycles(times_us[-1], ro_ch=ro_ch) for ro_ch in self.adc_chs]
-                
+
             if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
                 self.readout_lengths_adc = [
                     self.us2cycles(length, ro_ch=ro_ch)
@@ -1584,7 +1562,6 @@ class CliffordAveragerProgram(AveragerProgram):
             lengths_ch = [lengths[q] for q in qubits_ch] if lengths is not None else None
             pulse_I_shapes_ch = [pulse_I_shapes[q] for q in qubits_ch] if pulse_I_shapes is not None else None
             pulse_Q_shapes_ch = [pulse_Q_shapes[q] for q in qubits_ch] if pulse_Q_shapes is not None else None
-            
 
             assert max(mux_gains_ch) > 0, f"All mux gains are 0 for gen ch {full_mux_ch}"
             assert len(mask_ch) > 0, f"Len of mask is 0 for gen_ch {full_mux_ch}"
@@ -1597,7 +1574,9 @@ class CliffordAveragerProgram(AveragerProgram):
                 relative_amps=mux_gains_ch,
                 lengths=lengths_ch,
                 pulse_I_shapes=np.array(pulse_I_shapes_ch),
-                pulse_Q_shapes=(-1* np.array(pulse_Q_shapes_ch) if pulse_Q_shapes is not None else None),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
+                pulse_Q_shapes=(
+                    -1 * np.array(pulse_Q_shapes_ch) if pulse_Q_shapes is not None else None
+                ),  # the convention is actually consistent with the rfsoc convention, unlike in the optimal control code
                 times_us=times_us,
                 phase_deg=0,
                 plot_IQ=plot_IQ,
@@ -1611,7 +1590,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
-            print('ADC readout length', self.readout_lengths_adc[q])
+            # print("ADC readout length", self.readout_lengths_adc[q])
             if self.adc_chs[q] not in self.ro_chs:
                 self.declare_readout(
                     ch=self.adc_chs[q],
@@ -1919,7 +1898,6 @@ class CliffordAveragerProgram(AveragerProgram):
 
         if "len_readout_adc" in self.cfg.expt and self.cfg.expt.len_readout_adc is not None:
             _ro_lengths_adc = self.cfg.expt.len_readout_adc
-            print('using custom readout lengths', _ro_lengths_adc)
         else:
             _ro_lengths_adc = self.cfg.device.readout.readout_length
 
@@ -2097,7 +2075,10 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         phrst=0,
         reload=True,
         sync_after=True,
+        special=None,
     ):
+        if special is not None:
+            assert False, "No special EF pulses have been implemented!"
         n_pulse = 1
         if not pihalf:
             n_pulse = 2
