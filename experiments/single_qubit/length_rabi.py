@@ -104,6 +104,9 @@ class LengthRabiProgram(QutritAveragerProgram):
         if self.check_I_distort:
             assert "check_I_phase" in self.cfg.expt
             self.check_I_phase = self.cfg.expt.check_I_phase
+        if not (self.pi_minuspi or self.check_I_distort or self.check_C_distort): # npulse experiment
+            self.npulsecalib = True
+        else: self.npulsecalib = False
         self.use_pi2_for_pi = "use_pi2_for_pi" in self.cfg.expt and self.cfg.expt.use_pi2_for_pi
         if self.check_I_distort or self.check_C_distort:
             assert "delay_error_amp" in self.cfg.expt
@@ -117,6 +120,9 @@ class LengthRabiProgram(QutritAveragerProgram):
         if "pulse_type" in self.cfg.expt:
             if "pulse_type" != "gauss" and "pulse_type" != "const":
                 special = self.cfg.expt.pulse_type
+        if self.cfg.expt.use_robust_pulses:
+            self.cfg.expt.pulse_type = "robust"
+            special = "robust"
 
         if "skip_first_pi2" in self.cfg.expt:
             skip_first_pi2 = self.cfg.expt.skip_first_pi2
@@ -135,14 +141,17 @@ class LengthRabiProgram(QutritAveragerProgram):
                 n_cycles = self.cfg.expt.n_cycles
                 n_pulse_per_cycle = 2
                 # print('init pi/2 freq', self.reg2freq(self.f_pi_test_reg, gen_ch=self.qubit_chs[qTest]), 'gain', self.pi_test_half_gain)
-                
-                if not self.pi_minuspi or self.check_I_distort:
+
+                if self.npulsecalib:
+                    n_pulse_per_cycle = 1
+
+                if self.npulsecalib or self.check_I_distort:
                     if not skip_first_pi2:
                         # play initial pi/2 pulse if you're just doing error amplification and not the pi/-pi sweep
                         if not self.checkEF:
                             self.X_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True, special=special)
                         else:
-                            self.Xef_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True, special=special)
+                            self.Xef_pulse(q=qTest, ZZ_qubit=qZZ, pihalf=True, play=True, special=None)
                     self.sync_all()
 
             # ============
@@ -157,7 +166,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                     divide_len=self.divide_len,
                     play=False,
                     set_reg=True,
-                    special=special,
+                    special=None,
                 )
                 name = "X_ef"
             else:
@@ -623,6 +632,7 @@ class NPulseExperiment(Experiment):
             length = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4, 4))[qTest, qZZ]
 
         self.cfg.expt.sigma_test = float(length)
+        self.cfg.expt.error_amp = True
 
         if "loops" not in self.cfg.expt:
             self.cfg.expt.loops = 1

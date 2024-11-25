@@ -112,8 +112,8 @@ def fitexp(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(expfunc, xdata, ydata, p0=fitparams)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -135,8 +135,8 @@ def fitlogexp(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(logexpfunc, xdata, ydata, p0=fitparams)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -173,8 +173,8 @@ def fitqpexp(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(qp_expfunc, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -216,8 +216,8 @@ def fit_gauss(xdata, ydata, fitparams=None):
             gaussian, xdata, ydata, p0=np.array(fitparams, dtype="float64"), bounds=bounds
         )
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -264,8 +264,8 @@ def fit_doublegauss(xdata, ydata, fitparams=None):
             double_gaussian, xdata, ydata, p0=np.array(fitparams, dtype="float64"), bounds=bounds
         )
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -296,8 +296,8 @@ def fitlor(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(lorfunc, xdata, ydata, p0=fitparams)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -354,8 +354,8 @@ def fitnlor(xdata, ydata, npeaks, f0_guess, chi_guess, fitparams=None):
         fitnlorfunc = lambda x, *p: nlorfunc(x, npeaks, *p)
         pOpt, pCov = sp.optimize.curve_fit(fitnlorfunc, xdata, ydata, p0=fitparams)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -402,8 +402,8 @@ def fitsin(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(sinfunc, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -441,8 +441,8 @@ def fitquadratic(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(quadraticfunc, xdata, ydata, p0=fitparams)  # , bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -498,8 +498,8 @@ def fitrabi_gainslice(xdata, ydata, length, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(rabifunc, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -552,8 +552,8 @@ def fitdecaysin(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(decaysin, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -624,8 +624,8 @@ def fittwofreq_decaysin(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(twofreq_decaysin, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -726,8 +726,8 @@ def fitthreefreq_decaysin(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(threefreq_decaysin, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -816,8 +816,8 @@ def fithanger(xdata, ydata, fitparams=None):
         pOpt, pCov = sp.optimize.curve_fit(hangerS21func_sloped, xdata, ydata, p0=fitparams, bounds=bounds)
         print("popt", pOpt)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -878,8 +878,8 @@ def fitrb(xdata, ydata, fitparams=None):
         # print(pOpt)
         # print(pCov[0][0], pCov[1][1], pCov[2][2])
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -946,8 +946,8 @@ def fitrb_l1_l2(xdata, ydata, p1, offset, fitparams=None):
         # print(pOpt)
         # print(pCov[0][0], pCov[1][1], pCov[2][2])
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -1024,8 +1024,8 @@ def fit_probg_Xhalf(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(probg_Xhalf, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -1054,8 +1054,8 @@ def fit_probg_X(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(probg_X, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -1086,8 +1086,8 @@ def fit_probg_Xhalf_decay(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(probg_Xhalf_decay, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov
 
@@ -1120,7 +1120,7 @@ def fit_poisson(xdata, ydata, fitparams=None):
     try:
         pOpt, pCov = sp.optimize.curve_fit(poisson, xdata, ydata, p0=fitparams, bounds=bounds)
         # return pOpt, pCov
-    except RuntimeError:
-        print("Warning: fit failed!")
+    except (RuntimeError, ValueError) as e:
+        print("Warning: fit failed with error:", e)
         # return 0, 0
     return pOpt, pCov

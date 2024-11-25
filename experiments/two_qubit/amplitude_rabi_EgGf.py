@@ -977,9 +977,11 @@ class EgGfFreqGainChevronExperiment(Experiment):
         fit_freqs = np.array([f[2] if f is not None else np.nan for f in data["fitamps"][fit_qind]])
 
         fitparams = [x_sweep[0], fit_freqs[0], fit_freqs[-1] - fit_freqs[0]]
-        p, pCov = fitter.fitquadratic(x_sweep[:-5], fit_freqs[:-5], fitparams=fitparams)
+        fit_xsweep_set = x_sweep[5:15]
+        fit_freqs_set = fit_freqs[5:15]
+        p, pCov = fitter.fitquadratic(fit_xsweep_set, fit_freqs_set, fitparams=fitparams)
         fit_freqs_fit = fitter.quadraticfunc(x_sweep, *p)
-        print("gain_sweep =", x_sweep.tolist())
+        print("fit_gain_sweep =", x_sweep.tolist())
         print("fit_freqs =", fit_freqs_fit.tolist())
 
         plt.figure(figsize=(9, 7))

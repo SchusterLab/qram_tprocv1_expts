@@ -398,7 +398,7 @@ def general_hist(
         axs[1, 0].legend(prop=prop)
         if log_mode:
             axs[1, 0].set_yscale("log")
-            axs[1, 0].set_ylim(0.0001, 1.1 * y_max)
+            axs[1, 0].set_ylim(1e-3, 1.1 * y_max)
         axs[1, 1].legend(prop=prop)
 
         if export:

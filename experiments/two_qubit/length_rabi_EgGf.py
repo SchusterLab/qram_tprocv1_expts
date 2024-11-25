@@ -326,9 +326,13 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
         if self.sigma_test > 0:
             if "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None:
                 n_cycles = self.cfg.expt.n_cycles
-                n_pulse_per_cycle = 2  # (pi, +/- pi)^N
+                if self.pi_minuspi:
+                    n_pulse_per_cycle = 2  # (pi, - pi)^N
+                else:
+                    n_pulse_per_cycle = 1  # pi/2, (pi)^N
 
                 if not self.pi_minuspi:
+                    # print("WARNING, NO SWAP/2 FOR ERROR AMPLIFICATION CURRENTLY!")
                     # play the pihalf initialization for the error amplification
                     pulse_type = cfg.expt.pulse_type.lower()
                     if pulse_type == "gauss":
@@ -365,6 +369,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                             length=self.sigma_test // 2,
                         )  # , phrst=1)
                     self.sync_all()
+
             else:
                 n_cycles = 1
                 n_pulse_per_cycle = 1  # (pi/2 or pi)^1
@@ -416,7 +421,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             # ============
             # loop over error amplification (if no amplification we just loop 1x)
             # ============
-            # print("n_cycles", n_cycles)
+            # print("n_cycles", n_cycles, "n_pulse_per_cycle", n_pulse_per_cycle)
             for i in range(int(n_cycles)):
                 for j in range(n_pulse_per_cycle):
 
