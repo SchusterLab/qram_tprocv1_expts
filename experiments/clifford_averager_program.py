@@ -667,7 +667,6 @@ class CliffordAveragerProgram(AveragerProgram):
             times_us = times * 1e6
             freq_MHz = self.f_ges_robust[q, ZZ_qubit]
             gain = self.pihalf_gain_robust[q, ZZ_qubit]
-            # print(name, f"freq_MHz: {freq_MHz}, gain: {gain}")
 
         self.handle_IQ_pulse(
             name=name,
@@ -993,13 +992,10 @@ class CliffordAveragerProgram(AveragerProgram):
         if special is None and self.use_robust_pulses:  # use robust pulses as the default X/2
             special = "robust"
             
-        print('qubit', q)
-        print('special', special)
+        # print('qubit', q)
+        # print('special', special)
+  
         
-        
-        
-        
-
         # Get the freq, phase, length, type (assumes using default ge pulse)
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
         f_ge_MHz = self.f_ges[q, ZZ_qubit]
@@ -1611,7 +1607,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
         for q in range(self.num_qubits_sample):
-            print('ADC readout length', self.readout_lengths_adc[q])
+            # print('ADC readout length', self.readout_lengths_adc[q])
             if self.adc_chs[q] not in self.ro_chs:
                 self.declare_readout(
                     ch=self.adc_chs[q],
@@ -1673,6 +1669,7 @@ class CliffordAveragerProgram(AveragerProgram):
         Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
         Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
         """
+        
 
         idata, qdata = self.get_multireadout_shots(
             angle=angle, threshold_final=threshold, amplitude_mode=amplitude_mode
@@ -1726,7 +1723,7 @@ class CliffordAveragerProgram(AveragerProgram):
         shots_q_reshaped = np.zeros(shots_reshaped_shape)
         for i in range(len(self.ro_chs)):
             meas_per_expt = 1 + n_init_readout * n_trig
-
+            
             # reshape + average over n_trig for the init readouts
             if n_init_readout > 0 and n_trig > 0:
                 # init reads shape: reps, n_init_readout, n_trig
@@ -1761,16 +1758,22 @@ class CliffordAveragerProgram(AveragerProgram):
             shots_q_reshaped[i, -1, :] = shots_q_final_read
 
         if threshold_final is not None:
-            for ch in range(len(self.ro_chs)):
-                shots_i_reshaped[ch, -1, :], _ = rotate_and_threshold(
-                    ishots_1q=shots_i_reshaped[ch, -1, :],
-                    qshots_1q=shots_q_reshaped[ch, -1, :],
-                    threshold=threshold_final[ch],
+            for i in range(len(self.ro_chs)):
+                if amplitude_mode:
+                    _shots_q_reshaped = np.zeros_like(shots_q_reshaped[i, -1, :])
+                else:
+                    _shots_q_reshaped = shots_q_reshaped[i, -1, :]
+                    
+                shots_i_reshaped[i, -1, :], _ = rotate_and_threshold(
+                    ishots_1q=shots_i_reshaped[i, -1, :],
+                    qshots_1q=_shots_q_reshaped,
+                    threshold=threshold_final[i],
                     amplitude_mode=amplitude_mode,
                 )
 
         # final shape: (ro_chs, n_init_readout + 1, reps)
         # or if not avg_trigs: (ro_chs, n_init_readout*n_trig + 1, reps)
+        # return shots_i_reshaped, shots_q_reshaped
         return shots_i_reshaped, shots_q_reshaped
 
     def acquire(self, soc, load_pulses=True, progress=False, save_experiments=None):
