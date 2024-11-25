@@ -117,6 +117,10 @@ class LengthRabiProgram(QutritAveragerProgram):
             play_pulse = False
         self.cfg.expt.gain = 0
 
+        if self.cfg.expt.pulse_type == "robust" and "use_robust_pulses" in self.cfg.expt:
+            assert self.cfg.expt.use_robust_pulses
+        if "use_robust_pulses" in self.cfg.expt and self.cfg.expt.use_robust_pulses and "pulse_type" in self.cfg.expt:
+            assert self.cfg.expt.pulse_type == "robust" 
         if "pulse_type" in self.cfg.expt:
             if "pulse_type" != "gauss" and "pulse_type" != "const":
                 special = self.cfg.expt.pulse_type
@@ -208,7 +212,7 @@ class LengthRabiProgram(QutritAveragerProgram):
 
                     num_test_pulses = 1
 
-                    if self.use_pi2_for_pi:
+                    if self.use_pi2_for_pi or self.test_pi_half:
                         num_test_pulses = 2
 
                     self.safe_regwi(
