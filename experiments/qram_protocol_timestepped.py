@@ -11,14 +11,18 @@ from slab import AttrDict, Experiment, NpEncoder
 from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
-from experiments.clifford_averager_program import CliffordAveragerProgram
+from experiments.clifford_averager_program import (
+    CliffordAveragerProgram,
+    post_select_shots,
+    ps_threshold_adjust,
+)
 from experiments.four_qubit.fourQ_state_tomo import (
     AbstractStateTomo4QProgram,
     ErrorMitigationStateTomo4QProgram,
     make_4q_calib_order,
     make_4q_meas_order,
 )
-from experiments.single_qubit.single_shot import hist, multihist
+from experiments.single_qubit.single_shot import get_ge_avgs, hist, multihist
 from experiments.three_qubit.threeQ_state_tomo import (
     AbstractStateTomo3QProgram,
     ErrorMitigationStateTomo3QProgram,
@@ -243,7 +247,9 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         # else: already done with protocol for this timestep
         return new_count_us
 
-    def collect_counts_post_select(self, angle=None, threshold=None, postselect=True, postselect_q=1, amplitude_mode=False):
+    def collect_counts_post_select(
+        self, angle=None, threshold=None, postselect=True, postselect_q=1, amplitude_mode=False
+    ):
         if not postselect:
             return self.collect_counts(angle, threshold, amplitude_mode=amplitude_mode)
 
@@ -393,9 +399,9 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 assert self.use_robust_pulses
                 # self.Y_pulse(q=1, pihalf=True, play=True, special="gauss")
                 # self.Y_pulse(q=1, pihalf=True, play=True)
-                self.Y_pulse(q=1, pihalf=True, play=True, special='gauss')
+                self.Y_pulse(q=1, pihalf=True, play=True, special="gauss")
                 self.Y_pulse(q=0, pihalf=True, play=True)
-                
+
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
@@ -413,43 +419,38 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 # self.Y_pulse(q=1, play=True, special="gauss")  # -> 1
                 # self.Y_pulse(q=1, play=True)  # -> 1
                 # print('Carefull: q0 is played first')
-                self.Y_pulse(q=1, play=True, special='gauss')  # -> 1
+                self.Y_pulse(q=1, play=True, special="gauss")  # -> 1
                 self.Y_pulse(q=0, pihalf=True, play=True, ZZ_qubit=1)
 
-                
             else:
                 IQ_qubits = [0, 1]
                 for q in IQ_qubits:
                     # play the I + Q component for each qubit in the IQ pulse
                     self.handle_IQ_pulse(name=f"pulse_p1_Q{q}", ch=self.qubit_chs[q], sync_after=False, play=True)
                 self.sync_all()
-                
-                
-                
+
         elif init_state == "|0+1>|0+i>":
-            self.X_pulse(q=1, pihalf=True, play=True, special='gauss', neg=True)
+            self.X_pulse(q=1, pihalf=True, play=True, special="gauss", neg=True)
             self.Y_pulse(q=0, pihalf=True, play=True)
-            
+
         elif init_state == "|0+i>|0>":
             self.X_pulse(q=0, play=True, pihalf=True, neg=True)
-            
+
         elif init_state == "|0+i>|1>":
-            self.Y_pulse(q=1, play=True, special='gauss')
+            self.Y_pulse(q=1, play=True, special="gauss")
             self.X_pulse(q=0, play=True, neg=True, ZZ_qubit=1, pihalf=True)
-            
+
         elif init_state == "|0+i>|0+1>":
-            self.Y_pulse(q=1, play=True, special='gauss')
+            self.Y_pulse(q=1, play=True, special="gauss")
             self.X_pulse(q=0, pihalf=True, play=True, neg=True)
         elif init_state == "|0+i>|0+i>":
-            self.X_pulse(q=1, play=True, pihalf=True, neg=True, special='gauss')
+            self.X_pulse(q=1, play=True, pihalf=True, neg=True, special="gauss")
             self.X_pulse(q=0, play=True, pihalf=True, neg=True)
         elif init_state == "|0>|0+i>":
             self.X_pulse(q=1, play=True, pihalf=True, neg=True)
         elif init_state == "|1>|0+i>":
-            self.Y_pulse(q=0, play=True, special='gauss')
+            self.Y_pulse(q=0, play=True, special="gauss")
             self.X_pulse(q=1, play=True, pihalf=True, neg=True, ZZ_qubit=0)
-
-
 
         elif init_state == "|0+i1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
@@ -694,7 +695,7 @@ class QramProtocolExperiment(Experiment):
 
         timesteps = self.cfg.expt["start"] + self.cfg.expt["step"] * np.arange(self.cfg.expt["expts"])
         print("timesteps", timesteps)
-        
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
@@ -831,7 +832,9 @@ class QramProtocolExperiment(Experiment):
 
             # Process the shots taken for the confusion matrix with the calibration angles (for tomography)
             for iprep, prep_state in enumerate(self.calib_order):
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
+                counts = calib_prog_dict[prep_state].collect_counts(
+                    angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                )
                 data["counts_calib"].append(counts)
                 data[f"calib_ishots_raw"][iprep, :, :, :], data[f"calib_qshots_raw"][iprep, :, :, :] = calib_prog_dict[
                     prep_state
@@ -873,7 +876,9 @@ class QramProtocolExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f"Qubit ({q}) ge")
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
+                    fid, threshold, angle = hist(
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                    )
                     thresholds_q[q] = threshold[0]
                     angles_q[q] = angle
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -904,7 +909,7 @@ class QramProtocolExperiment(Experiment):
             # Perform 2q state tomo only on last timestep
             if self.cfg.expt.tomo_2q and time_i == len(timesteps) - 1:
                 for ibasis, basis in enumerate(tqdm(self.meas_order)):
-                    
+
                     # print('WARNING, ONLY MEASURING 1 BASIS')
                     # basis = 'ZX'
                     # print(basis)
@@ -920,7 +925,12 @@ class QramProtocolExperiment(Experiment):
 
                     avgi, avgq = tomo_prog.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
                     counts = tomo_prog.collect_counts_post_select(
-                        angle=angles_q, threshold=thresholds_q, postselect=self.cfg.expt.post_select, postselect_q=1, amplitude_mode=full_mux_expt)
+                        angle=angles_q,
+                        threshold=thresholds_q,
+                        postselect=self.cfg.expt.post_select,
+                        postselect_q=1,
+                        amplitude_mode=full_mux_expt,
+                    )
                     if cfg.expt.post_select:
                         data["counts_tomo_ps0"].append(counts[0])
                         data["counts_tomo_ps1"].append(counts[1])
@@ -1108,8 +1118,8 @@ class QramProtocolSingleShotExperiment(Experiment):
             cfg_i.expt.play_pulses = play_pulses
             protocol_prog = QramProtocolProgram(soccfg=self.soccfg, cfg=cfg_i)
             avgi, avgq = protocol_prog.acquire(soc=self.im[self.cfg.aliases.soc], load_pulses=True, progress=progress)
-            idata, qdata = protocol_prog.get_shots(angle=None, avg_shots=False, verbose=False)
-            # each idata, qdata has 4 readouts, each with the number of shots
+            idata, qdata = protocol_prog.get_multireadout_shots()
+            # each idata, qdata is [ro_chs, n_init_readout+1, reps)
             data["iqshots"].append((idata, qdata))
 
         for k, a in data.items():
@@ -1130,55 +1140,86 @@ class QramProtocolSingleShotExperiment(Experiment):
         g_states=None,
         e_states=None,
         verbose=True,
-        **kwargs,
+        apply_ps=False,
+        ps_qubits=None,
+        ps_adjust=None,
+        ps_check_states_list=None,
     ):
+        """
+        ps_check_states_list should be a list of indices of check_states that you want to use for post selection
+        """
         if data is None:
             data = self.data
 
-        # fids, thresholds, angle = multihist(data=data, check_qubit=check_qubit, qubits=qubits, check_states=check_states, g_states=g_states, e_states=e_states, theta=theta, plot=False, verbose=verbose)
-        # data['fids'] = fids
-        # data['angle'] = angle
-        # data['thresholds'] = thresholds
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
 
-        print("argwhere", check_states.index("Q2Q1_|2>|1>"))
-
+        data_process = dict(iqshots=[])
+        # if "readout_cool" in self.cfg.expt and self.cfg.expt.readout_cool:
+        for i_check, check_data in enumerate(data["iqshots"]):
+            idata, qdata = check_data
+            data_process["iqshots"].append((idata[:, -1, :], qdata[:, -1, :]))
         fids, thresholds, angle = multihist(
-            data=data,
-            check_qubit=1,
-            qubits=qubits,
+            data=data_process,
+            check_qubit=check_qubit,
             check_states=check_states,
             play_pulses_list=play_pulses_list,
-            g_states=[0],
-            e_states=[1],
+            g_states=g_states,
+            e_states=e_states,
             theta=theta,
             plot=False,
             verbose=verbose,
+            amplitude_mode=full_mux_expt,
         )
-        idata, qdata = data["iqshots"][check_states.index("Q2Q1_|2>|1>")]
-        idata_rot = idata * np.cos(np.pi / 180 * angle) - qdata * np.sin(np.pi / 180 * angle)
-        shots1 = np.array([np.heaviside(idata_rot - thresholds[0], 0)])
+        print(fids, thresholds, angle)
+        data["angles"] = np.zeros(4)
+        data["angles"][check_qubit] = angle
+        data["thresholds"] = np.zeros(4)
+        data["thresholds"][check_qubit] = thresholds[0]
+        data["ge_avgs"] = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+        Igs, Qgs = data["iqshots"][g_states[0]]
+        Ies, Qes = data["iqshots"][e_states[0]]
+        data["ge_avgs"][check_qubit] = get_ge_avgs(Igs=Igs, Qgs=Qgs, Ies=Ies, Qes=Qes, amplitude_mode=full_mux_expt)
 
-        fids, thresholds, angle = multihist(
-            data=data,
-            check_qubit=2,
-            qubits=qubits,
-            check_states=check_states,
-            play_pulses_list=play_pulses_list,
-            g_states=[0],
-            e_states=[2],
-            theta=theta,
-            plot=False,
-            verbose=verbose,
-        )
-        idata, qdata = data["iqshots"][check_states.index("Q2Q1_|2>|1>")]
-        idata_rot = idata * np.cos(np.pi / 180 * angle) - qdata * np.sin(np.pi / 180 * angle)
-        shots2 = np.array([np.heaviside(idata_rot - thresholds[0], 0)])
+        if apply_ps:
+            output_data = []
+            if ps_adjust is None:
+                ps_thresholds = data["thresholds"]
+            else:
+                ps_thresholds = ps_threshold_adjust(
+                    ps_thresholds_init=data["thresholds"],
+                    adjust=ps_adjust,
+                    ge_avgs=data["ge_avgs"],
+                    angles=data["angles"],
+                    amplitude_mode=full_mux_expt,
+                )
 
-        tomo_analysis = TomoAnalysis(nb_qubits=2)
-        counts = tomo_analysis.sort_counts([shots1, shots2])
-        print("counts")
-        print(counts)
-        return data
+            for ps_check_state_i in ps_check_states_list:
+                _, keep_indices = post_select_shots(
+                    final_qubit=check_qubit,
+                    all_ishots_raw_q=data["iqshots"][ps_check_state_i][0],
+                    all_qshots_raw_q=data["iqshots"][ps_check_state_i][1],
+                    angles=data["angles"],
+                    ps_thresholds=ps_thresholds,
+                    ps_qubits=ps_qubits,
+                    n_init_readout=self.cfg.expt.n_init_readout,
+                    post_process=None,
+                    verbose=False,
+                    return_keep_indices=True,
+                    amplitude_mode=full_mux_expt,
+                )
+
+                ishots_unrot = data["iqshots"][ps_check_state_i][0][:, -1, :]
+                qshots_unrot = data["iqshots"][ps_check_state_i][1][:, -1, :]
+                ishots_ps_unrot = ishots_unrot[:, keep_indices]
+                qshots_ps_unrot = qshots_unrot[:, keep_indices]
+                print("keep", 100 * np.sum(keep_indices) / len(ishots_unrot[check_qubit]), "%")
+                output_data.append((ishots_ps_unrot, qshots_ps_unrot))
+                check_states.append(f"{check_states[ps_check_state_i]}_ps")
+                play_pulses_list.append(play_pulses_list[ps_check_state_i])
+            data["iqshots_ps"] = output_data
+        return play_pulses_list, check_states, data
 
     def display(
         self,
@@ -1191,7 +1232,8 @@ class QramProtocolSingleShotExperiment(Experiment):
         g_states=None,
         e_states=None,
         verbose=True,
-        **kwargs,
+        export=False,
+        apply_ps=False,
     ):
         if data is None:
             data = self.data
@@ -1201,10 +1243,26 @@ class QramProtocolSingleShotExperiment(Experiment):
         #     for i in range(len(check_states)):
         #         check_states[i] = check_states[i][5:]
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
+        if apply_ps:
+            assert "iqshots_ps" in data
+
+        data_process = dict(iqshots=[])
+        # if "readout_cool" in self.cfg.expt and self.cfg.expt.readout_cool:
+        for check_data in data["iqshots"]:
+            idata, qdata = check_data
+            data_process["iqshots"].append((idata[:, -1, :], qdata[:, -1, :]))
+        if apply_ps:
+            for check_data in data["iqshots_ps"]:
+                idata, qdata = check_data
+                data_process["iqshots"].append((idata, qdata))
+
         fids, thresholds, angle = multihist(
-            data=data,
+            data=data_process,
             check_qubit=check_qubit,
-            qubits=qubits,
             check_states=check_states,
             play_pulses_list=play_pulses_list,
             g_states=g_states,
@@ -1212,7 +1270,8 @@ class QramProtocolSingleShotExperiment(Experiment):
             theta=theta,
             plot=True,
             verbose=verbose,
-            export=True,
+            export=export,
+            amplitude_mode=full_mux_expt,
         )
 
         print(f"average ge fidelity (%): {100*fids[0]}")
@@ -1418,11 +1477,10 @@ class QramProtocol1QTomoExperiment(Experiment):
         self.calib_order = ["g", "e"]  # should match with order of counts for each tomography measurement
         data = {"counts_tomo": [], "counts_calib": []}
         self.pulse_dict = dict()
-        
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
-        
 
         if "n_init_readout" not in self.cfg.expt:
             self.cfg.expt.n_init_readout = 0
@@ -1520,7 +1578,9 @@ class QramProtocol1QTomoExperiment(Experiment):
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for iprep, prep_state in enumerate(self.calib_order):
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
+                counts = calib_prog_dict[prep_state].collect_counts(
+                    angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                )
                 data["counts_calib"].append(counts)
                 data[f"calib_ishots_raw"][iprep, :, :, :], data[f"calib_qshots_raw"][iprep, :, :, :] = calib_prog_dict[
                     prep_state
@@ -1558,7 +1618,9 @@ class QramProtocol1QTomoExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f"Qubit ({q}) ge")
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
+                    fid, threshold, angle = hist(
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                    )
                     thresholds_q[q] = threshold[0]
                     angles_q[q] = angle
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
