@@ -985,6 +985,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         if special is None and self.use_robust_pulses:  # use robust pulses as the default X/2
             special = "robust"
+            
         # Get the freq, phase, length, type (assumes using default ge pulse)
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
         f_ge_MHz = self.f_ges[q, ZZ_qubit]

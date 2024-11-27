@@ -353,15 +353,15 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         elif init_state == "|0>|1>":
             # self.X_pulse(q=1, play=True, special="gauss")
-            self.X_pulse(q=1, play=True, special="gauss")
+            self.X_pulse(q=1, play=True)
 
         elif init_state == "|0>|0+1>":
             # self.Y_pulse(q=1, play=True, pihalf=True, special="gauss")
             # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
-            self.Y_pulse(q=1, play=True, pihalf=True, special="gauss")
+            self.Y_pulse(q=1, play=True, pihalf=True)
 
         elif init_state == "|0>|2>":
-            self.X_pulse(q=1, play=True, special="gauss")
+            self.X_pulse(q=1, play=True)
             self.Xef_pulse(q=1, play=True)
 
         elif init_state == "|1>|0>":
@@ -370,7 +370,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         elif init_state == "|1>|0+1>":
             if not self.cfg.expt.use_IQ_pulse:
                 assert self.use_robust_pulses
-                self.Y_pulse(q=1, pihalf=True, play=True, special="gauss")
+                self.Y_pulse(q=1, pihalf=True, play=True)
                 # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
                 # self.Y_pulse(q=1, play=True, pihalf=True)
                 self.X_pulse(q=0, play=True)
@@ -383,7 +383,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         elif init_state == "|1>|1>":
             # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
-            self.X_pulse(q=1, play=True, special="gauss")
+            self.X_pulse(q=1, play=True)
             self.X_pulse(q=0, play=True, ZZ_qubit=1)
             # self.X_pulse(q=1, play=True, special="gauss")
             # self.X_pulse(q=0, ZZ_qubit=1, play=True)
@@ -393,7 +393,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 assert self.use_robust_pulses
                 # self.Y_pulse(q=1, pihalf=True, play=True, special="gauss")
                 # self.Y_pulse(q=1, pihalf=True, play=True)
-                self.Y_pulse(q=1, pihalf=True, play=True, special='gauss')
+                self.Y_pulse(q=1, pihalf=True, play=True)
                 self.Y_pulse(q=0, pihalf=True, play=True)
                 
             else:
@@ -413,8 +413,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 # self.Y_pulse(q=1, play=True, special="gauss")  # -> 1
                 # self.Y_pulse(q=1, play=True)  # -> 1
                 # print('Carefull: q0 is played first')
-                self.Y_pulse(q=1, play=True, special='gauss')  # -> 1
-                self.Y_pulse(q=0, pihalf=True, play=True, ZZ_qubit=1)
+                self.Y_pulse(q=1, play=True)  # -> 1
+                self.Y_pulse(q=0, pihalf=True, play=True)
 
                 
             else:
@@ -427,57 +427,56 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 
                 
         elif init_state == "|0+1>|0+i>":
-            self.X_pulse(q=1, pihalf=True, play=True, special='gauss', neg=True)
+            self.X_pulse(q=1, pihalf=True, play=True, neg=True)
             self.Y_pulse(q=0, pihalf=True, play=True)
             
         elif init_state == "|0+i>|0>":
             self.X_pulse(q=0, play=True, pihalf=True, neg=True)
             
         elif init_state == "|0+i>|1>":
-            self.Y_pulse(q=1, play=True, special='gauss')
+            self.Y_pulse(q=1, play=True)
             self.X_pulse(q=0, play=True, neg=True, ZZ_qubit=1, pihalf=True)
             
         elif init_state == "|0+i>|0+1>":
-            self.Y_pulse(q=1, play=True, special='gauss')
+            self.Y_pulse(q=1, play=True)
             self.X_pulse(q=0, pihalf=True, play=True, neg=True)
         elif init_state == "|0+i>|0+i>":
-            self.X_pulse(q=1, play=True, pihalf=True, neg=True, special='gauss')
+            self.X_pulse(q=1, play=True, pihalf=True, neg=True)
             self.X_pulse(q=0, play=True, pihalf=True, neg=True)
         elif init_state == "|0>|0+i>":
             self.X_pulse(q=1, play=True, pihalf=True, neg=True)
         elif init_state == "|1>|0+i>":
-            self.Y_pulse(q=0, play=True, special='gauss')
+            self.Y_pulse(q=0, play=True)
             self.X_pulse(q=1, play=True, pihalf=True, neg=True, ZZ_qubit=0)
 
 
+        # elif init_state == "|0+i1>|0+1>":
+        #     if not self.cfg.expt.use_IQ_pulse:
+        #         assert self.use_robust_pulses
+        #         assert False, "not implemented!"
+        #     else:
+        #         assert False, "no i+ state prep implemented!"
 
-        elif init_state == "|0+i1>|0+1>":
-            if not self.cfg.expt.use_IQ_pulse:
-                assert self.use_robust_pulses
-                assert False, "not implemented!"
-            else:
-                assert False, "no i+ state prep implemented!"
+        #     self.X_pulse(q=0, play=True, pihalf=True, neg=True)  # -> 0+i1
+        #     self.sync_all()
 
-            self.X_pulse(q=0, play=True, pihalf=True, neg=True)  # -> 0+i1
-            self.sync_all()
-
-            freq_reg = self.freq2reg(np.average([self.f_ges[1, 1], self.f_ges[1, 0]]))
-            gain = int(np.average([self.pi_ge_gains[1, 1], self.pi_ge_gains[1, 0]]))
-            sigma_us = np.average([self.pi_ge_sigmas[1, 1] / 2, self.pi_ge_sigmas[1, 0] / 2])
-            pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
-            phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1])  # +Y/2 -> 0+1
-            self.add_gauss(
-                ch=self.qubit_chs[1], name="qubit1_semiZZ0_half", sigma=pi2_sigma_cycles, length=4 * pi2_sigma_cycles
-            )
-            self.setup_and_pulse(
-                ch=self.qubit_chs[1],
-                style="arb",
-                freq=freq_reg,
-                phase=phase,
-                gain=gain,
-                waveform="qubit1_semiZZ0_half",
-            )
-            self.sync_all()
+        #     freq_reg = self.freq2reg(np.average([self.f_ges[1, 1], self.f_ges[1, 0]]))
+        #     gain = int(np.average([self.pi_ge_gains[1, 1], self.pi_ge_gains[1, 0]]))
+        #     sigma_us = np.average([self.pi_ge_sigmas[1, 1] / 2, self.pi_ge_sigmas[1, 0] / 2])
+        #     pi2_sigma_cycles = self.us2cycles(sigma_us, gen_ch=self.qubit_chs[1])
+        #     phase = self.deg2reg(-90, gen_ch=self.qubit_chs[1])  # +Y/2 -> 0+1
+        #     self.add_gauss(
+        #         ch=self.qubit_chs[1], name="qubit1_semiZZ0_half", sigma=pi2_sigma_cycles, length=4 * pi2_sigma_cycles
+        #     )
+        #     self.setup_and_pulse(
+        #         ch=self.qubit_chs[1],
+        #         style="arb",
+        #         freq=freq_reg,
+        #         phase=phase,
+        #         gain=gain,
+        #         waveform="qubit1_semiZZ0_half",
+        #     )
+        #     self.sync_all()
 
         elif init_state == "|1002>":
             self.X_pulse(q=0, play=True)
@@ -611,6 +610,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
             # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
             if pulse_num == 2:
+                print('pi half swaps', pi_half_swaps[1])
                 count_us = self.eegg_eggf(
                     count_us, add_phase=add_phase, pihalf=pi_half_swaps[1], sync_after=self.cfg.expt.sync_between_swaps
                 )
@@ -1635,9 +1635,8 @@ class QramProtocol3QTomoProgram(QramProtocolProgram, AbstractStateTomo3QProgram)
     def body(self):
         AbstractStateTomo3QProgram.body(self)
 
-    def collect_counts(self, angle=None, threshold=None):
-        return AbstractStateTomo3QProgram.collect_counts(self, angle, threshold)
-
+    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False):
+        return AbstractStateTomo3QProgram.collect_counts(self, angle, threshold, amplitude_mode)
 
 class QramProtocol3QTomoExperiment(Experiment):
     def __init__(self, soccfg=None, path="", prefix="QramProtocol3QTomo", config_file=None, progress=None):
@@ -1669,6 +1668,11 @@ class QramProtocol3QTomoExperiment(Experiment):
         measure_f_qubits = None
         if "measure_f" in self.cfg.expt:
             measure_f_qubits = self.cfg.expt.measure_f
+            
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+        
 
         data = dict()
         data.update(
@@ -1779,7 +1783,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                 print(f"Qubit  ({q})")
-                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[q] = threshold[0]
                 angles_q[q] = angle
                 ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -1789,7 +1793,7 @@ class QramProtocol3QTomoExperiment(Experiment):
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for iprep, prep_state in enumerate(self.calib_order):
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q)
+                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
                 data["counts_calib"].append(counts)
                 data[f"calib_ishots_raw"][iprep, :, :, :], data[f"calib_qshots_raw"][iprep, :, :, :] = calib_prog_dict[
                     prep_state
@@ -1833,7 +1837,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f"Qubit ({q}) ge")
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
+                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                     thresholds_q[q] = threshold[0]
                     angles_q[q] = angle
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -1873,6 +1877,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                     threshold=thresholds_q,
                     ge_avgs=ge_avgs_q,
                     post_process=self.cfg.expt.post_process,
+                    amplitude_mode=full_mux_expt,
                 )
                 if measure_f_qubits is not None:
                     # Add a ge pulse, measure the g population, which is really measuring the e population
@@ -1887,6 +1892,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                         threshold=thresholds_q,
                         ge_avgs=ge_avgs_q,
                         post_process=self.cfg.expt.post_process,
+                        amplitude_mode=full_mux_expt,
                     )
 
                 gpop_q = gpop_q_times[:, time_i]
@@ -1911,7 +1917,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                 elif self.cfg.expt.post_process == "threshold":
                     # Need to re-do population counts using the readout matrix correction
 
-                    counts_g = protocol_prog_g.collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts_g = protocol_prog_g.collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
                     data["counts_raw"][0].append(counts_g)
 
                     counts_e = None
@@ -1920,7 +1926,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                         for q in qubits:
                             epop_q[q] = 0  # reset this to recalculate e population
 
-                        counts_e = protocol_prog_e.collect_counts(angle=angles_q, threshold=thresholds_q)
+                        counts_e = protocol_prog_e.collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
                         data["counts_raw"][1].append(counts_e)
 
                     gpop_q, epop_q, fpop_q = infer_gef_popln(
@@ -1975,7 +1981,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                     #     print('q', q, 'avgq', avgq[adc_chs[q]])
                     #     print('q', q, 'amps', np.abs(avgi[adc_chs[q]]+1j*avgi[adc_chs[q]]))
 
-                    counts = tomo.collect_counts(angle=angles_q, threshold=thresholds_q)
+                    counts = tomo.collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
                     data["counts_tomo"].append(counts)
                     (
                         data[f"ishots_raw"][ibasis, :, :, :],

@@ -208,7 +208,7 @@ class LengthRabiProgram(QutritAveragerProgram):
 
                     num_test_pulses = 1
 
-                    if self.use_pi2_for_pi:
+                    if self.use_pi2_for_pi or self.test_pi_half:
                         num_test_pulses = 2
 
                     self.safe_regwi(

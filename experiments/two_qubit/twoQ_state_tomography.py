@@ -190,11 +190,11 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         assert basis in "IXYZ"
         assert len(basis) == 1
         if basis == "X":
-            print('Warning q1 is using gauss')
-            if qubit ==1:
-                special = 'gauss'
-            else:
-                special = 'robust'
+        #     print('Warning q1 is using gauss')
+        #     if qubit ==1:
+        #         special = 'gauss'
+        #     else:
+                # special = 'robust'
                 
                 
             self.Y_pulse(
@@ -205,7 +205,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 neg=True,
                 flag=flag,
                 reload=True,
-                special=special
+                # special=special
             )  # -Y/2 pulse to get from +X to +Z
         elif basis == "Y":
             if qubit ==1:
@@ -220,7 +220,7 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
                 play=play,
                 flag=flag,
                 reload=True,
-                special=special
+                # special=special
             )  # X/2 pulse to get from +Y to +Z
         else:
             pass  # measure in I/Z basis
@@ -741,7 +741,6 @@ class ErrorMitigationStateTomo1QProgram(AbstractStateTomo1QProgram):
         # pass in kwargs via cfg.expt.state_prep_kwargs
         prep_state = kwargs["prep_state"]  # should be gg, ge, eg, or ee
         if prep_state == "e":
-            # print('q0: e')
             self.Y_pulse(q=self.qubit, play=True)
             self.sync_all()
         elif prep_state == "f":
