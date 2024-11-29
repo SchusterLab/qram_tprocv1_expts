@@ -218,6 +218,7 @@ class TomoAnalysis:
         angles=None,
         all_qshots_raw_q_preps=None,
         verbose=False,
+        amplitude_mode=False, 
     ):
         assert len(all_ishots_raw_q_preps.shape) == 4
         assert all_ishots_raw_q_preps.shape[1] == self.nb_qubits_tot
@@ -227,7 +228,7 @@ class TomoAnalysis:
             assert all_qshots_raw_q_preps.shape == all_ishots_raw_q_preps.shape
         if nprep is None:
             nprep = all_ishots_raw_q_preps.shape[0]
-
+            
         counts_all = np.zeros((nprep, 2**self.nb_qubits))
         for iprep in range(nprep):
             ps_thresholds = thresholds
@@ -235,7 +236,8 @@ class TomoAnalysis:
                 print("ps thresholds", ps_thresholds)
             if ps_adjust is not None:
                 ps_thresholds = ps_threshold_adjust(
-                    ps_thresholds_init=thresholds, adjust=ps_adjust, ge_avgs=ge_avgs, angles=angles
+                    ps_thresholds_init=thresholds, adjust=ps_adjust, ge_avgs=ge_avgs, angles=angles, 
+                    amplitude_mode=amplitude_mode
                 )
                 if verbose:
                     print("new ps thresholds", ps_thresholds)
@@ -253,6 +255,7 @@ class TomoAnalysis:
                     post_process="threshold",
                     thresholds=thresholds,
                     verbose=verbose,
+                    amplitude_mode=amplitude_mode,
                 )
                 shots_q.append(shots_ps)
             shots_q = np.array(shots_q)
@@ -283,7 +286,6 @@ class TomoAnalysis:
     ):
         if apply_ps:
             assert cfg.expt.readout_cool, "Experiment was not run with post selection readouts!"
-        if apply_ps:
             assert "thresholds" in data
             assert "ge_avgs" in data
             assert "angles" in data
@@ -291,6 +293,10 @@ class TomoAnalysis:
             assert "qshots_raw" in data
             assert "calib_ishots_raw" in data
             assert "calib_qshots_raw" in data
+            
+            amplitude_mode = False
+            if "full_mux_expt" in cfg.expt:
+                amplitude_mode = cfg.expt.full_mux_expt
 
             thresholds = np.array(data["thresholds"])
             ge_avgs = np.array(data["ge_avgs"])
@@ -318,6 +324,7 @@ class TomoAnalysis:
                 n_init_readout=1,
                 angles=angles,
                 verbose=verbose,
+                amplitude_mode=amplitude_mode,
             )
 
             # print()
@@ -334,12 +341,15 @@ class TomoAnalysis:
                 n_init_readout=1,
                 angles=angles,
                 verbose=verbose,
+                amplitude_mode=amplitude_mode,
             )
         else:
             assert "counts_tomo" in data
             assert "counts_calib" in data
             n_tomo_raw = np.array(data["counts_tomo"])
             n_calib = np.array(data["counts_calib"])
+            
+        
 
         return n_tomo_raw, n_calib
 
@@ -1356,7 +1366,7 @@ class TomoAnalysis:
         #     plt.style.use("dark_background")
 
         labels = self.calib_order_numeric
-
+        
         if size is None:
             if rho_id is None:
                 size = (9.5, 5)
