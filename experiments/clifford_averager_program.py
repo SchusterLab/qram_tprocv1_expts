@@ -2446,6 +2446,256 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
         self.sync_all(100)
 
 
+from qick.asm_v1 import AcquireProgram
+
+
+class QutritRAveragerProgram(RAveragerProgram, QutritAveragerProgram):
+    def __init__(self, soccfg, cfg):
+        self.cfg = AttrDict(cfg)
+        self.cfg.update(self.cfg.expt)
+        self.gen_delays = [0] * len(soccfg["gens"])  # need to calibrate via oscilloscope
+
+        # copy over parameters for the acquire method
+        self.cfg.reps = cfg.expt.reps
+        self.cfg.rounds = cfg.expt.rounds
+
+        # this is just the RAverager init but need to call the right super
+        AcquireProgram.__init__(self, soccfg)
+        # super(RAveragerProgram).__init__(soccfg)
+        self.cfg = cfg
+        self.make_program()  # call RAverager make program
+        self.soft_avgs = 1
+        if "rounds" in cfg:
+            self.soft_avgs = cfg["rounds"]
+        # expts loop is the outer loop, reps loop is the inner loop
+        loop_dims = [self.cfg["expts"], self.cfg["reps"]]
+        # average over the reps axis
+        self.setup_acquire(counter_addr=self.COUNTER_ADDR, loop_dims=loop_dims, avg_level=1)
+
+    def initialize(self):
+        QutritAveragerProgram.initialize(self)
+
+    def acquire(self, soc, load_pulses=True, progress=True, save_experiments=None):
+        if not self.readout_cool:
+            self.cfg.expt.n_trig = 1
+            self.cfg.expt.n_init_readout = 0
+
+        readouts_per_experiment = 1 + self.cfg.expt.n_trig * self.cfg.expt.n_init_readout
+
+        # this is also just copy pasted from RAveragerProgram but the multiple inheritance wasn't working
+        self.set_reads_per_shot(readouts_per_experiment)
+
+        avg_d = AcquireProgram.acquire(
+            self,
+            soc,
+            soft_avgs=self.soft_avgs,
+            load_pulses=load_pulses,
+            start_src="internal",
+            threshold=None,
+            angle=None,
+            progress=progress,
+            remove_offset=True,
+        )
+
+        # reformat the data into separate I and Q arrays
+        # save results to class in case you want to look at it later or for analysis
+        raw = [d.reshape((-1, 2)) for d in self.get_raw()]
+        self.di_buf = [d[:, 0] for d in raw]
+        self.dq_buf = [d[:, 1] for d in raw]
+
+        expt_pts = self.get_expt_pts()
+
+        n_ro = len(self.ro_chs)
+        if save_experiments is None:
+            avg_di = [d[..., 0] for d in avg_d]
+            avg_dq = [d[..., 1] for d in avg_d]
+        else:
+            avg_di = [np.zeros((len(save_experiments), *d.shape[1:])) for d in avg_d]
+            avg_dq = [np.zeros((len(save_experiments), *d.shape[1:])) for d in avg_d]
+            for i_ch in range(n_ro):
+                for nn, ii in enumerate(save_experiments):
+                    avg_di[i_ch][nn] = avg_d[i_ch][ii, ..., 0]
+                    avg_dq[i_ch][nn] = avg_d[i_ch][ii, ..., 1]
+
+        return expt_pts, avg_di, avg_dq
+
+    def acquire_rotated(
+        self,
+        soc,
+        progress,
+        angle=None,
+        threshold=None,
+        ge_avgs=None,
+        amplitude_mode=False,
+        post_process=None,
+        verbose=False,
+    ):
+        """
+        If post_process == 'threshold': uses angle + threshold to categorize shots into 0 or 1 and calculate the population
+        If post_process == 'scale': uses angle + ge_avgs to scale the average of all shots on a scale of 0 to 1. ge_avgs should be of shape (num_total_qubits, 4) and should represent the pre-rotation Ig, Qg, Ie, Qe
+        If post_process == None: uses angle to rotate the i and q and then returns the avg i and q
+        """
+        expt_pts, avgi, avgq = self.acquire(soc, load_pulses=True, progress=progress)
+        if post_process == "threshold":
+            assert threshold is not None
+        elif post_process == "scale":
+            threshold = None  # just to double check nothing gets thresholded in get_shots
+            assert ge_avgs is not None
+
+        expt_pts, avgi_rot, avgq_rot = self.get_shots(
+            angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+        )
+
+        if post_process == None or post_process == "threshold":
+            return expt_pts, avgi_rot, avgq_rot
+        elif post_process == "scale":
+            ge_avgs_rot = [None] * 4
+            for q, angle_q in enumerate(angle):
+                if not isinstance(ge_avgs[q], (list, np.ndarray)):
+                    continue  # this qubit was not calibrated
+                Ig_q, Qg_q, Ie_q, Qe_q = ge_avgs[q]
+                ge_avgs_rot[q] = [
+                    Ig_q * np.cos(np.pi / 180 * angle_q) - Qg_q * np.sin(np.pi / 180 * angle_q),
+                    Ie_q * np.cos(np.pi / 180 * angle_q) - Qe_q * np.sin(np.pi / 180 * angle_q),
+                ]
+            shape = None
+            for q in range(4):
+                if ge_avgs_rot[q] is not None:
+                    shape = np.shape(ge_avgs_rot[q])
+                    break
+            for q in range(4):
+                if ge_avgs_rot[q] is None:
+                    ge_avgs_rot[q] = np.zeros(shape=shape)
+
+            ge_avgs_rot = np.asarray(ge_avgs_rot)
+            avgi_rot -= ge_avgs_rot[:, 0]
+            avgi_rot /= ge_avgs_rot[:, 1] - ge_avgs_rot[:, 0]
+            return avgi_rot, avgq_rot
+        else:
+            assert False, "Undefined post processing flag, options are None, threshold, scale"
+
+    # def get_multireadout_shots(self, angle=None, threshold_final=None, amplitude_mode=False, avg_trigs=True):
+    #     shots_i_reshaped, shots_q_reshaped = super().get_multireadout_shots(
+    #         angle=angle, threshold_final=threshold_final, amplitude_mode=amplitude_mode, avg_trigs=avg_trigs
+    #     )
+    #     expt_pts = self.get_expt_pts()
+    #     shots_i_reshaped = np.reshape(shots_i_reshaped, (expt_pts, -1))
+    #     shots_q_reshaped = np.reshape(shots_q_reshaped, (expt_pts, -1))
+    #     return expt_pts, shots_i_reshaped, shots_q_reshaped
+
+    def get_multireadout_shots(self, angle=None, threshold_final=None, amplitude_mode=False, avg_trigs=True):
+        """
+        For all readouts, angle is applied if None; threshold_final is applied only to the last readout
+        threshold_final should be specified for all qubits
+        If avg_trigs is False, return as if each trig is a separate readout
+        If amplitude_mode is True, does thresholding based on amplitude (and assumes the threshold provided is this threshold)
+        """
+        n_init_readout = self.cfg.expt.n_init_readout
+        n_trig = self.cfg.expt.n_trig
+        n_expts = self.cfg.expt.expts
+
+        if self.cfg.expt.rounds > 1:
+            print(
+                "WARNING: not sure if single shot checking makes sense when there are multiple rounds of averaging... use at your own risk"
+            )
+        # print('n_init_readout', n_init_readout, 'n_trig', n_trig)
+
+        # NOTE: this code assumes the number of expts in a single program is 1 (i.e. this must be an Averager not RAverager program!)
+
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
+        if angle is None:
+            angle = [0] * self.num_qubits_sample
+
+        di_buf = np.array([self.di_buf[i] / ro["length"] for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        dq_buf = np.array([self.dq_buf[i] / ro["length"] for i, (ch, ro) in enumerate(self.ro_chs.items())])
+        for i, ch in enumerate(self.ro_chs):
+            idata_ch, qdata_ch = rotate_and_threshold(
+                ishots_1q=di_buf[i],
+                qshots_1q=dq_buf[i],
+                angle=angle[i],
+                threshold=None,
+                amplitude_mode=amplitude_mode,
+                avg_shots=False,
+            )
+            di_buf[i] = idata_ch
+            dq_buf[i] = qdata_ch
+
+        shots_i = di_buf.reshape((len(self.ro_chs), n_expts, (1 + n_init_readout * n_trig) * self.cfg.expt.reps))
+        shots_q = dq_buf.reshape((len(self.ro_chs), n_expts, (1 + n_init_readout * n_trig) * self.cfg.expt.reps))
+
+        shots_reshaped_shape = (len(self.ro_chs), n_expts, 1 + n_init_readout, self.cfg.expt.reps)
+        if not avg_trigs:
+            shots_reshaped_shape = (len(self.ro_chs), n_expts, 1 + n_init_readout * n_trig, self.cfg.expt.reps)
+        shots_i_reshaped = np.zeros(shots_reshaped_shape)
+        shots_q_reshaped = np.zeros(shots_reshaped_shape)
+        for i in range(len(self.ro_chs)):
+            meas_per_expt = 1 + n_init_readout * n_trig
+
+            for expt in range(n_expts):
+                # reshape + average over n_trig for the init readouts
+                if n_init_readout > 0 and n_trig > 0:
+                    # init reads shape: reps, n_init_readout, n_trig
+                    if avg_trigs:
+                        shots_i_init_reads = np.reshape(
+                            np.reshape(shots_i[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, :-1],
+                            (self.cfg.expt.reps, n_init_readout, n_trig),
+                        )
+                        shots_q_init_reads = np.reshape(
+                            np.reshape(shots_q[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, :-1],
+                            (self.cfg.expt.reps, n_init_readout, n_trig),
+                        )
+                        shots_i_reshaped[i, :-1, :] = np.average(shots_i_init_reads, axis=2).T
+                        shots_q_reshaped[i, :-1, :] = np.average(shots_q_init_reads, axis=2).T
+                    else:
+                        shots_i_init_reads = np.reshape(
+                            np.reshape(shots_i[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, :-1],
+                            (self.cfg.expt.reps, n_init_readout * n_trig),
+                        )
+                        shots_q_init_reads = np.reshape(
+                            np.reshape(shots_q[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, :-1],
+                            (self.cfg.expt.reps, n_init_readout * n_trig),
+                        )
+                        shots_i_reshaped[i, :-1, :] = shots_i_init_reads.T
+                        shots_q_reshaped[i, :-1, :] = shots_q_init_reads.T
+
+                # reshape for the final readout (only 1 n_trig here)
+                # final read shape: reps
+                shots_i_final_read = np.reshape(shots_i[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, -1]
+                shots_q_final_read = np.reshape(shots_q[i, expt], (self.cfg.expt.reps, meas_per_expt))[:, -1]
+                shots_i_reshaped[i, expt, -1, :] = shots_i_final_read
+                shots_q_reshaped[i, expt, -1, :] = shots_q_final_read
+
+        if threshold_final is not None:
+            for ch in range(len(self.ro_chs)):
+                shots_i_reshaped[ch, :, -1, :], _ = rotate_and_threshold(
+                    ishots_1q=shots_i_reshaped[ch, :, -1, :],
+                    qshots_1q=shots_q_reshaped[ch, :, -1, :],
+                    threshold=threshold_final[ch],
+                    amplitude_mode=amplitude_mode,
+                )
+
+        # final shape: (ro_chs, n_init_readout + 1, reps)
+        # or if not avg_trigs: (ro_chs, n_init_readout*n_trig + 1, reps)
+        return self.get_expt_pts(), shots_i_reshaped, shots_q_reshaped
+
+    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, amplitude_mode=False):
+        """
+        Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
+        Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg, first axis is expt pts
+        """
+
+        expt_pts, idata, qdata = self.get_multireadout_shots(
+            angle=angle, threshold_final=threshold, amplitude_mode=amplitude_mode
+        )
+
+        idata = idata[:, :, -1, :]
+        qdata = qdata[:, :, -1, :]
+        if avg_shots:
+            idata = np.average(idata, axis=2)
+            qdata = np.average(qdata, axis=2)
+        return expt_pts, idata, qdata
+
+
 def sin_sqrd_func(t, Tp):
     # zero if t < 0 or t > Tp else np.sin(np.pi*t/Tp)**2
     return np.where((t < 0) | (t > Tp), 0, np.sin(np.pi * t / Tp) ** 2)

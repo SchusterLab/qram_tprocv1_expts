@@ -263,6 +263,10 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             )
             self.sync_all()
 
+        elif init_state == "test":
+            self.X_pulse(q=3, play=True)
+            self.X_pulse(q=3, play=True, neg=True)
+
         elif (
             "Q1" in init_state
         ):  # specify other qubits to prepare. it will always be specified as QxQ1_regular_state_name, with regular state name specified as |Qx>|Q1>
@@ -321,6 +325,10 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
         # self.Xef_pulse(q=3, ZZ_qubit=0, play=True)
 
         self.pi_minuspi = "pi_minuspi" in self.cfg.expt and self.cfg.expt.pi_minuspi
+        if "skip_first_pi2" in self.cfg.expt:
+            skip_first_pi2 = self.cfg.expt.skip_first_pi2
+        else:
+            skip_first_pi2 = False
 
         n_pulse_per_cycle = 1
         if self.sigma_test > 0:
@@ -332,43 +340,43 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     n_pulse_per_cycle = 1  # pi/2, (pi)^N
 
                 if not self.pi_minuspi:
-                    # print("WARNING, NO SWAP/2 FOR ERROR AMPLIFICATION CURRENTLY!")
-                    # play the pihalf initialization for the error amplification
-                    pulse_type = cfg.expt.pulse_type.lower()
-                    if pulse_type == "gauss":
-                        self.setup_and_pulse(
-                            ch=self.swap_chs[qSort],
-                            style="arb",
-                            freq=self.f_EgGf_reg,
-                            phase=0,
-                            gain=cfg.expt.gain,
-                            waveform="pi_EgGf_swap_half",
-                        )
-                    elif pulse_type == "flat_top":
-                        sigma_ramp_cycles = 3
-                        if "sigma_ramp_cycles" in self.cfg.expt:
-                            sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                        flat_length_cycles = self.sigma_test // 2 - sigma_ramp_cycles * 4
-                        if flat_length_cycles >= 3:
+                    if not skip_first_pi2:
+                        # play the pihalf initialization for the error amplification
+                        pulse_type = cfg.expt.pulse_type.lower()
+                        if pulse_type == "gauss":
                             self.setup_and_pulse(
                                 ch=self.swap_chs[qSort],
-                                style="flat_top",
+                                style="arb",
                                 freq=self.f_EgGf_reg,
                                 phase=0,
                                 gain=cfg.expt.gain,
-                                length=flat_length_cycles,
-                                waveform="pi_EgGf_swap",
+                                waveform="pi_EgGf_swap_half",
                             )
-                    else:  # const
-                        self.setup_and_pulse(
-                            ch=self.swap_chs[qSort],
-                            style="const",
-                            freq=self.f_EgGf_reg,
-                            phase=0,
-                            gain=cfg.expt.gain,
-                            length=self.sigma_test // 2,
-                        )  # , phrst=1)
-                    self.sync_all()
+                        elif pulse_type == "flat_top":
+                            sigma_ramp_cycles = 3
+                            if "sigma_ramp_cycles" in self.cfg.expt:
+                                sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
+                            flat_length_cycles = self.sigma_test // 2 - sigma_ramp_cycles * 4
+                            if flat_length_cycles >= 3:
+                                self.setup_and_pulse(
+                                    ch=self.swap_chs[qSort],
+                                    style="flat_top",
+                                    freq=self.f_EgGf_reg,
+                                    phase=0,
+                                    gain=cfg.expt.gain,
+                                    length=flat_length_cycles,
+                                    waveform="pi_EgGf_swap",
+                                )
+                        else:  # const
+                            self.setup_and_pulse(
+                                ch=self.swap_chs[qSort],
+                                style="const",
+                                freq=self.f_EgGf_reg,
+                                phase=0,
+                                gain=cfg.expt.gain,
+                                length=self.sigma_test // 2,
+                            )  # , phrst=1)
+                        self.sync_all()
 
             else:
                 n_cycles = 1
@@ -870,7 +878,10 @@ class LengthRabiEgGfExperiment(Experiment):
 
                 # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
                 sscfg = AttrDict(deepcopy(self.cfg))
-                sscfg.expt.reps = sscfg.expt.singleshot_reps
+                if "singleshot_reps_f" in self.cfg.expt:
+                    sscfg.expt.singleshot_reps = self.cfg.expt.singleshot_reps_f
+                else:
+                    sscfg.expt.reps = sscfg.expt.singleshot_reps
                 sscfg.expt.tomo_qubits = (
                     self.cfg.expt.qubits
                 )  # the order of this was set earlier in code so 2nd qubit is the measure f qubit
