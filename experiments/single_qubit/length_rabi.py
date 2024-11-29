@@ -591,7 +591,7 @@ class NPulseExperiment(Experiment):
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[qTest], Qg=Qg[qTest], Ie=Ie[qTest], Qe=Qe[qTest])
                 print(f"Qubit  ({qTest})")
-                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=True, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
                 ge_avgs_q[qTest] = [
                     np.average(Ig[qTest]),
@@ -607,8 +607,7 @@ class NPulseExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, 
-                                                                        amplitude_mode=full_mux_expt)
+                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -656,6 +655,7 @@ class NPulseExperiment(Experiment):
                 self.cfg.expt.gain = self.prog.cfg.expt.gain
                 avgi = avgi[qTest]
                 avgq = avgq[qTest]
+                
                 amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
                 phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
                 data["avgi"].append(avgi)
