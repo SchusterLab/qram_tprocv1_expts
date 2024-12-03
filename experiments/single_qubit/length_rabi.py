@@ -193,6 +193,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                 name += "_half"
             self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
+            self.overall_phase[qTest] = 0 # force virtual Z to 0 in case it was set from the X_pulse
             for i in range(int(n_cycles)):  # n_cycles is the number of cycle sets
                 for j in range(n_pulse_per_cycle):
                     phase = 0
@@ -223,7 +224,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                         self.deg2reg(self.overall_phase[qTest] + phase, gen_ch=self.qubit_chs[qTest]),
                     )
                     for k in range(num_test_pulses):
-                        print(i, j, k, "phase", self.overall_phase[qTest] + phase)
+                        # print(i, j, k, "phase", self.overall_phase[qTest] + phase)
                         self.pulse(ch=self.qubit_chs[qTest])
                         # self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
 
@@ -1163,6 +1164,13 @@ class PiMinusPiExperiment(Experiment):
         if self.cfg.expt.sweep_phase:
             old_freq = 0
         print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
+
+        if self.cfg.expt.sweep_phase:
+            best_phase = fit_freq * 2 * np.pi * self.cfg.expt.sigma_test * 180 / np.pi
+            if self.cfg.expt.pulse_type == "gauss" or not self.cfg.expt.use_robust_pulses:
+                best_phase *= 4  # gaussian pulse is 4*listed length
+            data["best_phase"] = best_phase
+            print(f"Best virtual Z (deg)", best_phase)
 
         plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
         plt.show()

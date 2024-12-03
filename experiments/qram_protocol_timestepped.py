@@ -432,10 +432,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         elif init_state == "|0+i>|1>":
             self.Y_pulse(q=1, play=True)
-            self.X_pulse(q=0, play=True, neg=True, ZZ_qubit=1, pihalf=True)
+            self.X_pulse(q=0, play=True, neg=True, pihalf=True)
 
         elif init_state == "|0+i>|0+1>":
-            self.Y_pulse(q=1, play=True)
+            self.Y_pulse(q=1, pihalf=True, play=True)
             self.X_pulse(q=0, pihalf=True, play=True, neg=True)
 
         elif init_state == "|0+i>|0+i>":
@@ -446,8 +446,8 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.X_pulse(q=1, play=True, pihalf=True, neg=True)
 
         elif init_state == "|1>|0+i>":
+            self.X_pulse(q=1, play=True, pihalf=True, neg=True)
             self.Y_pulse(q=0, play=True)
-            self.X_pulse(q=1, play=True, pihalf=True, neg=True, ZZ_qubit=0)
 
         elif init_state == "|1002>":
             self.X_pulse(q=0, play=True)
@@ -581,7 +581,6 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
             # 2. apply Eg-Gf with qDrive=3: eegg -> eggf [path 2]
             if pulse_num == 2:
-                print('pi half swaps', pi_half_swaps[1])
                 count_us = self.eegg_eggf(
                     count_us, add_phase=add_phase, pihalf=pi_half_swaps[1], sync_after=self.cfg.expt.sync_between_swaps
                 )
@@ -1670,6 +1669,7 @@ class QramProtocol3QTomoProgram(QramProtocolProgram, AbstractStateTomo3QProgram)
     def collect_counts(self, angle=None, threshold=None, amplitude_mode=False):
         return AbstractStateTomo3QProgram.collect_counts(self, angle, threshold, amplitude_mode)
 
+
 class QramProtocol3QTomoExperiment(Experiment):
     def __init__(self, soccfg=None, path="", prefix="QramProtocol3QTomo", config_file=None, progress=None):
         super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
@@ -1700,11 +1700,10 @@ class QramProtocol3QTomoExperiment(Experiment):
         measure_f_qubits = None
         if "measure_f" in self.cfg.expt:
             measure_f_qubits = self.cfg.expt.measure_f
-            
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
-        
 
         data = dict()
         data.update(
@@ -1825,7 +1824,9 @@ class QramProtocol3QTomoExperiment(Experiment):
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for iprep, prep_state in enumerate(self.calib_order):
-                counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
+                counts = calib_prog_dict[prep_state].collect_counts(
+                    angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                )
                 data["counts_calib"].append(counts)
                 data[f"calib_ishots_raw"][iprep, :, :, :], data[f"calib_qshots_raw"][iprep, :, :, :] = calib_prog_dict[
                     prep_state
@@ -1869,7 +1870,9 @@ class QramProtocol3QTomoExperiment(Experiment):
                     Ie, Qe = e_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                     print(f"Qubit ({q}) ge")
-                    fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
+                    fid, threshold, angle = hist(
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                    )
                     thresholds_q[q] = threshold[0]
                     angles_q[q] = angle
                     ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
@@ -1949,7 +1952,9 @@ class QramProtocol3QTomoExperiment(Experiment):
                 elif self.cfg.expt.post_process == "threshold":
                     # Need to re-do population counts using the readout matrix correction
 
-                    counts_g = protocol_prog_g.collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
+                    counts_g = protocol_prog_g.collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_raw"][0].append(counts_g)
 
                     counts_e = None
@@ -1958,7 +1963,9 @@ class QramProtocol3QTomoExperiment(Experiment):
                         for q in qubits:
                             epop_q[q] = 0  # reset this to recalculate e population
 
-                        counts_e = protocol_prog_e.collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
+                        counts_e = protocol_prog_e.collect_counts(
+                            angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                        )
                         data["counts_raw"][1].append(counts_e)
 
                     gpop_q, epop_q, fpop_q = infer_gef_popln(

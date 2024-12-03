@@ -17,7 +17,7 @@ class RamseyProgram(QutritRAveragerProgram):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
@@ -365,7 +365,7 @@ class RamseyExperiment(Experiment):
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None:
+        if qZZ is not None and qZZ != qTest:
             self.checkZZ = True
         else:
             qZZ = qTest
