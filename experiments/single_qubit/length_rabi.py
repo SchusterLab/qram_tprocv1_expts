@@ -14,7 +14,7 @@ from experiments.clifford_averager_program import (
     ps_threshold_adjust,
     rotate_and_threshold,
 )
-from experiments.single_qubit.single_shot import hist
+from experiments.single_qubit.single_shot import get_ge_avgs, hist
 from experiments.two_qubit.twoQ_state_tomography import (
     ErrorMitigationStateTomo1QProgram,
 )
@@ -41,7 +41,7 @@ class LengthRabiProgram(QutritAveragerProgram):
         sigma_test_cycles = self.us2cycles(self.cfg.expt.sigma_test, gen_ch=self.qubit_chs[qTest])
         if "sigma_test" in self.cfg.expt and sigma_test_cycles > 3:
             self.num_qubits_sample = len(self.cfg.device.readout.frequency)
-            if self.checkZZ:
+            if self.checkEF:
                 self.cfg.device.qubit.pulses.pi_ef.sigma[
                     qTest * self.num_qubits_sample + qZZ
                 ] = self.cfg.expt.sigma_test
@@ -104,12 +104,17 @@ class LengthRabiProgram(QutritAveragerProgram):
         if self.check_I_distort:
             assert "check_I_phase" in self.cfg.expt
             self.check_I_phase = self.cfg.expt.check_I_phase
-        if not (self.pi_minuspi or self.check_I_distort or self.check_C_distort): # npulse experiment
+        if not (self.pi_minuspi or self.check_I_distort or self.check_C_distort):  # npulse experiment
             self.npulsecalib = True
-        else: self.npulsecalib = False
+        else:
+            self.npulsecalib = False
         self.use_pi2_for_pi = "use_pi2_for_pi" in self.cfg.expt and self.cfg.expt.use_pi2_for_pi
         if self.check_I_distort or self.check_C_distort:
             assert "delay_error_amp" in self.cfg.expt
+        if self.pi_minuspi:
+            self.Z_phase = 0  # add a virtual Z phase after every pulse
+            if "Z_phase" in self.cfg.expt:
+                self.Z_phase = self.cfg.expt.Z_phase
 
         # play pi pulse that we want to calibrate
         play_pulse = True
@@ -120,7 +125,7 @@ class LengthRabiProgram(QutritAveragerProgram):
         if "pulse_type" in self.cfg.expt:
             if "pulse_type" != "gauss" and "pulse_type" != "const":
                 special = self.cfg.expt.pulse_type
-        if self.cfg.expt.use_robust_pulses:
+        if self.use_robust_pulses:
             self.cfg.expt.pulse_type = "robust"
             special = "robust"
 
@@ -180,7 +185,7 @@ class LengthRabiProgram(QutritAveragerProgram):
                     special=special,
                 )
                 name = "X"
-            if self.cfg.expt.pulse_type == "robust":
+            if self.cfg.expt.pulse_type == "robust" and not self.checkEF:  # EF doesn't have robust pulses
                 name += "_robust"
             if self.checkZZ:
                 name += f"_ZZ{qZZ}"
@@ -188,7 +193,6 @@ class LengthRabiProgram(QutritAveragerProgram):
                 name += "_half"
             self.cfg.expt.gain = self.pulse_dict[f"{name}_q{qTest}"]["gain"]
 
-            # print("n_cycles", n_cycles)
             for i in range(int(n_cycles)):  # n_cycles is the number of cycle sets
                 for j in range(n_pulse_per_cycle):
                     phase = 0
@@ -210,14 +214,26 @@ class LengthRabiProgram(QutritAveragerProgram):
 
                     if self.use_pi2_for_pi or self.test_pi_half:
                         num_test_pulses = 2
+                        if self.test_pi_half and self.pi_minuspi:
+                            num_test_pulses = 1
 
                     self.safe_regwi(
-                        self.q_rps[qTest], self.qTest_rphase, self.deg2reg(phase, gen_ch=self.qubit_chs[qTest])
+                        self.q_rps[qTest],
+                        self.qTest_rphase,
+                        self.deg2reg(self.overall_phase[qTest] + phase, gen_ch=self.qubit_chs[qTest]),
                     )
                     for k in range(num_test_pulses):
-                        # print("phase", phase)
+                        print(i, j, k, "phase", self.overall_phase[qTest] + phase)
                         self.pulse(ch=self.qubit_chs[qTest])
                         # self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
+
+                        if self.pi_minuspi and np.abs(self.Z_phase) > 0:
+                            self.overall_phase[qTest] += self.Z_phase
+                            self.safe_regwi(
+                                self.q_rps[qTest],
+                                self.qTest_rphase,
+                                self.deg2reg(self.overall_phase[qTest] + phase, gen_ch=self.qubit_chs[qTest]),
+                            )
 
                         # print(
                         #     "pulse pi test freq",
@@ -533,11 +549,10 @@ class NPulseExperiment(Experiment):
         if not self.cfg.expt.readout_ge:
             self.cfg.device.readout.frequency = self.cfg.device.readout.frequency_ef
             self.cfg.device.readout.readout_length = self.cfg.device.readout.readout_length_ef
-            
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
-        
 
         # ================= #
         # Get single shot calibration for 1 qubit
@@ -593,21 +608,25 @@ class NPulseExperiment(Experiment):
                 print(f"Qubit  ({qTest})")
                 fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=True, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
-                ge_avgs_q[qTest] = [
-                    np.average(Ig[qTest]),
-                    np.average(Qg[qTest]),
-                    np.average(Ie[qTest]),
-                    np.average(Qe[qTest]),
-                ]
+                ge_avgs_q[qTest] = get_ge_avgs(
+                    Igs=Ig[qTest], Qgs=Qg[qTest], Ies=Ie[qTest], Qes=Qe[qTest], amplitude_mode=full_mux_expt
+                )
                 angles_q[qTest] = angle
                 fids_q[qTest] = fid[0]
-                print(
-                    f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[qTest]} \t threshold ge: {thresholds_q[qTest]}"
-                )
+                if self.cfg.expt.readout_ge:
+                    print(
+                        f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[qTest]} \t threshold ge: {thresholds_q[qTest]}"
+                    )
+                else:
+                    print(
+                        f"gf fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[qTest]} \t threshold ge: {thresholds_q[qTest]}"
+                    )
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -655,7 +674,7 @@ class NPulseExperiment(Experiment):
                 self.cfg.expt.gain = self.prog.cfg.expt.gain
                 avgi = avgi[qTest]
                 avgq = avgq[qTest]
-                
+
                 amp = np.abs(avgi + 1j * avgq)  # Calculating the magnitude
                 phase = np.angle(avgi + 1j * avgq)  # Calculating the phase
                 data["avgi"].append(avgi)
@@ -698,7 +717,7 @@ class NPulseExperiment(Experiment):
             # else:
             #     fit_fitfunc = fitter.fit_probg_X
             if scale is not None:
-                Ig, Qg, Ie, Qe = scale[self.qTest]
+                Ig, Qg, Ie, Qe = scale[qTest]
                 reformatted_scale = [
                     (Ig, Ie),
                     (Qg, Qe),
@@ -742,7 +761,7 @@ class NPulseExperiment(Experiment):
         )
 
         if scale is not None:
-            Ig, Qg, Ie, Qe = scale[self.qTest]
+            Ig, Qg, Ie, Qe = scale[qTest]
             reformatted_scale = [
                 (Ig, Ie),
                 (Qg, Qe),
@@ -855,6 +874,8 @@ class PiMinusPiExperiment(Experiment):
         checkEF: does ramsey on the EF transition instead of ge
         qubits: if not checkZZ, just specify [1 qubit]. if checkZZ: [qZZ in e , qB sweeps length rabi]
         readout_ge: whether to readout at the g/e set point or e/f set point
+
+        sweep_phase: sweeps a virtual Z phase added after each pulse instead of adjusting the true frequency (phase is calculated by radians = 2*np.pi * length * freq)
     )
 
     See https://arxiv.org/pdf/2406.08295 Appendix E
@@ -981,8 +1002,9 @@ class PiMinusPiExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, 
-                                                                        amplitude_mode=full_mux_expt)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -1006,6 +1028,14 @@ class PiMinusPiExperiment(Experiment):
             self.cfg.expt.loops = 1
 
         self.cfg.expt.error_amp = True
+
+        if "sweep_phase" not in self.cfg.expt:
+            self.cfg.expt.sweep_phase = False
+        if self.cfg.expt.sweep_phase:
+            if max(np.abs(freq_sweep)) > 10:
+                print(
+                    "WARNING: confirm that the frequency sweep you are setting for the phase sweep is a delta and not the absolute frequency!"
+                )
 
         data.update(
             {
@@ -1034,13 +1064,19 @@ class PiMinusPiExperiment(Experiment):
                 for ifreq, freq in enumerate(freq_sweep):
                     cfg.expt.n_cycles = n_cycle
 
-                    if self.checkEF:
-                        cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ] = freq
+                    if self.cfg.expt.sweep_phase:
+                        cfg.expt.Z_phase = 2 * np.pi * length * freq * 180 / np.pi
+                        if self.cfg.expt.pulse_type == "gauss" or not self.cfg.expt.use_robust_pulses:
+                            cfg.expt.Z_phase = 4 * cfg.expt.Z_phase  # gaussian pulse is 4*listed length
+
                     else:
-                        if self.cfg.expt.pulse_type != "robust":
-                            cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ] = freq
+                        if self.checkEF:
+                            cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ] = freq
                         else:
-                            cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ] = freq
+                            if self.cfg.expt.pulse_type != "robust":
+                                cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ] = freq
+                            else:
+                                cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ] = freq
 
                     # print('n cycle', n_cycle)
                     lengthrabi = LengthRabiProgram(soccfg=self.soccfg, cfg=cfg)
@@ -1124,6 +1160,8 @@ class PiMinusPiExperiment(Experiment):
                 old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
             else:
                 old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
+        if self.cfg.expt.sweep_phase:
+            old_freq = 0
         print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
 
         plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt))
@@ -1149,6 +1187,7 @@ class PiMinusPiExperiment(Experiment):
             + (f" ZZ Q{qZZ}" if (self.checkZZ and qZZ != qTest) else "")
             + (" EF" if self.checkEF else "")
             + (" $\pi/2$" if self.cfg.expt.test_pi_half else " $\pi$")
+            + (" Phase Sweep" if self.cfg.expt.sweep_phase else "")
         )
 
         data = deepcopy(data)
@@ -1176,10 +1215,12 @@ class PiMinusPiExperiment(Experiment):
                 old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
             else:
                 old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
+        if self.cfg.expt.sweep_phase:
+            old_freq = 0
 
         ax = plt.gca()
         ax.set_ylabel(f"N {label}", fontsize=18)
-        ax.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
+        ax.set_xlabel("$f-f_0$ [MHz]" + ("(virtual)" if self.cfg.expt.sweep_phase else ""), fontsize=18)
         ax.tick_params(axis="both", which="major", labelsize=16)
         plt.pcolormesh(x_sweep - old_freq, y_sweep, data[data_name], cmap="viridis", shading="auto")
         if fit:
@@ -1672,7 +1713,7 @@ class CDistortPiMinusPiExperiment(Experiment):
         data["angles"] = None
         data["ge_avgs"] = None
         data["counts_calib"] = []
-        
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
@@ -1741,8 +1782,9 @@ class CDistortPiMinusPiExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q,
-                                                                          amplitude_mode=full_mux_expt)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_calib"].append(counts)
 
                 if debug:
@@ -2019,7 +2061,7 @@ class IDistortDelayExperiment(Experiment):
         data["angles"] = None
         data["ge_avgs"] = None
         data["counts_calib"] = []
-        
+
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
@@ -2074,12 +2116,9 @@ class IDistortDelayExperiment(Experiment):
                 print(f"Qubit  ({qTest})")
                 fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[qTest] = threshold[0]
-                ge_avgs_q[qTest] = [
-                    np.average(Ig[qTest]),
-                    np.average(Qg[qTest]),
-                    np.average(Ie[qTest]),
-                    np.average(Qe[qTest]),
-                ]
+                ge_avgs_q[qTest] = get_ge_avgs(
+                    Igs=Ig[qTest], Qgs=Qg[qTest], Ies=Ie[qTest], Qes=Qe[qTest], amplitude_mode=full_mux_expt
+                )
                 angles_q[qTest] = angle
                 fids_q[qTest] = fid[0]
                 print(
@@ -2088,8 +2127,9 @@ class IDistortDelayExperiment(Experiment):
 
                 # Process the shots taken for the confusion matrix with the calibration angles
                 for prep_state in calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(angle=angles_q, threshold=thresholds_q, 
-                                                                        amplitude_mode=full_mux_expt)
+                    counts = calib_prog_dict[prep_state].collect_counts(
+                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                    )
                     data["counts_calib"].append(counts)
 
                 if debug:
