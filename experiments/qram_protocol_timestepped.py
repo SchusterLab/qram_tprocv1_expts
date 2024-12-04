@@ -644,8 +644,8 @@ class QramProtocolExperiment(Experiment):
     )
     """
 
-    def __init__(self, soccfg=None, path="", prefix="qram_protocol", config_file=None, progress=None):
-        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+    def __init__(self, soccfg=None, path="", prefix="qram_protocol", config_file=None, progress=None, **kwargs):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress, **kwargs)
 
     def acquire(self, progress=False, debug=True):
         # expand entries in config that are length 1 to fill all qubits
@@ -1671,8 +1671,8 @@ class QramProtocol3QTomoProgram(QramProtocolProgram, AbstractStateTomo3QProgram)
 
 
 class QramProtocol3QTomoExperiment(Experiment):
-    def __init__(self, soccfg=None, path="", prefix="QramProtocol3QTomo", config_file=None, progress=None):
-        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+    def __init__(self, soccfg=None, path="", prefix="QramProtocol3QTomo", config_file=None, progress=None, **kwargs):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress, **kwargs)
         self.cfg.all_qubits = [0, 1, 2, 3]
 
     def acquire(self, progress=False, debug=False):

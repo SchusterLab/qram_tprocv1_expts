@@ -24,6 +24,7 @@ import sys
 
 import qutip as qt
 import qutip.visualization as qplt
+from qutip_qip.operations import rz
 import scipy as sp
 from slab import AttrDict, get_next_filename
 from slab.datamanagement import SlabFile
@@ -1510,7 +1511,7 @@ class TomoAnalysis:
     def z_gate_nq(self, phis):  # expects phis in deg
         gates = []
         for phi in phis:
-            gates.append(qt.qip.operations.gates.rz(np.pi / 180 * phi))
+            gates.append(rz(np.pi / 180 * phi))
         return qt.tensor(*gates)
 
     """
