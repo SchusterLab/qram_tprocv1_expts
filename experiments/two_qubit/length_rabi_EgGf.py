@@ -2411,23 +2411,18 @@ class NPulseEgGfExperiment(Experiment):
             fit_fitfunc = fitter.fit_probg_Xhalf_decay
 
             q_names = ["A", "B", "C"]
+            data_names = ["avgi", "avgq", "amps"]
 
             for i_q, q in enumerate(self.cfg.expt.measure_qubits):
                 q_name = q_names[i_q]
-                try:
-                    p_avgi, pCov_avgi = fit_fitfunc(xdata, data["avgi"][i_q], fitparams=fitparams)
-                    print(p_avgi)
-                    data[f"fit{q_name}_avgi"] = p_avgi
-                    data[f"fit{q_name}_err_avgi"] = pCov_avgi
-                except Exception as e:
-                    print("Exception:", e)
-                try:
-                    p_avgq, pCov_avgq = fit_fitfunc(xdata, data["avgq"][i_q], fitparams=fitparams)
-                    print(p_avgq)
-                    data[f"fit{q_name}_avgq"] = p_avgq
-                    data[f"fit{q_name}_err_avgq"] = pCov_avgq
-                except Exception as e:
-                    print("Exception:", e)
+                for data_name in data_names:
+                    try:
+                        p, pCov = fit_fitfunc(xdata, data[data_name][i_q], fitparams=fitparams)
+                        print(p)
+                        data[f"fit{q_name}_{data_name}"] = p
+                        data[f"fit{q_name}_err_{data_name}"] = pCov
+                    except Exception as e:
+                        print("Exception:", e)
                 # p_amps, pCov_amps = fitter.fitdecaysin(data['xpts'], data["amps"][0], fitparams=None)
         return data
 
@@ -2808,8 +2803,8 @@ class PiMinusPiEgGfExperiment(Experiment):
         if fit:
             for iq, q in enumerate(self.cfg.expt.measure_qubits):
                 popt, pcov = fitter.fit_gauss(data["freq_sweep"], np.array(prods[iq]))
-                data[f"fit_q{q}"] = popt
-                data[f"fit_err_q{q}"] = pcov
+                data[f"fit_q{q}_{data_name}"] = popt
+                data[f"fit_q{q}_err_{data_name}"] = pcov
 
                 fit_freq = popt[1]
                 if qDrive == 1:
@@ -2823,7 +2818,10 @@ class PiMinusPiEgGfExperiment(Experiment):
                 plt.axvline(fit_freq, color="r", linestyle="--")
                 plt.legend(fontsize=18)
                 print(f"Best freq from pi/-pi on Q{q}", fit_freq)
-            data["best_freq"] = np.average([data[f"fit_q{q}"][1] for q in self.cfg.expt.measure_qubits])
+            best_fit, best_fit_err = fitter.get_best_fit(
+                data, prefixes=[f"fit_q{qA}", f"fit_q{qB}"], check_measures=[data_name]
+            )
+            data["best_freq"] = np.average([best_fit[1] for q in self.cfg.expt.measure_qubits])
 
         plt.tight_layout()
         plt.show()

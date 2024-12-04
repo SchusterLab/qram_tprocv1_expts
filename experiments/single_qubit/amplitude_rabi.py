@@ -25,6 +25,7 @@ class AmplitudeRabiProgram(QutritRAveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
+        self.num_qubits_sample = len(self.cfg.device.readout.frequency)
 
         qTest = self.cfg.expt.qTest
         qZZ = self.cfg.expt.qZZ
@@ -42,17 +43,18 @@ class AmplitudeRabiProgram(QutritRAveragerProgram):
 
         # Override the default length parameters before initializing the clifford averager program
         self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
+        calib_index = qTest * self.num_qubits_sample + qZZ
+        if "sigma_test" not in self.cfg.expt:
+            self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ge.sigma[calib_index]
+            if self.checkEF:
+                self.cfg.expt.sigma_test = self.cfg.device.qubit.pulses.pi_ef.sigma[calib_index]
         sigma_test_cycles = self.us2cycles(self.cfg.expt.sigma_test, gen_ch=self.qubit_chs[qTest])
-        if "sigma_test" in self.cfg.expt and sigma_test_cycles > 3:
+        if sigma_test_cycles > 3:
             self.num_qubits_sample = len(self.cfg.device.readout.frequency)
-            if self.checkZZ:
-                self.cfg.device.qubit.pulses.pi_ef.sigma[
-                    qTest * self.num_qubits_sample + qZZ
-                ] = self.cfg.expt.sigma_test
+            if self.checkEF:
+                self.cfg.device.qubit.pulses.pi_ef.sigma[calib_index] = self.cfg.expt.sigma_test
             else:
-                self.cfg.device.qubit.pulses.pi_ge.sigma[
-                    qTest * self.num_qubits_sample + qZZ
-                ] = self.cfg.expt.sigma_test
+                self.cfg.device.qubit.pulses.pi_ge.sigma[calib_index] = self.cfg.expt.sigma_test
 
         super().initialize()
 

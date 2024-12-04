@@ -666,7 +666,8 @@ class CliffordAveragerProgram(AveragerProgram):
             I_values_MHz = np.array(pulse_params_dict[f"I_{q}"]) * 1e-6
             Q_values_MHz = np.array(pulse_params_dict[f"Q_{q}"]) * 1e-6
             times_us = times * 1e6
-            freq_MHz = self.f_ges_robust[q, ZZ_qubit]
+            # freq_MHz = self.f_ges_robust[q, ZZ_qubit]
+            freq_MHz = self.f_ges[q, ZZ_qubit]
             gain = self.pihalf_gain_robust[q, ZZ_qubit]
 
         self.handle_IQ_pulse(
@@ -685,6 +686,13 @@ class CliffordAveragerProgram(AveragerProgram):
             reload=reload,
             sync_after=sync_after,
         )
+
+        # Apply virtual Z correction
+        if play:
+            phase_correction = self.pihalf_correction_phase_robust[q, ZZ_qubit]
+            # if phase_correction == 0:
+            #     print(f"WARNING: you may not have calibrated the phase correction on Q{q} ZZ {ZZ_qubit}")
+            self.overall_phase[q] += phase_correction
 
     def add_adiabatic(self, ch, name, mu, beta, period_us):
         """mu, beta are dimensionless"""
@@ -985,16 +993,12 @@ class CliffordAveragerProgram(AveragerProgram):
 
         if special is None and self.use_robust_pulses:  # use robust pulses as the default X/2
             special = "robust"
-            
+
         # Get the freq, phase, length, type (assumes using default ge pulse)
         assert self.f_ges.shape == (self.num_qubits_sample, self.num_qubits_sample)
         f_ge_MHz = self.f_ges[q, ZZ_qubit]
         # gain = self.pi_ge_gains[q, ZZ_qubit]
-        correction_phase = self.cfg.device.qubit.pulses.pi_ge.half_correction_phase[
-            q * self.num_qubits_sample + ZZ_qubit
-        ]
-        # print("correction phase", correction_phase)
-        phase_deg = self.overall_phase[q] + extra_phase + correction_phase
+        phase_deg = self.overall_phase[q] + extra_phase
         if neg:
             phase_deg -= 180
         sigma_cycles = self.us2cycles(self.pi_ge_sigmas[q, ZZ_qubit], gen_ch=self.qubit_chs[q])
@@ -1162,6 +1166,15 @@ class CliffordAveragerProgram(AveragerProgram):
             )
         else:
             assert False, f"Pulse type {type} not supported."
+
+        # Apply virtual Z correction
+        if play:
+            if special != "robust":
+                correction_phase = self.cfg.device.qubit.pulses.pi_ge.half_correction_phase[
+                    q * self.num_qubits_sample + ZZ_qubit
+                ]
+                self.overall_phase[q] += correction_phase
+                # print("correction phase", correction_phase)
 
     def X_pulse(
         self,
@@ -1651,7 +1664,6 @@ class CliffordAveragerProgram(AveragerProgram):
         Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
         Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
         """
-        
 
         idata, qdata = self.get_multireadout_shots(
             angle=angle, threshold_final=threshold, amplitude_mode=amplitude_mode
@@ -1705,7 +1717,7 @@ class CliffordAveragerProgram(AveragerProgram):
         shots_q_reshaped = np.zeros(shots_reshaped_shape)
         for i in range(len(self.ro_chs)):
             meas_per_expt = 1 + n_init_readout * n_trig
-            
+
             # reshape + average over n_trig for the init readouts
             if n_init_readout > 0 and n_trig > 0:
                 # init reads shape: reps, n_init_readout, n_trig
@@ -1745,7 +1757,7 @@ class CliffordAveragerProgram(AveragerProgram):
                     _shots_q_reshaped = np.zeros_like(shots_q_reshaped[i, -1, :])
                 else:
                     _shots_q_reshaped = shots_q_reshaped[i, -1, :]
-                    
+
                 shots_i_reshaped[i, -1, :], _ = rotate_and_threshold(
                     ishots_1q=shots_i_reshaped[i, -1, :],
                     qshots_1q=_shots_q_reshaped,
@@ -1883,11 +1895,15 @@ class CliffordAveragerProgram(AveragerProgram):
         self.pi_ef_half_gain_pi_sigmas = np.reshape(
             self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (self.num_qubits_sample, self.num_qubits_sample)
         )
-        self.f_ges_robust = np.reshape(
-            self.cfg.device.qubit.f_ge_robust, (self.num_qubits_sample, self.num_qubits_sample)
-        )
+        # self.f_ges_robust = np.reshape(
+        #     self.cfg.device.qubit.f_ge_robust, (self.num_qubits_sample, self.num_qubits_sample)
+        # )
         self.pihalf_gain_robust = np.reshape(
             self.cfg.device.qubit.pulses.pihalf_ge_robust.gain, (self.num_qubits_sample, self.num_qubits_sample)
+        )
+        self.pihalf_correction_phase_robust = np.reshape(
+            self.cfg.device.qubit.pulses.pihalf_ge_robust.correction_phase,
+            (self.num_qubits_sample, self.num_qubits_sample),
         )
         self.pi_ge_types = self.cfg.device.qubit.pulses.pi_ge.type
         self.pi_ef_types = self.cfg.device.qubit.pulses.pi_ef.type

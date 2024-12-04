@@ -559,6 +559,7 @@ def get_ge_avgs(Igs, Qgs, Ies, Qes, amplitude_mode=False):
     """
     Igs, Qgs, Ies, Qes should be data for 1 qubit only (1d array for each)
     """
+    assert len(np.array(Igs).shape) == 1, "Make sure to pass I/Q data for 1Q only!"
     if not amplitude_mode:
         Ig_avg = np.average(Igs)
         Qg_avg = np.average(Qgs)
