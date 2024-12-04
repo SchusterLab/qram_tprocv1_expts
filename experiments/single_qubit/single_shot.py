@@ -151,6 +151,7 @@ def general_hist(
 
     if plot:
         fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(9, 6))
+        plt.style.use("default")
         if title is None:
             title = f"Readout Fidelity" + (f" on Q{check_qubit_label}" if check_qubit_label is not None else "")
         fig.suptitle(title)
@@ -555,6 +556,9 @@ def multihist(
 
 
 def get_ge_avgs(Igs, Qgs, Ies, Qes, amplitude_mode=False):
+    """
+    Igs, Qgs, Ies, Qes should be data for 1 qubit only (1d array for each)
+    """
     if not amplitude_mode:
         Ig_avg = np.average(Igs)
         Qg_avg = np.average(Qgs)
@@ -948,7 +952,9 @@ class MultiReadoutProgram(QutritAveragerProgram):
             adcs=self.adc_chs,
             adc_trig_offset=self.cfg.device.readout.trig_offset[0],
             wait=True,
-            syncdelay=self.us2cycles(max([self.cfg.device.readout.relax_delay[q] for q in range(self.num_qubits_sample)])),
+            syncdelay=self.us2cycles(
+                max([self.cfg.device.readout.relax_delay[q] for q in range(self.num_qubits_sample)])
+            ),
         )
 
 
