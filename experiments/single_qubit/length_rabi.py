@@ -217,7 +217,9 @@ class LengthRabiProgram(QutritAveragerProgram):
                     for k in range(num_test_pulses):
                         # print("phase", phase)
                         self.pulse(ch=self.qubit_chs[qTest])
-                        # self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
+                        if k == 0:
+                            print('CAREFUll I am adding a delay')
+                        self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
 
                         # print(
                         #     "pulse pi test freq",
