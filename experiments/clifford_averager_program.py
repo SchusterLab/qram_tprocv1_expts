@@ -1199,24 +1199,28 @@ class CliffordAveragerProgram(AveragerProgram):
         if not pihalf:
             n_pulse = 2
 
-        for i in range(n_pulse):
-            self.X_half_pulse(
-                q=q,
-                divide_len=divide_len,
-                ZZ_qubit=ZZ_qubit,
-                neg=neg,
-                extra_phase=extra_phase,
-                play=play,
-                set_reg=set_reg,
-                name=name,
-                flag=flag,
-                special=special,
-                phrst=phrst,
-                reload=reload,
-                sync_after=sync_after,
-                pihalf=pihalf,
-                **kwargs,
-            )
+        self.X_half_pulse(
+            q=q,
+            divide_len=divide_len,
+            ZZ_qubit=ZZ_qubit,
+            neg=neg,
+            extra_phase=extra_phase,
+            play=False,
+            set_reg=set_reg or play,
+            name=name,
+            flag=flag,
+            special=special,
+            phrst=phrst,
+            reload=reload,
+            sync_after=sync_after,
+            pihalf=pihalf,
+            **kwargs,
+        )
+        if play:
+            for i in range(n_pulse):
+                self.pulse(self.qubit_chs[q])
+        if sync_after:
+            self.sync_all()
 
     def Y_pulse(
         self,
@@ -1281,8 +1285,9 @@ class CliffordAveragerProgram(AveragerProgram):
             delay_cycles = self.us2cycles(delay_ns * 1e-3, gen_ch=ch)
             self.gen_delays[ch] = delay_cycles
 
-    def sync_all(self, t=0):
-        super().sync_all(t=t, gen_t0=self.gen_delays)
+    def sync_all(self, t=0, gen_t0=None):
+        if gen_t0 is None: gen_t0 = self.gen_delays
+        super().sync_all(t=t, gen_t0=gen_t0)
 
     def setup_readout(self):
         """
@@ -2104,21 +2109,25 @@ class QutritAveragerProgram(CliffordAveragerProgram):
         n_pulse = 1
         if not pihalf:
             n_pulse = 2
-        for i in range(n_pulse):
-            self.Xef_half_pulse(
-                q=q,
-                divide_len=divide_len,
-                name=name,
-                ZZ_qubit=ZZ_qubit,
-                neg=neg,
-                extra_phase=extra_phase,
-                play=play,
-                set_reg=set_reg,
-                flag=flag,
-                phrst=phrst,
-                reload=reload,
-                sync_after=sync_after,
-            )
+        self.Xef_half_pulse(
+            q=q,
+            divide_len=divide_len,
+            name=name,
+            ZZ_qubit=ZZ_qubit,
+            neg=neg,
+            extra_phase=extra_phase,
+            play=False,
+            set_reg=set_reg or play,
+            flag=flag,
+            phrst=phrst,
+            reload=reload,
+            sync_after=False,
+        )
+        if play:
+            for i in range(n_pulse):
+                self.pulse(self.qubit_chs[q])
+        if sync_after:
+            self.sync_all()
 
     def Yef_pulse(
         self,
