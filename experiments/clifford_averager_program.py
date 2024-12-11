@@ -14,11 +14,14 @@ logger = logging.getLogger("qick.qick_asm")
 logger.setLevel(logging.ERROR)
 
 
-def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, amplitude_mode=False, avg_shots=False):
+def rotate_and_threshold(
+    ishots_1q, qshots_1q=None, angle=None, threshold=None, amplitude_mode=False, flip_threshold=False, avg_shots=False
+):
     """
     Takes ishots, qshots, angle, threshold all specified for 1 qubit only (so angle, threshold are both numbers)
     If angle is not None, applies the rotation to ishots, qshots
     If threshold is not None, bins shots into 0/1 if less than/greater than threshold
+    If flip_threshold is True, does the binning in the opposite direction (less than threshold -> 1)
     If avg shots is True, returns the average value of ishots (qshots if specified)
     """
     if amplitude_mode:
@@ -46,7 +49,10 @@ def rotate_and_threshold(ishots_1q, qshots_1q=None, angle=None, threshold=None, 
         qfinal = np.zeros_like(ifinal)
 
     if threshold is not None:
-        ifinal = np.heaviside(ifinal - threshold, 0)
+        if not flip_threshold:
+            ifinal = np.heaviside(ifinal - threshold, 0)
+        else:
+            ifinal = np.heaviside(threshold - ifinal, 0)
         qfinal = np.zeros_like(ifinal)
 
     if avg_shots:
@@ -66,6 +72,7 @@ def post_select_shots(
     angles=None,
     post_process="threshold",
     amplitude_mode=False,
+    flip_threshold=False,
     thresholds=None,
     verbose=False,
     return_keep_indices=False,
@@ -141,6 +148,7 @@ def post_select_shots(
         threshold=thresholds[final_qubit],
         avg_shots=False,
         amplitude_mode=amplitude_mode,
+        flip_threshold=flip_threshold,
     )
 
     assert shots_final.shape == keep_prev.shape
@@ -1286,7 +1294,8 @@ class CliffordAveragerProgram(AveragerProgram):
             self.gen_delays[ch] = delay_cycles
 
     def sync_all(self, t=0, gen_t0=None):
-        if gen_t0 is None: gen_t0 = self.gen_delays
+        if gen_t0 is None:
+            gen_t0 = self.gen_delays
         super().sync_all(t=t, gen_t0=gen_t0)
 
     def setup_readout(self):
@@ -1664,14 +1673,19 @@ class CliffordAveragerProgram(AveragerProgram):
                     syncdelay=syncdelay,
                 )
 
-    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, amplitude_mode=False):
+    def get_shots(
+        self, angle=None, threshold=None, avg_shots=False, verbose=False, amplitude_mode=False, flip_threshold=False
+    ):
         """
         Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
         Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg
         """
 
         idata, qdata = self.get_multireadout_shots(
-            angle=angle, threshold_final=threshold, amplitude_mode=amplitude_mode
+            angle=angle,
+            threshold_final=threshold,
+            amplitude_mode=amplitude_mode,
+            flip_threshold=flip_threshold,
         )
 
         idata = idata[:, -1, :]
@@ -1681,7 +1695,9 @@ class CliffordAveragerProgram(AveragerProgram):
             qdata = np.average(qdata, axis=1)
         return idata, qdata
 
-    def get_multireadout_shots(self, angle=None, threshold_final=None, amplitude_mode=False, avg_trigs=True):
+    def get_multireadout_shots(
+        self, angle=None, threshold_final=None, amplitude_mode=False, flip_threshold=False, avg_trigs=True
+    ):
         """
         For all readouts, angle is applied if None; threshold_final is applied only to the last readout
         threshold_final should be specified for all qubits
@@ -1768,6 +1784,7 @@ class CliffordAveragerProgram(AveragerProgram):
                     qshots_1q=_shots_q_reshaped,
                     threshold=threshold_final[i],
                     amplitude_mode=amplitude_mode,
+                    flip_threshold=flip_threshold,
                 )
 
         # final shape: (ro_chs, n_init_readout + 1, reps)
@@ -1795,6 +1812,7 @@ class CliffordAveragerProgram(AveragerProgram):
         threshold=None,
         ge_avgs=None,
         amplitude_mode=False,
+        flip_threshold=False,
         post_process=None,
         verbose=False,
     ):
@@ -1811,7 +1829,12 @@ class CliffordAveragerProgram(AveragerProgram):
             assert ge_avgs is not None
 
         avgi_rot, avgq_rot = self.get_shots(
-            angle=angle, threshold=threshold, avg_shots=True, verbose=verbose, amplitude_mode=amplitude_mode
+            angle=angle,
+            threshold=threshold,
+            avg_shots=True,
+            verbose=verbose,
+            amplitude_mode=amplitude_mode,
+            flip_threshold=flip_threshold,
         )
 
         if post_process == None or post_process == "threshold":
@@ -2599,16 +2622,9 @@ class QutritRAveragerProgram(RAveragerProgram, QutritAveragerProgram):
         else:
             assert False, "Undefined post processing flag, options are None, threshold, scale"
 
-    # def get_multireadout_shots(self, angle=None, threshold_final=None, amplitude_mode=False, avg_trigs=True):
-    #     shots_i_reshaped, shots_q_reshaped = super().get_multireadout_shots(
-    #         angle=angle, threshold_final=threshold_final, amplitude_mode=amplitude_mode, avg_trigs=avg_trigs
-    #     )
-    #     expt_pts = self.get_expt_pts()
-    #     shots_i_reshaped = np.reshape(shots_i_reshaped, (expt_pts, -1))
-    #     shots_q_reshaped = np.reshape(shots_q_reshaped, (expt_pts, -1))
-    #     return expt_pts, shots_i_reshaped, shots_q_reshaped
-
-    def get_multireadout_shots(self, angle=None, threshold_final=None, amplitude_mode=False, avg_trigs=True):
+    def get_multireadout_shots(
+        self, angle=None, threshold_final=None, amplitude_mode=False, flip_threshold=False, avg_trigs=True
+    ):
         """
         For all readouts, angle is applied if None; threshold_final is applied only to the last readout
         threshold_final should be specified for all qubits
@@ -2697,20 +2713,26 @@ class QutritRAveragerProgram(RAveragerProgram, QutritAveragerProgram):
                     qshots_1q=shots_q_reshaped[ch, :, -1, :],
                     threshold=threshold_final[ch],
                     amplitude_mode=amplitude_mode,
+                    flip_threshold=flip_threshold,
                 )
 
         # final shape: (ro_chs, n_init_readout + 1, reps)
         # or if not avg_trigs: (ro_chs, n_init_readout*n_trig + 1, reps)
         return self.get_expt_pts(), shots_i_reshaped, shots_q_reshaped
 
-    def get_shots(self, angle=None, threshold=None, avg_shots=False, verbose=False, amplitude_mode=False):
+    def get_shots(
+        self, angle=None, threshold=None, avg_shots=False, verbose=False, amplitude_mode=False, flip_threshold=False
+    ):
         """
         Collect shots for all adcs, rotates by given angle (degrees), separate based on threshold (if not None), and averages over all shots (i.e. returns data[num_chs, 1] as opposed to data[num_chs, num_shots]) if requested.
         Returns avgi (idata), avgq (qdata) which avgi/q are avg over shot_avg, first axis is expt pts
         """
 
         expt_pts, idata, qdata = self.get_multireadout_shots(
-            angle=angle, threshold_final=threshold, amplitude_mode=amplitude_mode
+            angle=angle,
+            threshold_final=threshold,
+            amplitude_mode=amplitude_mode,
+            flip_threshold=flip_threshold,
         )
 
         idata = idata[:, :, -1, :]
