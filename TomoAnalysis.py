@@ -1357,7 +1357,7 @@ class TomoAnalysis:
             plt.tight_layout()
             plt.show()
 
-    def show_plot_rho_2d(self, rho_test, rho_id=None, title=None, cmax=None, savetitle=None, size=None):
+    def show_plot_rho_2d(self, rho_test, rho_id=None, title=None, cmax=None, savetitle=None, size=None, no_show=False):
         """
         Plot real and imag parts of rho, optionally also with a comparison ideal rho
         """
@@ -1431,16 +1431,18 @@ class TomoAnalysis:
         plt.tight_layout()
 
         if savetitle is not None:
-            plt.savefig(savetitle, format="svg", bbox_inches="tight", transparent=True)
-        plt.show()
+            plt.savefig(savetitle, format="pdf", bbox_inches="tight", transparent=True)
+            
+        if not no_show:
+            plt.show()
 
     def show_plot_rho_3d(
         self, rho_test, rho_id=None, title="", zmin=None, zmax=None, width=0.75, elev=30, azim=-20, savetitle=None
     ):
-        if savetitle is None:
-            plt.style.use("default")
-        else:
-            plt.style.use("dark_background")
+        # if savetitle is None:
+        #     plt.style.use("default")
+        # else:
+        #     plt.style.use("dark_background")
         fig = plt.figure(figsize=(15, 7))
         ax1 = fig.add_subplot(121, projection="3d")
         ax2 = fig.add_subplot(122, projection="3d")
@@ -1504,7 +1506,7 @@ class TomoAnalysis:
         plt.tight_layout()
 
         if savetitle is not None:
-            plt.savefig(savetitle, format="svg", bbox_inches="tight", transparent=True)
+            plt.savefig(savetitle, format="pdf", bbox_inches="tight", transparent=True)
         plt.show()
 
     # =========================== VIRTUAL ROTATIONS =========================== #
