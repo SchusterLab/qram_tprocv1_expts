@@ -334,13 +334,13 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         return count_us
 
     def q2_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
-        self.Xef_pulse(q=2, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
+        self.Xef_pulse(q=2, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf, sync_after=sync_after)
         if self.timestep_us < np.inf:
             assert False, "no time stepping on the ef pulse right now"
         return 0
 
     def q3_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
-        self.Xef_pulse(q=3, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf)
+        self.Xef_pulse(q=3, play=True, ZZ_qubit=ZZ_qubit, pihalf=pihalf, sync_after=sync_after)
         if self.timestep_us < np.inf:
             assert False, "no time stepping on the ef pulse right now"
         return 0
@@ -362,9 +362,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             self.X_pulse(q=1, play=True)
 
         elif init_state == "|0>|0+1>":
-            # self.Y_pulse(q=1, play=True, pihalf=True, special="gauss")
-            # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
+            old_gen_delays = np.copy(self.gen_delays).tolist()
+            self.gen_delays[self.qubit_chs[1]] += 1
             self.Y_pulse(q=1, play=True, pihalf=True)
+            self.gen_delays = old_gen_delays
 
         elif init_state == "|0>|2>":
             self.X_pulse(q=1, play=True)
@@ -377,8 +378,6 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             if not self.cfg.expt.use_IQ_pulse:
                 assert self.use_robust_pulses
                 self.Y_pulse(q=1, pihalf=True, play=True)
-                # print("WARNING, USING ROBUST PULSE ON Q1 PREP")
-                # self.Y_pulse(q=1, play=True, pihalf=True)
                 self.X_pulse(q=0, play=True)
             else:
                 IQ_qubits = [0, 1]
@@ -399,6 +398,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 assert self.use_robust_pulses
                 self.Y_pulse(q=1, pihalf=True, play=True)
                 self.Y_pulse(q=0, pihalf=True, play=True)
+                self.sync_all(5)  # timing correction
 
             else:
                 IQ_qubits = [0, 1]
@@ -426,6 +426,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         elif init_state == "|0+1>|0+i>":
             self.X_pulse(q=1, pihalf=True, play=True, neg=True)
             self.Y_pulse(q=0, pihalf=True, play=True)
+            self.sync_all(5)  # timing correction
 
         elif init_state == "|0+i>|0>":
             self.X_pulse(q=0, play=True, pihalf=True, neg=True)
@@ -437,13 +438,18 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         elif init_state == "|0+i>|0+1>":
             self.Y_pulse(q=1, pihalf=True, play=True)
             self.X_pulse(q=0, pihalf=True, play=True, neg=True)
+            self.sync_all(5)  # timing correction
 
         elif init_state == "|0+i>|0+i>":
             self.X_pulse(q=1, play=True, pihalf=True, neg=True)
             self.X_pulse(q=0, play=True, pihalf=True, neg=True)
+            self.sync_all(5)  # timing correction
 
         elif init_state == "|0>|0+i>":
+            old_gen_delays = np.copy(self.gen_delays).tolist()
+            self.gen_delays[self.qubit_chs[1]] += 1
             self.X_pulse(q=1, play=True, pihalf=True, neg=True)
+            self.gen_delays = old_gen_delays
 
         elif init_state == "|1>|0+i>":
             self.X_pulse(q=1, play=True, pihalf=True, neg=True)
@@ -679,7 +685,12 @@ class QramProtocolExperiment(Experiment):
             "phases": [[], [], [], []],
         }
 
-        self.meas_order = ["ZZ", "ZX", "ZY", "XZ", "XX", "XY", "YZ", "YX", "YY"]
+        if "meas_order" not in self.cfg.expt or self.cfg.expt.meas_order is None:
+            tomo_analysis = TomoAnalysis(nb_qubits=2)
+            self.meas_order = tomo_analysis.meas_order
+        else:
+            self.meas_order = self.cfg.expt.meas_order
+
         self.calib_order = [
             "gg",
             "ge",
@@ -1149,7 +1160,13 @@ class QramProtocolSingleShotExperiment(Experiment):
         data["ge_avgs"] = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
         Igs, Qgs = data["iqshots"][g_states[0]]
         Ies, Qes = data["iqshots"][e_states[0]]
-        data["ge_avgs"][check_qubit] = get_ge_avgs(Igs=Igs, Qgs=Qgs, Ies=Ies, Qes=Qes, amplitude_mode=full_mux_expt)
+        data["ge_avgs"][check_qubit] = get_ge_avgs(
+            Igs=Igs[check_qubit, -1, :],
+            Qgs=Qgs[check_qubit, -1, :],
+            Ies=Ies[check_qubit, -1, :],
+            Qes=Qes[check_qubit, -1, :],
+            amplitude_mode=full_mux_expt,
+        )
 
         if apply_ps:
             output_data = []
@@ -1534,12 +1551,13 @@ class QramProtocol1QTomoExperiment(Experiment):
             fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
             thresholds_q[self.qubit] = threshold[0]
             angles_q[self.qubit] = angle
-            ge_avgs_q[self.qubit] = [
-                np.average(Ig[self.qubit]),
-                np.average(Qg[self.qubit]),
-                np.average(Ie[self.qubit]),
-                np.average(Qe[self.qubit]),
-            ]
+            ge_avgs_q[self.qubit] = get_ge_avgs(
+                Igs=Ig[self.qubit],
+                Qgs=Qg[self.qubit],
+                Ies=Ie[self.qubit],
+                Qes=Qe[self.qubit],
+                amplitude_mode=full_mux_expt,
+            )
             print(f"Qubit ({self.qubit}) ge")
             print(
                 f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[self.qubit]} \t threshold ge: {thresholds_q[self.qubit]}"
@@ -1592,7 +1610,9 @@ class QramProtocol1QTomoExperiment(Experiment):
                     )
                     thresholds_q[q] = threshold[0]
                     angles_q[q] = angle
-                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    ge_avgs_q[q] = get_ge_avgs(
+                        Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                    )
                     print(
                         f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}"
                     )
@@ -1691,7 +1711,10 @@ class QramProtocol3QTomoExperiment(Experiment):
                 elif not (isinstance(value, list)):
                     subcfg.update({key: [value] * self.num_qubits_sample})
 
-        self.meas_order = make_3q_meas_order()
+        if "meas_order" not in self.cfg.expt or self.cfg.expt.meas_order is None:
+            self.meas_order = make_3q_meas_order()
+        else:
+            self.meas_order = self.cfg.expt.meas_order
         # self.meas_order = ['XXY']
         self.calib_order = make_3q_calib_order()  # should match with order of counts for each tomography measurement
 
@@ -1817,7 +1840,7 @@ class QramProtocol3QTomoExperiment(Experiment):
                 fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt)
                 thresholds_q[q] = threshold[0]
                 angles_q[q] = angle
-                ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                ge_avgs_q[q] = get_ge_avgs(Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt)
                 print(
                     f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}"
                 )
@@ -1875,7 +1898,9 @@ class QramProtocol3QTomoExperiment(Experiment):
                     )
                     thresholds_q[q] = threshold[0]
                     angles_q[q] = angle
-                    ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                    ge_avgs_q[q] = get_ge_avgs(
+                        Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                    )
                     print(
                         f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}"
                     )
@@ -2292,7 +2317,7 @@ class QramProtocolExperiment4Q(Experiment):
                 fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_q[q] = threshold[0]
                 angles_q[q] = angle
-                ge_avgs_q[q] = [np.average(Ig[q]), np.average(Qg[q]), np.average(Ie[q]), np.average(Qe[q])]
+                ge_avgs_q[q] = get_ge_avgs(Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt)
 
             print("thresholds", thresholds_q)
             print("angles", angles_q)
