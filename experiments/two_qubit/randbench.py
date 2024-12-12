@@ -1726,6 +1726,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 else:
                     gate_list, total_gate = gate_sequence(depth)
                 gate_list.append(total_gate)  # make sure to do the inverse gate
+
+                # gate_list = ["X/2", "X/2", "-X/2", "-X/2", "I"]
+                # print("gate list", gate_list)
                 gate_list_variations[i_depth].append(gate_list)
 
                 cfg_test = AttrDict(deepcopy(self.cfg))
@@ -1880,7 +1883,10 @@ class SimultaneousRBEgGfExperiment(Experiment):
             # ================= #
 
             if self.measure_f:
-                flip_threshold = full_mux_expt  # if using amplitude mode and measuring at the f resonator frequency, f will have a lower amplitude than g/e
+                flip_threshold_all_q = [False] * 4
+                flip_threshold_all_q[
+                    q_measure_f
+                ] = full_mux_expt  # if using amplitude mode and measuring at the f resonator frequency, f will have a lower amplitude than g/e
                 counts_calib_f = []
 
                 # ================= #
@@ -1940,7 +1946,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                         angle=angles_f_q,
                         threshold=thresholds_f_q,
                         amplitude_mode=full_mux_expt,
-                        flip_threshold=flip_threshold,
+                        flip_threshold_all_q=flip_threshold_all_q,
                     )
                     counts_calib_f.append(counts)
 
@@ -1990,7 +1996,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             ge_avgs=gf_avgs_q,
                             post_process=self.cfg.expt.post_process,
                             amplitude_mode=full_mux_expt,
-                            flip_threshold=flip_threshold,
+                            flip_threshold_all_q=flip_threshold_all_q,
                         )
                         assert (
                             self.cfg.expt.post_process == "threshold"
@@ -2001,7 +2007,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                                 angle=angles_f_q,
                                 threshold=thresholds_f_q,
                                 amplitude_mode=full_mux_expt,
-                                flip_threshold=flip_threshold,
+                                flip_threshold_all_q=flip_threshold_all_q,
                             )
                             # 00, 02, 10, 12
                             counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])

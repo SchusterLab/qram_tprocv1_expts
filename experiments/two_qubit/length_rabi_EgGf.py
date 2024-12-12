@@ -141,7 +141,10 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None
         ):  # add pihalf initialization pulse for error amplification
             if self.cfg.expt.pulse_type.lower() == "gauss" and self.cfg.expt.sigma_test > 0:
-                self.pi_half_sigma_test = self.us2cycles(self.sigma_test, gen_ch=self.swap_chs[qSort]) // 2
+                sigma_test_half = self.sigma_test // 2
+                if self.test_pi_half:
+                    sigma_test_half = self.sigma_test
+                self.pi_half_sigma_test = sigma_test_half
                 self.add_gauss(
                     ch=self.swap_chs[qSort],
                     name="pi_EgGf_swap_half",
@@ -356,7 +359,10 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                             sigma_ramp_cycles = 3
                             if "sigma_ramp_cycles" in self.cfg.expt:
                                 sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                            flat_length_cycles = self.sigma_test // 2 - sigma_ramp_cycles * 4
+                            sigma_test_half = self.sigma_test // 2
+                            if self.test_pi_half:
+                                sigma_test_half = self.sigma_test
+                            flat_length_cycles = sigma_test_half - sigma_ramp_cycles * 4
                             if flat_length_cycles >= 3:
                                 self.setup_and_pulse(
                                     ch=self.swap_chs[qSort],
@@ -670,15 +676,30 @@ class LengthRabiEgGfExperiment(Experiment):
             data["gf_avgs_loops"] = []
             data["counts_calib_f_loops"] = []
 
-        if "gain" not in self.cfg.expt:
-            if qDrive == 1:
+        test_pi_half = False
+        if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
+            test_pi_half = self.cfg.expt.test_pi_half
+
+        if qDrive == 1:
+            self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort]
+            if test_pi_half:
+                assert False, "not implemented test pi half with qdrive = 1"
+            if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
-            else:
-                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
-        if "pulse_type" not in self.cfg.expt:
-            if qDrive == 1:
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qSort]
+            if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
-            else:
+        else:
+            if test_pi_half:
+                self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
+                    qSort
+                ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
+            if "gain" not in self.cfg.expt:
+                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qSort]
+            if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
 
         full_mux_expt = False
@@ -2342,16 +2363,31 @@ class NPulseEgGfExperiment(Experiment):
         # ================= #
         # Begin actual experiment
         # ================= #
+        test_pi_half = False
+        if "test_pi_half" in self.cfg.expt:
+            test_pi_half = self.cfg.expt.test_pi_half
+
         if qDrive == 1:
             self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort]
+            if test_pi_half:
+                assert False, "not implemented test pi half with qdrive = 1"
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qSort]
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
         else:
             self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort]
+            if test_pi_half:
+                self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qSort]
+                self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
+                    qSort
+                ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qSort]
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
         self.cfg.expt.sigma_test = float(self.cfg.expt.length)
@@ -2473,9 +2509,15 @@ class NPulseEgGfExperiment(Experiment):
             print(f"\tadjust ratio {amp_ratio}")
         print()
 
-        # label = '($X_{\pi/2}, X_{'+ ('\pi' if not self.cfg.expt.test_pi_half else '\pi/2') + '}^{2n}$)'
+        label = (
+            "($X_{\pi/2}, X_{"
+            + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2")
+            + "}^{"
+            + (str(2) if self.cfg.expt.test_pi_half else "")
+            + "N}$)"
+        )
         # label = "($X_{\pi/2}, X_{\pi}^{2n}$)"
-        label = "($X_{\pi/2}, X_{\pi}^{n}$)"
+        # label = "($X_{\pi/2}, X_{\pi}^{n}$)"
         ax_qB = plt.subplot(212)
         ax_qB.tick_params(axis="both", which="major", labelsize=16)
         ax_qB.set_ylabel(f"QA ({self.cfg.expt.measure_qubits[1]}) (scaled)", fontsize=18)
@@ -2683,18 +2725,33 @@ class PiMinusPiEgGfExperiment(Experiment):
             }
         )
 
+        test_pi_half = False
+        if "test_pi_half" in self.cfg.expt:
+            test_pi_half = self.cfg.expt.test_pi_half
+        else:
+            self.cfg.expt.test_pi_half = False
+
         if qDrive == 1:
             self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort]
+            if test_pi_half:
+                assert False, "not implemented test pi half with qdrive = 1"
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qSort]
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
         else:
             self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort]
+            if test_pi_half:
+                self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qSort]
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qSort]
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
+
         self.cfg.expt.sigma_test = float(self.cfg.expt.length)
         self.cfg.expt.pi_minuspi = True
 
@@ -2782,6 +2839,8 @@ class PiMinusPiEgGfExperiment(Experiment):
                 )  # expect to end in e, so we compare relative to e
 
         label = "($X_{\pi}, X_{-\pi})^N$"
+        if self.cfg.expt.test_pi_half:
+            label = "($X_{\pi/2}, X_{-\pi/2})^N$"
         title = (
             f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
         )
@@ -2845,6 +2904,8 @@ class PiMinusPiEgGfExperiment(Experiment):
             old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
 
         label = "($X_{\pi}, X_{-\pi})^N$"
+        if self.cfg.expt.test_pi_half:
+            label = "($X_{\pi/2}, X_{-\pi/2})^N$"
         title = (
             f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
         )
