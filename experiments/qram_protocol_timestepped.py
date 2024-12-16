@@ -284,15 +284,19 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         phase = self.deg2reg(phase_deg, gen_ch=self.swap_Q_chs[2])
         sigma_us = self.pi_EgGf_Q_sigmas_us[2]
         waveform = "pi_EgGf_Q_swap2"
+        freq_reg = self.f_EgGf_Q_regs[2]
+        gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[2]
         if pihalf:
             sigma_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[2]
+            freq_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q_half[2], gen_ch=self.swap_Q_chs[2])
+            gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[2]
         count_us = self.handle_next_pulse(
             count_us=count_us,
             ch=self.swap_Q_chs[2],
-            freq_reg=self.f_EgGf_Q_regs[2],
+            freq_reg=freq_reg,
             type=self.pi_EgGf_Q_types[2],
             phase=phase,
-            gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[2],
+            gain=gain,
             sigma_us=sigma_us,
             waveform=waveform,
         )
@@ -302,6 +306,7 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[2]
             self.overall_phase[2] += virtual_Z
             # print('virtual Z', virtual_Z)
+        # print("playing q2/q1", sigma_us, self.overall_phase[2])
         if sync_after:
             self.sync_all()
         return count_us
@@ -312,15 +317,19 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         phase = self.deg2reg(phase_deg, gen_ch=self.swap_Q_chs[3])
         sigma_us = self.pi_EgGf_Q_sigmas_us[3]
         waveform = "pi_EgGf_Q_swap3"
+        freq_reg = self.f_EgGf_Q_regs[3]
+        gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[3]
         if pihalf:
             sigma_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[3]
+            freq_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q_half[3], gen_ch=self.swap_Q_chs[3])
+            gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[3]
         count_us = self.handle_next_pulse(
             count_us=count_us,
             ch=self.swap_Q_chs[3],
-            freq_reg=self.f_EgGf_Q_regs[3],
+            freq_reg=freq_reg,
             type=self.pi_EgGf_Q_types[3],
             phase=phase,
-            gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[3],
+            gain=gain,
             sigma_us=sigma_us,
             waveform=waveform,
         )
@@ -345,12 +354,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             assert False, "no time stepping on the ef pulse right now"
         return 0
 
-    def state_prep_pulse(self, qubits=None, **kwargs):
-        cfg = AttrDict(self.cfg)
-
-        # ================= #
-        # Initial states
-        # ================= #
+    def initialize_state_prep(self):
+        """
+        Initial states
+        """
 
         init_state = self.cfg.expt.init_state
 
@@ -523,6 +530,11 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
         else:
             assert False, f"Init state {init_state} not valid"
+
+    def state_prep_pulse(self, qubits=None, **kwargs):
+        cfg = AttrDict(self.cfg)
+
+        self.initialize_state_prep()
 
         count_us = 0
         self.end_times_us = []
@@ -1558,10 +1570,12 @@ class QramProtocol1QTomoExperiment(Experiment):
                 Qes=Qe[self.qubit],
                 amplitude_mode=full_mux_expt,
             )
-            print(f"Qubit ({self.qubit}) ge")
-            print(
-                f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[self.qubit]} \t threshold ge: {thresholds_q[self.qubit]}"
-            )
+
+            if debug:
+                print(f"Qubit ({self.qubit}) ge")
+                print(
+                    f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[self.qubit]} \t threshold ge: {thresholds_q[self.qubit]}"
+                )
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for iprep, prep_state in enumerate(self.calib_order):
