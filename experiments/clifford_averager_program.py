@@ -993,7 +993,6 @@ class CliffordAveragerProgram(AveragerProgram):
         phrst=0,
         reload=False,
         sync_after=True,
-        pihalf=True,
         **kwargs,
     ):
 
@@ -1116,7 +1115,7 @@ class CliffordAveragerProgram(AveragerProgram):
             )
             # if play: print(f"playing phase {phase_deg}, waveform {waveformname}_q{q}, gain {gain}, ch {self.qubit_chs[q]}")
         elif type == "adiabatic":
-            assert not pihalf, "Cannot do pihalf pulse with adiabatic"
+            assert False, "Cannot do pihalf pulse with adiabatic"
             self.handle_adiabatic_pulse(
                 name=f"{name}_q{q}",
                 ch=self.qubit_chs[q],
@@ -1135,7 +1134,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 sync_after=sync_after,
             )
         elif type == "pulseiq":
-            assert not pihalf, "Cannot do pihalf pulse with pulseiq"
+            assert False, "Cannot do pihalf pulse with pulseiq"
             self.handle_IQ_pulse(
                 name=f"{name}_q{q}",
                 ch=self.qubit_chs[q],
@@ -1199,7 +1198,6 @@ class CliffordAveragerProgram(AveragerProgram):
         name="X",
         flag=None,
         special=None,
-        phrst=0,
         reload=False,
         sync_after=True,
         **kwargs,
@@ -1220,10 +1218,8 @@ class CliffordAveragerProgram(AveragerProgram):
             name=name,
             flag=flag,
             special=special,
-            phrst=phrst,
             reload=reload,
-            sync_after=sync_after,
-            pihalf=pihalf,
+            sync_after=False,
             **kwargs,
         )
         if play:
@@ -1244,7 +1240,6 @@ class CliffordAveragerProgram(AveragerProgram):
         play=False,
         set_reg=False,
         flag=None,
-        phrst=0,
         special=None,
         reload=False,
         sync_after=True,
@@ -1263,7 +1258,6 @@ class CliffordAveragerProgram(AveragerProgram):
             flag=flag,
             adiabatic=adiabatic,
             special=special,
-            phrst=phrst,
             reload=reload,
             sync_after=sync_after,
         )
@@ -1464,6 +1458,7 @@ class CliffordAveragerProgram(AveragerProgram):
         mux_gains = [0] * 4
         mux_ro_ch = None
         mux_nqz = None
+        adc_readout_freqs = [0] * 4
         for q in range(self.num_qubits_sample):
             assert self.res_ch_types[q] in ["full", "mux4"]
             if self.res_ch_types[q] == "full":
@@ -1485,6 +1480,7 @@ class CliffordAveragerProgram(AveragerProgram):
                         play=False,
                         set_reg=True,
                     )
+                    adc_readout_freqs[q] = self.cfg.device.readout.frequency[q] + self.cfg.hw.soc.dacs.readout.mixer_freq[q]
                     self.measure_chs.append(self.res_chs[q])
                     self.meas_ch_types.append(self.res_ch_types[q])
                     self.meas_ch_qs.append(q)
@@ -1506,6 +1502,7 @@ class CliffordAveragerProgram(AveragerProgram):
                     self.measure_chs.append(self.res_chs[q])
                     self.meas_ch_types.append("mux4")
                     self.meas_ch_qs.append(-1)
+                adc_readout_freqs[q] = self.cfg.device.readout.frequency[q]
 
         # declare mux4 channel
         if "mux4" in self.res_ch_types:
@@ -1522,7 +1519,7 @@ class CliffordAveragerProgram(AveragerProgram):
                 self.declare_readout(
                     ch=self.adc_chs[q],
                     length=self.readout_lengths_adc[q],
-                    freq=self.cfg.device.readout.frequency[q],
+                    freq=adc_readout_freqs[q],
                     gen_ch=self.res_chs[q],
                 )
 
@@ -1804,7 +1801,7 @@ class CliffordAveragerProgram(AveragerProgram):
         # return shots_i_reshaped, shots_q_reshaped
         return shots_i_reshaped, shots_q_reshaped
 
-    def acquire(self, soc, load_pulses=True, progress=False, save_experiments=None):
+    def acquire(self, soc, load_pulses=True, progress=False, save_experiments=None, **kwargs):
         if not self.readout_cool:
             self.cfg.expt.n_trig = 1
             self.cfg.expt.n_init_readout = 0
@@ -2319,66 +2316,192 @@ extra_phase is applied to the swap itself.
 class CliffordEgGfAveragerProgram(QutritAveragerProgram):
     # self.overall_phase keeps track of the EgGf phase insetad of the e-g pulse phase
 
-    def XEgGf_pulse(
+    # def XEgGf_pulse(
+    #     self,
+    #     qDrive,
+    #     qNotDrive,
+    #     pihalf=False,
+    #     divide_len=True,
+    #     name="X_EgGf",
+    #     neg=False,
+    #     extra_phase=0,
+    #     add_virtual_Z=True,
+    #     set_reg=False,
+    #     play=False,
+    #     flag=None,
+    #     phrst=0,
+    #     reload=True,
+    #     sync_after=True,
+    # ):
+    #     # convention is waveformname is pi_EgGf_qNotDriveqDrive
+    #     virtual_Z = 0
+    #     if qDrive == 1:
+    #         ch = self.swap_chs[qNotDrive]
+    #         f_EgGf_MHz = self.cfg.device.qubit.f_EgGf[qNotDrive]
+    #         gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qNotDrive]
+    #         phase_deg = self.overall_phase[qNotDrive] + extra_phase
+    #         sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive], gen_ch=ch)
+    #         type = self.cfg.device.qubit.pulses.pi_EgGf.type[qNotDrive]
+    #         waveformname = "pi_EgGf"
+    #         if add_virtual_Z:
+    #             virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.phase[qNotDrive]
+    #     else:
+    #         ch = self.swap_Q_chs[qDrive]
+    #         f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q[qDrive]
+    #         gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qDrive]
+    #         phase_deg = self.overall_phase[qDrive] + extra_phase
+    #         sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive], gen_ch=ch)
+    #         type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qDrive]
+    #         waveformname = "pi_EgGf"
+    #         if add_virtual_Z:
+    #             virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.phase[qDrive]
+    #     if pihalf:
+    #         if divide_len:
+    #             # sigma_cycles = sigma_cycles // 2
+    #             if qDrive == 1:
+    #                 f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_half[qDrive]
+    #                 gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qDrive]
+    #                 sigma_cycles = self.us2cycles(
+    #                     self.cfg.device.qubit.pulses.pi_EgGf.half_sigma[qNotDrive], gen_ch=ch
+    #                 )
+    #                 if add_virtual_Z:
+    #                     virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.half_phase[qNotDrive]
+    #             else:
+    #                 f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q_half[qDrive]
+    #                 gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qDrive]
+    #                 sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qDrive], gen_ch=ch)
+    #                 if add_virtual_Z:
+    #                     virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[qDrive]
+    #             waveformname += "half"
+    #         else:
+    #             assert False, "dividing gain for an eg-gf pi/2 pulse is a bad idea!"
+    #         name += "half"
+
+    #     if neg:
+    #         phase_deg -= 180
+
+    #     if type == "const":
+    #         self.handle_const_pulse(
+    #             name=f"{name}_{qNotDrive}{qDrive}",
+    #             ch=ch,
+    #             waveformname=f"{waveformname}_{qNotDrive}{qDrive}",
+    #             length=sigma_cycles,
+    #             freq_MHz=f_EgGf_MHz,
+    #             phase_deg=phase_deg,
+    #             gain=gain,
+    #             play=play,
+    #             set_reg=set_reg,
+    #             flag=flag,
+    #             phrst=phrst,
+    #             reload=reload,
+    #             sync_after=sync_after,
+    #         )
+
+    #     elif type == "gauss":
+    #         self.handle_gauss_pulse(
+    #             name=f"{name}_{qNotDrive}{qDrive}",
+    #             ch=ch,
+    #             waveformname=f"{waveformname}_{qNotDrive}{qDrive}",
+    #             sigma=sigma_cycles,
+    #             freq_MHz=f_EgGf_MHz,
+    #             phase_deg=phase_deg,
+    #             gain=gain,
+    #             play=play,
+    #             set_reg=set_reg,
+    #             flag=flag,
+    #             phrst=phrst,
+    #             reload=reload,
+    #             sync_after=sync_after,
+    #         )
+
+    #     elif type == "flat_top":
+    #         sigma_ramp_cycles = 3
+    #         flat_length_cycles = sigma_cycles - sigma_ramp_cycles * 4
+    #         self.handle_flat_top_pulse(
+    #             name=f"{name}_{qNotDrive}{qDrive}",
+    #             ch=ch,
+    #             waveformname=f"{waveformname}_{qNotDrive}{qDrive}",
+    #             sigma=sigma_ramp_cycles,
+    #             flat_length=flat_length_cycles,
+    #             freq_MHz=f_EgGf_MHz,
+    #             phase_deg=phase_deg,
+    #             gain=gain,
+    #             play=play,
+    #             set_reg=set_reg,
+    #             flag=flag,
+    #             phrst=phrst,
+    #             reload=reload,
+    #             sync_after=sync_after,
+    #         )
+
+    #     else:
+    #         assert False, f"Pulse type {type} not supported."
+
+    #     if add_virtual_Z:
+    #         self.overall_phase[qDrive] += virtual_Z
+
+    def XEgGf_half_pulse(
         self,
         qDrive,
         qNotDrive,
-        pihalf=False,
         divide_len=True,
         name="X_EgGf",
         neg=False,
         extra_phase=0,
         add_virtual_Z=True,
+        set_reg=False,
         play=False,
         flag=None,
-        phrst=0,
-        reload=True,
+        reload=False,
+        sync_after=True,
     ):
         # convention is waveformname is pi_EgGf_qNotDriveqDrive
         virtual_Z = 0
         if qDrive == 1:
             ch = self.swap_chs[qNotDrive]
-            f_EgGf_MHz = self.cfg.device.qubit.f_EgGf[qNotDrive]
-            gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qNotDrive]
+            # f_EgGf_MHz = self.cfg.device.qubit.f_EgGf[qNotDrive]
+            # gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qNotDrive]
+            # sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive], gen_ch=ch)
             phase_deg = self.overall_phase[qNotDrive] + extra_phase
-            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive], gen_ch=ch)
             type = self.cfg.device.qubit.pulses.pi_EgGf.type[qNotDrive]
             waveformname = "pi_EgGf"
             if add_virtual_Z:
                 virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.phase[qNotDrive]
         else:
             ch = self.swap_Q_chs[qDrive]
-            f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q[qDrive]
-            gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qDrive]
+            # f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q[qDrive]
+            # gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qDrive]
+            # sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive], gen_ch=ch)
             phase_deg = self.overall_phase[qDrive] + extra_phase
-            sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive], gen_ch=ch)
             type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qDrive]
             waveformname = "pi_EgGf"
             if add_virtual_Z:
                 virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.phase[qDrive]
-        if pihalf:
-            if divide_len:
-                # sigma_cycles = sigma_cycles // 2
-                if qDrive == 1:
-                    f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_half[qDrive]
-                    gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qDrive]
-                    sigma_cycles = self.us2cycles(
-                        self.cfg.device.qubit.pulses.pi_EgGf.half_sigma[qNotDrive], gen_ch=ch
-                    )
-                    if add_virtual_Z:
-                        virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.half_phase[qNotDrive]
-                else:
-                    f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q_half[qDrive]
-                    gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qDrive]
-                    sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qDrive], gen_ch=ch)
-                    if add_virtual_Z:
-                        virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[qDrive]
-                waveformname += "half"
+
+        if divide_len:
+            # sigma_cycles = sigma_cycles // 2
+            if qDrive == 1:
+                f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_half[qDrive]
+                gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qDrive]
+                sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf.half_sigma[qNotDrive], gen_ch=ch)
+                if add_virtual_Z:
+                    virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf.half_phase[qNotDrive]
             else:
-                assert False, "dividing gain for an eg-gf pi/2 pulse is a bad idea!"
-            name += "half"
+                f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q_half[qDrive]
+                gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qDrive]
+                sigma_cycles = self.us2cycles(self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qDrive], gen_ch=ch)
+                if add_virtual_Z:
+                    virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[qDrive]
+            waveformname += "half"
+        else:
+            assert False, "dividing gain for an eg-gf pi/2 pulse is a bad idea!"
+        name += "half"
+        # if play or set_reg:
+        #     print(f"Playing {self.cycles2us(sigma_cycles, gen_ch=ch)}us on q{qDrive}q{qNotDrive}")
+
         if neg:
             phase_deg -= 180
+
         if type == "const":
             self.handle_const_pulse(
                 name=f"{name}_{qNotDrive}{qDrive}",
@@ -2389,10 +2512,12 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
-                phrst=phrst,
                 reload=reload,
+                sync_after=sync_after,
             )
+
         elif type == "gauss":
             self.handle_gauss_pulse(
                 name=f"{name}_{qNotDrive}{qDrive}",
@@ -2403,10 +2528,12 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
-                phrst=phrst,
                 reload=reload,
+                sync_after=sync_after,
             )
+
         elif type == "flat_top":
             sigma_ramp_cycles = 3
             flat_length_cycles = sigma_cycles - sigma_ramp_cycles * 4
@@ -2420,16 +2547,58 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
                 phase_deg=phase_deg,
                 gain=gain,
                 play=play,
+                set_reg=set_reg,
                 flag=flag,
-                phrst=phrst,
                 reload=reload,
+                sync_after=sync_after,
             )
+
         else:
             assert False, f"Pulse type {type} not supported."
 
         if add_virtual_Z:
             self.overall_phase[qDrive] += virtual_Z
-        # print('ch keys', self.gen_chs.keys())
+
+    def XEgGf_pulse(
+        self,
+        qDrive,
+        qNotDrive,
+        pihalf=False,
+        divide_len=True,
+        neg=False,
+        extra_phase=0,
+        add_virtual_Z=True,
+        play=False,
+        set_reg=False,
+        name="X_EgGf",
+        flag=None,
+        reload=False,
+        sync_after=True,
+    ):
+
+        n_pulse = 1
+        if not pihalf:
+            n_pulse = 2
+
+        self.XEgGf_half_pulse(
+            qDrive=qDrive,
+            qNotDrive=qNotDrive,
+            divide_len=divide_len,
+            neg=neg,
+            extra_phase=extra_phase,
+            add_virtual_Z=add_virtual_Z,
+            play=False,
+            set_reg=set_reg or play,
+            name=name,
+            flag=flag,
+            reload=reload,
+            sync_after=False,
+        )
+        if play:
+            for i in range(n_pulse):
+                self.pulse(self.swap_Q_chs[qDrive])
+        if sync_after:
+            self.sync_all()
 
     def YEgGf_pulse(
         self,
@@ -2440,9 +2609,10 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
         extra_phase=0,
         add_virtual_Z=False,
         play=False,
+        set_reg=False,
         flag=None,
-        phrst=0,
         reload=True,
+        sync_after=True,
     ):
         # the sign of the 180 does not matter, but the sign of the pihalf does!
         self.XEgGf_pulse(
@@ -2453,16 +2623,27 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
             extra_phase=90 + extra_phase,
             add_virtual_Z=add_virtual_Z,
             play=play,
+            set_reg=set_reg,
             name="Y_EgGf",
             flag=flag,
-            phrst=phrst,
             reload=reload,
+            sync_after=sync_after,
         )
+
+    def ZEgGf_phi_pulse(
+        self,
+        qDrive,
+        phase_adjust,
+        play,
+    ):
+        if play:
+            self.overall_phase[qDrive] += phase_adjust
 
     def ZEgGf_pulse(
         self,
         qDrive,
-        qNotDrive,
+        qNotDrive=None,
+        phase_adjust=180,
         pihalf=False,
         divide_len=True,
         neg=False,
@@ -2471,23 +2652,13 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
         play=False,
         reload=None,
     ):
-        if qDrive == 1:
-            sigma_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive]
-            dac_type = self.swap_ch_types[qNotDrive]
-        else:
-            sigma_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive]
-            dac_type = self.swap_Q_ch_types[qDrive]
-        if pihalf:
-            if divide_len:
-                sigma_us /= 2
-        assert not dac_type == "mux4", "Currently cannot set phase for mux4!"
         phase_adjust = 180
         if pihalf:
             phase_adjust = 90  # the sign of the 180 does not matter, but the sign of the pihalf does!
         if neg:
             phase_adjust *= -1
         if play:
-            self.overall_phase[qDrive] += phase_adjust + extra_phase
+            self.ZEgGf_phi_pulse(qDrive=qDrive, phase_adjust=phase_adjust + extra_phase, play=play)
             # self.sync_all(self.us2cycles(sigma_us))
 
     def initialize(self):
