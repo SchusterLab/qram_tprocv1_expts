@@ -38,16 +38,16 @@ can be uniquely identified just by checking where +X and +Y
 go.
 """
 clifford_1q = dict()
-clifford_1q["Z"] = np.matrix(
-    [
-        [1, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 1, 0],
-        [0, 0, 0, 0, 0, 1],
-        [0, 0, 0, 1, 0, 0],
-        [0, 1, 0, 0, 0, 0],
-        [0, 0, 1, 0, 0, 0],
-    ]
-)
+# clifford_1q["Z"] = np.matrix(
+#     [
+#         [1, 0, 0, 0, 0, 0],
+#         [0, 0, 0, 0, 1, 0],
+#         [0, 0, 0, 0, 0, 1],
+#         [0, 0, 0, 1, 0, 0],
+#         [0, 1, 0, 0, 0, 0],
+#         [0, 0, 1, 0, 0, 0],
+#     ]
+# )
 clifford_1q["X"] = np.matrix(
     [
         [0, 0, 0, 1, 0, 0],
@@ -68,16 +68,16 @@ clifford_1q["Y"] = np.matrix(
         [0, 0, 0, 0, 0, 1],
     ]
 )
-clifford_1q["Z/2"] = np.matrix(
-    [
-        [1, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 1],
-        [0, 1, 0, 0, 0, 0],
-        [0, 0, 0, 1, 0, 0],
-        [0, 0, 1, 0, 0, 0],
-        [0, 0, 0, 0, 1, 0],
-    ]
-)
+# clifford_1q["Z/2"] = np.matrix(
+#     [
+#         [1, 0, 0, 0, 0, 0],
+#         [0, 0, 0, 0, 0, 1],
+#         [0, 1, 0, 0, 0, 0],
+#         [0, 0, 0, 1, 0, 0],
+#         [0, 0, 1, 0, 0, 0],
+#         [0, 0, 0, 0, 1, 0],
+#     ]
+# )
 clifford_1q["X/2"] = np.matrix(
     [
         [0, 0, 1, 0, 0, 0],
@@ -98,16 +98,16 @@ clifford_1q["Y/2"] = np.matrix(
         [0, 0, 0, 0, 0, 1],
     ]
 )
-clifford_1q["-Z/2"] = np.matrix(
-    [
-        [1, 0, 0, 0, 0, 0],
-        [0, 0, 1, 0, 0, 0],
-        [0, 0, 0, 0, 1, 0],
-        [0, 0, 0, 1, 0, 0],
-        [0, 0, 0, 0, 0, 1],
-        [0, 1, 0, 0, 0, 0],
-    ]
-)
+# clifford_1q["-Z/2"] = np.matrix(
+#     [
+#         [1, 0, 0, 0, 0, 0],
+#         [0, 0, 1, 0, 0, 0],
+#         [0, 0, 0, 0, 1, 0],
+#         [0, 0, 0, 1, 0, 0],
+#         [0, 0, 0, 0, 0, 1],
+#         [0, 1, 0, 0, 0, 0],
+#     ]
+# )
 clifford_1q["-X/2"] = np.matrix(
     [
         [0, 0, 0, 0, 0, 1],
@@ -128,46 +128,88 @@ clifford_1q["-Y/2"] = np.matrix(
         [0, 0, 0, 0, 0, 1],
     ]
 )
-clifford_1q["I"] = np.diag([1] * 6)
+identity = np.diag([1] * 6)  # DO NOT PICK FROM THIS FROM THE SET THOUGH! JUST TO DO THE INVERSION
 
 # Read pulse as a matrix product acting on state (meaning apply pulses in reverse order of the tuple)
-two_step_pulses = [
-    ("X", "Z/2"),
-    ("X/2", "Z/2"),
-    ("-X/2", "Z/2"),
-    ("Y", "Z/2"),
-    ("Y/2", "Z/2"),
-    ("-Y/2", "Z/2"),
-    ("X", "Z"),
-    ("X/2", "Z"),
-    ("-X/2", "Z"),
-    ("Y", "Z"),
-    ("Y/2", "Z"),
-    ("-Y/2", "Z"),
-    ("X", "-Z/2"),
-    ("X/2", "-Z/2"),
-    ("-X/2", "-Z/2"),
-    ("Y", "-Z/2"),
-    ("Y/2", "-Z/2"),
-    ("-Y/2", "-Z/2"),
-]
-# Get rid of repeats
-for pulse in two_step_pulses:
-    new_mat = clifford_1q[pulse[0]] @ clifford_1q[pulse[1]]
-    repeat = False
-    for existing_pulse_name, existing_pulse in clifford_1q.items():
-        if np.array_equal(new_mat, existing_pulse):
-            # print(pulse, existing_pulse_name)
-            repeat = True
-    if not repeat:
-        clifford_1q[pulse[0] + "," + pulse[1]] = new_mat
-clifford_1q_names = list(clifford_1q.keys())
+# two_step_pulses = [
+#     ("X", "Z/2"),
+#     ("X/2", "Z/2"),
+#     ("-X/2", "Z/2"),
+#     ("Y", "Z/2"),
+#     ("Y/2", "Z/2"),
+#     ("-Y/2", "Z/2"),
+#     ("X", "Z"),
+#     ("X/2", "Z"),
+#     ("-X/2", "Z"),
+#     ("Y", "Z"),
+#     ("Y/2", "Z"),
+#     ("-Y/2", "Z"),
+#     ("X", "-Z/2"),
+#     ("X/2", "-Z/2"),
+#     ("-X/2", "-Z/2"),
+#     ("Y", "-Z/2"),
+#     ("Y/2", "-Z/2"),
+#     ("-Y/2", "-Z/2"),
+# ]
 
+step_pulses = [
+    ("Y/2", "X"),
+    ("Y/2", "X/2"),
+    ("X/2", "-Y/2", "-X/2"),
+    ("-X/2", "-Y/2"),
+    ("Y/2", "-X/2"),
+    ("-X/2", "Y/2", "-X/2"),
+    ("X/2", "Y/2"),
+    ("-Y/2", "X"),
+    ("-X/2", "Y"), 
+    ("-Y/2", "-X/2"),
+    ("X/2", "Y/2", "X/2"),
+    ("-X/2", "Y/2"),
+    ("X", "Y"),
+    ("X/2", "Y"),
+    ("-Y/2", "X/2"),
+    ("X/2", "Y/2", "-X/2"),
+    ("X/2", "-Y/2"),   
+]
+
+for pulse in step_pulses:
+    new_mat = clifford_1q[pulse[0]]
+    for p in pulse[1:]:
+        new_mat = new_mat @ clifford_1q[p]
+    clifford_1q[pulse[0] + "," + ",".join(pulse[1:])] = new_mat
+    
+clifford_1q_names = list(clifford_1q.keys())
 for name, matrix in clifford_1q.items():
     z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
     x_new = np.argmax(matrix[:, 1])  # +X goes to row where col 1 is 1
-    # print(name, z_new, x_new)
     clifford_1q[name] = (matrix, (z_new, x_new))
+
+
+
+# two_step_pulses = []
+# for pulse0 in ["X/2", "-X/2", "Y/2", "-Y/2", "X", "Y"]:
+#     for pulse1 in ["X/2", "-X/2", "Y/2", "-Y/2", "X", "Y"]:
+#         two_step_pulses.append((pulse0, pulse1))
+
+# # Get rid of repeats
+# for pulse in two_step_pulses:
+#     new_mat = clifford_1q[pulse[0]] @ clifford_1q[pulse[1]]
+#     repeat = False
+#     for existing_pulse_name, existing_pulse in clifford_1q.items():
+#         if np.array_equal(new_mat, existing_pulse):
+#             # print(pulse, existing_pulse_name)
+#             repeat = True
+#     if not repeat:
+#         clifford_1q[pulse[0] + "," + pulse[1]] = new_mat
+# clifford_1q_names = list(clifford_1q.keys())
+# # print(len(clifford_1q_names), "elements in clifford_1q")
+# # print(clifford_1q_names)
+
+# for name, matrix in clifford_1q.items():
+#     z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
+#     x_new = np.argmax(matrix[:, 1])  # +X goes to row where col 1 is 1
+#     # print(name, z_new, x_new)
+#     clifford_1q[name] = (matrix, (z_new, x_new))
 
 
 def gate_sequence(rb_depth, pulse_n_seq=None, debug=False):
@@ -180,9 +222,9 @@ def gate_sequence(rb_depth, pulse_n_seq=None, debug=False):
     """
     if pulse_n_seq == None:
         pulse_n_seq = (len(clifford_1q_names) * np.random.rand(rb_depth)).astype(int)
-    if debug:
-        print("pulse seq", pulse_n_seq)
     pulse_name_seq = [clifford_1q_names[n] for n in pulse_n_seq]
+    if debug:
+        print("pulse seq", pulse_name_seq)
     psi_nz = np.matrix([[1, 0, 0, 0, 0, 0]]).transpose()
     psi_nx = np.matrix([[0, 1, 0, 0, 0, 0]]).transpose()
     for n in pulse_n_seq:  # n is index in clifford_1q_names
@@ -194,12 +236,26 @@ def gate_sequence(rb_depth, pulse_n_seq=None, debug=False):
     psi_nx = psi_nx.flatten()
     if debug:
         print("+Z axis after seq:", psi_nz, "+X axis after seq:", psi_nx)
-    for clifford in clifford_1q_names:  # Get the clifford equivalent to the total seq
-        if clifford_1q[clifford][1] == (np.argmax(psi_nz), np.argmax(psi_nx)):
-            total_clifford = clifford
-            break
+
+    total_clifford = None
+    if np.argmax(psi_nz) == 0:
+        total_clifford = "I"
+    else:
+        for clifford in clifford_1q_names:  # Get the clifford equivalent to the total seq
+            if clifford_1q[clifford][1] == (np.argmax(psi_nz), np.argmax(psi_nx)):
+            # z_new, x_new = clifford_1q[clifford][1]
+            # if z_new == np.argmax(psi_nz):
+                total_clifford = clifford
+                break
+    assert total_clifford is not None, f"Failed to invert gate sequence! {pulse_name_seq} which brings +Z to {psi_nz}"
+
     if debug:
-        print("Total gate matrix:\n", clifford_1q[total_clifford][0])
+        if total_clifford == "I":
+            total_clifford_mat = identity
+        else:
+            total_clifford_mat = clifford_1q[total_clifford][0]
+        print("Total gate matrix:\n", total_clifford_mat)
+
     return pulse_name_seq, total_clifford
 
 
@@ -417,7 +473,7 @@ class SimultaneousRBExperiment(Experiment):
             e_prog = calib_prog_dict["e"]
             Ie, Qe = e_prog.get_shots(verbose=False)
             shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=Ie[self.qubit], Qe=Qe[self.qubit])
-            fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+            fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
             thresholds_q[self.qubit] = threshold[0]
             angles_q[self.qubit] = angle
             ge_avgs_q[self.qubit] = [
@@ -908,7 +964,7 @@ class SimultaneousRBEFExperiment(Experiment):
                 e_prog = calib_prog_dict["e"]
                 Ie, Qe = e_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=Ie[self.qubit], Qe=Qe[self.qubit])
-                fid, threshold, angle = hist(data=shot_data, plot=progress, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_q[self.qubit] = threshold[0]
                 angles_q[self.qubit] = angle
                 ge_avgs_q[self.qubit] = [
@@ -959,7 +1015,6 @@ class SimultaneousRBEFExperiment(Experiment):
                         else:
                             gate_list, total_gate = gate_sequence(depth)
                         gate_list.append(total_gate)  # make sure to do the inverse gate
-
                         # gate_list = ['X', '-X/2,Z', 'Y/2', '-X/2,-Z/2', '-Y/2,Z', '-Z/2', 'X', 'Y']
                         # gate_list = ['X', 'X', 'I']
                         # print('variation', var)
@@ -1054,7 +1109,7 @@ class SimultaneousRBEFExperiment(Experiment):
                 If, Qf = f_prog.get_shots(verbose=False)
                 shot_data = dict(Ig=Ig[self.qubit], Qg=Qg[self.qubit], Ie=If[self.qubit], Qe=Qf[self.qubit])
                 print(f"Qubit ({self.qubit}) f")
-                fid, threshold, angle = hist(data=shot_data, plot=True, verbose=False)
+                fid, threshold, angle = hist(data=shot_data, plot=debug, verbose=False)
                 thresholds_f_q[self.qubit] = threshold[0]
                 gf_avgs_q[self.qubit] = [
                     np.average(Ig[self.qubit]),
@@ -1491,7 +1546,15 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         super().__init__(soccfg, cfg)
 
     def cliffordEgGf(
-        self, qDrive, qNotDrive, pulse_name: str, extra_phase=0, add_virtual_Z=False, inverted=False, play=False
+        self,
+        qDrive,
+        qNotDrive,
+        pulse_name: str,
+        extra_phase=0,
+        add_virtual_Z=False,
+        inverted=False,
+        play=False,
+        sync_after=True,
     ):
         """
         Convert a clifford pulse name (in the Eg-Gf subspace) into the function that performs the pulse.
@@ -1499,7 +1562,7 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         If inverted, play the inverse of this gate (the extra phase is added on top of the inversion)
         """
         pulse_name = pulse_name.upper()
-        assert pulse_name in clifford_1q_names
+        assert pulse_name in clifford_1q_names or pulse_name == "I"
         gates = pulse_name.split(",")
 
         # Normally gates are applied right to left, but if inverted apply them left to right
@@ -1531,11 +1594,12 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
                 add_virtual_Z=add_virtual_Z,
                 play=play,
                 reload=False,
+                sync_after=sync_after,
             )
             # print(self.overall_phase[qubit])
-            self.sync_all(
-                5
-            )  # THIS IS NECESSARY IN RB WHEN THERE ARE MORE THAN O(30) PULSES SINCE THE TPROC CAN'T KEEP UP FOR SHORT PULSES
+            # self.sync_all(
+            #     5
+            # )  # THIS IS NECESSARY IN RB WHEN THERE ARE MORE THAN O(30) PULSES SINCE THE TPROC CAN'T KEEP UP FOR SHORT PULSES
 
     def body(self):
         cfg = AttrDict(self.cfg)
@@ -1548,9 +1612,18 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
                 cool_idle = self.cfg.expt.cool_idle
             self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
 
+        if self.readout_cool:
+            self.measure_readout_cool()
+
         # Get into the Eg-Gf subspace
+        ZZ_qubit = None
+        if self.qDrive == 3:
+            # print("WARNING: not initiating q0 in e for the q3/q1 swap")
+            self.X_pulse(q=0, play=True)  # ZZ qubit for the q3/q1 swap
+            ZZ_qubit = 0
+
         self.X_pulse(
-            self.qNotDrive, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
+            q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
         )  # this is the g->e pulse from CliffordAveragerProgram, always have the "overall phase" of the normal qubit subspace be 0 because it is just a state prep pulse
         self.sync_all()
 
@@ -1569,8 +1642,14 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
                 qNotDrive=self.qNotDrive,
                 pulse_name=self.gate_list[i],
                 play=True,
+                sync_after=False,
             )
-            self.sync_all()
+            # don't need to sync between gates because all are on the same channel
+            # self.sync_all()
+        self.sync_all()
+
+        # print("WARNING: adding a huge sync after clifford eggfs")
+        # self.sync_all(self.us2cycles(0.09 * 100))
 
         # self.Xef_pulse(q=1, play=True)
         # qB = 1
@@ -1586,6 +1665,10 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
             play=True,
         )
         self.sync_all()
+
+        # print("WARNING: adding an extra test pulse")
+        # self.sync_all(self.us2cycles(1))
+        # self.X_pulse(q=1, play=True)
 
         # Measure the population of just the e state when e/f are not distinguishable - check the g population
         setup_measure = None
@@ -1677,20 +1760,31 @@ class SimultaneousRBEgGfExperiment(Experiment):
         self.qDrive = qDrive
         self.qNotDrive = qNotDrive
 
-        data = {"counts_raw": [[]]}
-        if self.cfg.expt.measure_f is not None:
-            for i in range(
-                len(self.cfg.expt.measure_f)
-            ):  # measure g of everybody, second measurement of each measure_f qubit using the g/f readout
-                data["counts_raw"].append([])
+        data = dict()
 
         thresholds_q = ge_avgs_q = angles_q = fids_q = None
         if "post_process" not in self.cfg.expt.keys():  # threshold or scale
             self.cfg.expt.post_process = None
 
+        self.measure_f_only = True
+        if "measure_f_only" in self.cfg.expt:
+            self.measure_f_only = self.cfg.expt.measure_f_only
+
         self.calib_order = ["gg", "ge", "eg", "ee"]
         if self.measure_f:
-            self.calib_order += ["gf", "ef"]  # assumes the 2nd qubit is the measure_f
+            if not self.measure_f_only:
+                self.calib_order += ["gf", "ef"]  # assumes the 2nd qubit is the measure_f
+            else:
+                self.calib_order = ["gg", "gf", "eg", "ef"]
+
+        data["xpts"] = []
+        depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+
+        gate_list_variations = [None] * len(depths)
+
+        data["counts_raw"] = np.zeros(
+            (1 + len(self.cfg.expt.measure_f), self.cfg.expt.loops, len(depths), self.cfg.expt.variations, 4)
+        )
 
         data["thresholds_loops"] = []
         data["angles_loops"] = []
@@ -1702,13 +1796,15 @@ class SimultaneousRBEgGfExperiment(Experiment):
             data["angles_f_loops"] = []
             data["gf_avgs_loops"] = []
             data["counts_calib_f_loops"] = []
-        data["xpts"] = []
-        depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
-        gate_list_variations = [None] * len(depths)
 
         full_mux_expt = False
         if "full_mux_expt" in self.cfg.expt:
             full_mux_expt = self.cfg.expt.full_mux_expt
+
+        if "singleshots_reps_f" not in self.cfg.expt:
+            self.cfg.expt.singleshot_reps_f = self.cfg.expt.singleshot_reps
+        if "reps_f" not in self.cfg.expt:
+            self.cfg.expt.reps_f = self.cfg.expt.reps
 
         if "loops" not in self.cfg.expt:
             self.cfg.expt.loops = 1
@@ -1717,8 +1813,13 @@ class SimultaneousRBEgGfExperiment(Experiment):
         # ================= #
         # Make sure the variations picked can run
         # ================= #
-        print("Validating variations")
-        for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
+        if "validate_variations" in self.cfg.expt and self.cfg.expt.validate_variations:
+            validate_variations = True
+            print("Validating variations")
+        else:
+            validate_variations = False
+            print("Skipping variations validation")
+        for i_depth, depth in enumerate(tqdm(depths, disable=not progress or not validate_variations)):
             gate_list_variations[i_depth] = []
             for var in range(self.cfg.expt.variations):
                 if "gate_char" in self.cfg.expt and self.cfg.expt.gate_char is not None:
@@ -1727,156 +1828,167 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     gate_list, total_gate = gate_sequence(depth)
                 gate_list.append(total_gate)  # make sure to do the inverse gate
 
+                # gate_list = ["I"]
+                # gate_list = ["X/2"] * self.cfg.expt.start
+                # gate_list = ["X", "X", "X", "X", "I"]
                 # gate_list = ["X/2", "X/2", "-X/2", "-X/2", "I"]
-                # print("gate list", gate_list)
+
+                # gate_list = ["X/2", "X/2", "X/2", "X/2", "I"]
+                # gate_list = ["-X/2,-Z/2", "X/2,Z/2", "X,Z/2", "-X/2"]
+                # gate_list = ["X/2", "X", "Z", "X", "-Z", "-X/2", "I"]
+
+                # gate_list.append("I")
+                print("gate_list =", gate_list)
                 gate_list_variations[i_depth].append(gate_list)
 
-                cfg_test = AttrDict(deepcopy(self.cfg))
-                cfg_test.reps = 10
-
-                randbench = RBEgGfProgram(
-                    soccfg=self.soccfg,
-                    cfg=cfg_test,
-                    gate_list=gate_list,
-                    qubits=self.cfg.expt.qubits,
-                    qDrive=self.cfg.expt.qDrive,
-                )
-                popln, popln_err = randbench.acquire_rotated(
-                    soc=self.im[self.cfg.aliases.soc],
-                    progress=False,
-                )
-
-        for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
-            print("Beginning loop", loop)
-            # ================= #
-            # Get single shot calibration for all qubits
-            # ================= #
-
-            if (
-                "angles" in self.cfg.expt
-                and "thresholds" in self.cfg.expt
-                and "ge_avgs" in self.cfg.expt
-                and "counts_calib" in self.cfg.expt
-            ):
-                angles_q = self.cfg.expt.angles
-                thresholds_q = self.cfg.expt.thresholds
-                ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
-                counts_calib = self.cfg.expt.counts_calib
-                print("Re-using provided angles, thresholds, ge_avgs")
-            else:
-                thresholds_q = [0] * 4
-                ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
-                angles_q = [0] * 4
-                fids_q = [0] * 4
-                counts_calib = []
-
-                # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
-                sscfg = AttrDict(deepcopy(self.cfg))
-                sscfg.expt.reps = sscfg.expt.singleshot_reps
-                sscfg.expt.tomo_qubits = self.cfg.expt.qubits
-                qA, qB = sscfg.expt.tomo_qubits
-
-                calib_prog_dict = dict()
-                for prep_state in tqdm(self.calib_order):
-                    # print(prep_state)
-                    sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
-                    err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
-                    err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
-                    calib_prog_dict.update({prep_state: err_tomo})
-
-                g_prog = calib_prog_dict["gg"]
-                Ig, Qg = g_prog.get_shots(verbose=False)
-
-                # Get readout angle + threshold for qubits
-                for qi, q in enumerate(sscfg.expt.tomo_qubits):
-                    calib_e_state = "gg"
-                    calib_e_state = calib_e_state[:qi] + "e" + calib_e_state[qi + 1 :]
-                    e_prog = calib_prog_dict[calib_e_state]
-                    Ie, Qe = e_prog.get_shots(verbose=False)
-                    shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
-                    print(f"Qubit ({q}) ge")
-                    fid, threshold, angle = hist(
-                        data=shot_data, plot=True, verbose=False, amplitude_mode=full_mux_expt
-                    )
-                    thresholds_q[q] = threshold[0]
-                    ge_avgs_q[q] = get_ge_avgs(
-                        Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
-                    )
-                    angles_q[q] = angle
-                    fids_q[q] = fid[0]
-                    print(
-                        f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}"
-                    )
-
-                # Process the shots taken for the confusion matrix with the calibration angles
-                for prep_state in self.calib_order:
-                    counts = calib_prog_dict[prep_state].collect_counts(
-                        angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
-                    )
-                    counts_calib.append(counts)
-
-                print(f"thresholds={thresholds_q},")
-                print(f"angles={angles_q},")
-                print(f"ge_avgs={ge_avgs_q},")
-                print(f"counts_calib={np.array(counts_calib).tolist()}")
-
-                data["thresholds_loops"].append(thresholds_q)
-                data["angles_loops"].append(angles_q)
-                data["ge_avgs_loops"].append(ge_avgs_q)
-                data["counts_calib_loops"].append(np.array(counts_calib))
-
-            # ================= #
-            # Begin RB
-            # ================= #
-
-            if "shot_avg" not in self.cfg.expt:
-                self.cfg.expt.shot_avg = 1
-
-            tomo_analysis = TomoAnalysis(nb_qubits=2)
-            for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
-                # print(f'depth {depth} gate list (last gate is the total gate)')
-                if loop == 0:
-                    data["xpts"].append([])
-                for var in range(self.cfg.expt.variations):
-                    gate_list = gate_list_variations[i_depth][var]
+                if "validate_variations" in self.cfg.expt and self.cfg.expt.validate_variations:
+                    cfg_test = AttrDict(deepcopy(self.cfg))
+                    cfg_test.reps = 10
 
                     randbench = RBEgGfProgram(
                         soccfg=self.soccfg,
-                        cfg=self.cfg,
+                        cfg=cfg_test,
                         gate_list=gate_list,
                         qubits=self.cfg.expt.qubits,
                         qDrive=self.cfg.expt.qDrive,
                     )
-                    # print(randbench)
-                    # # from qick.helpers import progs2json
-                    # # print(progs2json([randbench.dump_prog()]))
-
-                    assert self.cfg.expt.post_process is not None, "need post processing for RB to make sense!"
                     popln, popln_err = randbench.acquire_rotated(
                         soc=self.im[self.cfg.aliases.soc],
                         progress=False,
-                        angle=angles_q,
-                        threshold=thresholds_q,
-                        ge_avgs=ge_avgs_q,
-                        post_process=self.cfg.expt.post_process,
-                        amplitude_mode=full_mux_expt,
                     )
-                    assert self.cfg.expt.post_process == "threshold", "Can only bin EgGf RB properly using threshold"
+        for var in range(self.cfg.expt.variations):
+            data["xpts"].append(depths)
 
-                    adcDrive_ch = self.cfg.hw.soc.adcs.readout.ch[qDrive]
-                    adcNotDrive_ch = self.cfg.hw.soc.adcs.readout.ch[qNotDrive]
+        tomo_analysis = TomoAnalysis(nb_qubits=2)
+        adcDrive_ch = self.cfg.hw.soc.adcs.readout.ch[qDrive]
+        adcNotDrive_ch = self.cfg.hw.soc.adcs.readout.ch[qNotDrive]
 
-                    if self.cfg.expt.post_process == "threshold":
-                        shots, _ = randbench.get_shots(
+        for loop in tqdm(range(self.cfg.expt.loops), disable=not progress or self.cfg.expt.loops == 1):
+            print("Beginning loop", loop)
+
+            if not self.measure_f_only:
+                # ================= #
+                # Get single shot calibration for all qubits
+                # ================= #
+
+                if (
+                    "angles" in self.cfg.expt
+                    and "thresholds" in self.cfg.expt
+                    and "ge_avgs" in self.cfg.expt
+                    and "counts_calib" in self.cfg.expt
+                ):
+                    angles_q = self.cfg.expt.angles
+                    thresholds_q = self.cfg.expt.thresholds
+                    ge_avgs_q = np.asarray(self.cfg.expt.ge_avgs)
+                    counts_calib = self.cfg.expt.counts_calib
+                    print("Re-using provided angles, thresholds, ge_avgs")
+                else:
+                    thresholds_q = [0] * 4
+                    ge_avgs_q = [np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)]
+                    angles_q = [0] * 4
+                    fids_q = [0] * 4
+                    counts_calib = []
+
+                    # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
+                    sscfg = AttrDict(deepcopy(self.cfg))
+                    sscfg.expt.reps = sscfg.expt.singleshot_reps
+                    sscfg.expt.tomo_qubits = self.cfg.expt.qubits
+                    qA, qB = sscfg.expt.tomo_qubits
+
+                    calib_prog_dict = dict()
+                    for prep_state in tqdm(self.calib_order):
+                        # print(prep_state)
+                        sscfg.expt.state_prep_kwargs = dict(prep_state=prep_state, apply_q1_pi2=False)
+                        err_tomo = ErrorMitigationStateTomo2QProgram(soccfg=self.soccfg, cfg=sscfg)
+                        err_tomo.acquire(self.im[sscfg.aliases.soc], load_pulses=True, progress=False)
+                        calib_prog_dict.update({prep_state: err_tomo})
+
+                    g_prog = calib_prog_dict["gg"]
+                    Ig, Qg = g_prog.get_shots(verbose=False)
+
+                    # Get readout angle + threshold for qubits
+                    for qi, q in enumerate(sscfg.expt.tomo_qubits):
+                        calib_e_state = "gg"
+                        calib_e_state = calib_e_state[:qi] + "e" + calib_e_state[qi + 1 :]
+                        e_prog = calib_prog_dict[calib_e_state]
+                        Ie, Qe = e_prog.get_shots(verbose=False)
+                        shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
+                        print(f"Qubit ({q}) ge")
+                        fid, threshold, angle = hist(
+                            data=shot_data, plot=debug, verbose=False, amplitude_mode=full_mux_expt
+                        )
+                        thresholds_q[q] = threshold[0]
+                        ge_avgs_q[q] = get_ge_avgs(
+                            Igs=Ig[q], Qgs=Qg[q], Ies=Ie[q], Qes=Qe[q], amplitude_mode=full_mux_expt
+                        )
+                        angles_q[q] = angle
+                        fids_q[q] = fid[0]
+                        print(
+                            f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[q]} \t threshold ge: {thresholds_q[q]}"
+                        )
+
+                    # Process the shots taken for the confusion matrix with the calibration angles
+                    for prep_state in self.calib_order:
+                        counts = calib_prog_dict[prep_state].collect_counts(
                             angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
                         )
-                        # 00, 01, 10, 11
-                        counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])
-                        data["counts_raw"][0].append(counts)
-                        # print('variation', var, 'gate list', gate_list, 'counts', counts)
+                        counts_calib.append(counts)
 
-                    if loop == 0:
-                        data["xpts"][-1].append(depth)
+                    print(f"thresholds={thresholds_q},")
+                    print(f"angles={angles_q},")
+                    print(f"ge_avgs={ge_avgs_q},")
+                    print(f"counts_calib={np.array(counts_calib).tolist()}")
+
+                    data["thresholds_loops"].append(thresholds_q)
+                    data["angles_loops"].append(angles_q)
+                    data["ge_avgs_loops"].append(ge_avgs_q)
+                    data["counts_calib_loops"].append(np.array(counts_calib))
+
+                # ================= #
+                # Begin RB
+                # ================= #
+
+                if "shot_avg" not in self.cfg.expt:
+                    self.cfg.expt.shot_avg = 1
+
+                for i_depth, depth in enumerate(tqdm(depths, disable=not progress)):
+                    # print(f'depth {depth} gate list (last gate is the total gate)')
+                    for var in range(self.cfg.expt.variations):
+                        gate_list = gate_list_variations[i_depth][var]
+
+                        randbench = RBEgGfProgram(
+                            soccfg=self.soccfg,
+                            cfg=self.cfg,
+                            gate_list=gate_list,
+                            qubits=self.cfg.expt.qubits,
+                            qDrive=self.cfg.expt.qDrive,
+                        )
+                        # print(randbench)
+                        # # from qick.helpers import progs2json
+                        # # print(progs2json([randbench.dump_prog()]))
+
+                        assert self.cfg.expt.post_process is not None, "need post processing for RB to make sense!"
+                        popln, popln_err = randbench.acquire_rotated(
+                            soc=self.im[self.cfg.aliases.soc],
+                            progress=False,
+                            angle=angles_q,
+                            threshold=thresholds_q,
+                            ge_avgs=ge_avgs_q,
+                            post_process=self.cfg.expt.post_process,
+                            amplitude_mode=full_mux_expt,
+                        )
+                        assert (
+                            self.cfg.expt.post_process == "threshold"
+                        ), "Can only bin EgGf RB properly using threshold"
+
+                        if self.cfg.expt.post_process == "threshold":
+                            shots, _ = randbench.get_shots(
+                                angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
+                            )
+                            # 00, 01, 10, 11
+                            counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])
+                            data["counts_raw"][0, loop, i_depth, var, :] = counts
+                            # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
             # ================= #
             # Measure the same thing with g/f distinguishing
@@ -1884,9 +1996,10 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
             if self.measure_f:
                 flip_threshold_all_q = [False] * 4
-                flip_threshold_all_q[
-                    q_measure_f
-                ] = full_mux_expt  # if using amplitude mode and measuring at the f resonator frequency, f will have a lower amplitude than g/e
+                # We are using regular mux4 for f readout!
+                # flip_threshold_all_q[
+                #     q_measure_f
+                # ] = full_mux_expt  # if using amplitude mode and measuring at the f resonator frequency, f will have a lower amplitude than g/e
                 counts_calib_f = []
 
                 # ================= #
@@ -1900,13 +2013,21 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                 # We really just need the single shot plots here, but convenient to use the ErrorMitigation tomo to do it
                 sscfg = AttrDict(deepcopy(self.cfg))
-                sscfg.expt.reps = sscfg.expt.singleshot_reps
+                sscfg.expt.reps = sscfg.expt.singleshot_reps_f
                 sscfg.expt.tomo_qubits = (
                     self.cfg.expt.qubits
                 )  # the order of this was set earlier in code so 2nd qubit is the measure f qubit
+
+                sscfg.expt.full_mux_expt = False
+                sscfg.expt.resonator_reset = None
                 sscfg.device.readout.frequency[q_measure_f] = sscfg.device.readout.frequency_ef[q_measure_f]
                 sscfg.device.readout.gain = sscfg.device.readout.gain_ef
-                sscfg.device.readout.readout_length[q_measure_f] = sscfg.device.readout.readout_length_ef[q_measure_f]
+                # for q in range(4):
+                #     if q not in self.cfg.expt.qubits:
+                #         sscfg.device.readout.gain[q] = 1e-4
+                sscfg.device.readout.readout_length = sscfg.device.readout.readout_length_ef
+                local_amplitude_mode = sscfg.expt.full_mux_expt
+                # local_amplitude_mode = True
 
                 calib_prog_dict = dict()
                 for prep_state in tqdm(self.calib_order):
@@ -1930,11 +2051,11 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=If[q], Qe=Qf[q])
                     print(f'Qubit ({q}){f" gf" if q == q_measure_f else " ge"}')
                     fid, threshold, angle = hist(
-                        data=shot_data, plot=True, verbose=False, amplitude_mode=full_mux_expt
+                        data=shot_data, plot=debug, verbose=False, amplitude_mode=local_amplitude_mode
                     )
                     thresholds_f_q[q] = threshold[0]
                     gf_avgs_q[q] = get_ge_avgs(
-                        Igs=Ig[q], Qgs=Qg[q], Ies=If[q], Qes=Qf[q], amplitude_mode=full_mux_expt
+                        Igs=Ig[q], Qgs=Qg[q], Ies=If[q], Qes=Qf[q], amplitude_mode=local_amplitude_mode
                     )
                     angles_f_q[q] = angle
                     fids_f_q[q] = fid[0]
@@ -1945,7 +2066,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     counts = calib_prog_dict[prep_state].collect_counts(
                         angle=angles_f_q,
                         threshold=thresholds_f_q,
-                        amplitude_mode=full_mux_expt,
+                        amplitude_mode=local_amplitude_mode,
                         flip_threshold_all_q=flip_threshold_all_q,
                     )
                     counts_calib_f.append(counts)
@@ -1970,11 +2091,18 @@ class SimultaneousRBEgGfExperiment(Experiment):
                         gate_list = gate_list_variations[i_depth][var]
 
                         rbcfg = deepcopy(self.cfg)
+                        rbcfg.expt.full_mux_expt = False
+                        rbcfg.expt.resonator_reset = None
                         rbcfg.device.readout.frequency[q_measure_f] = rbcfg.device.readout.frequency_ef[q_measure_f]
                         rbcfg.device.readout.gain = rbcfg.device.readout.gain_ef
-                        rbcfg.device.readout.readout_length[q_measure_f] = rbcfg.device.readout.readout_length_ef[
-                            q_measure_f
-                        ]
+                        # for q in range(4):
+                        #     if q not in self.cfg.expt.qubits:
+                        #         rbcfg.device.readout.gain[q] = 1e-4
+                        rbcfg.device.readout.readout_length = rbcfg.device.readout.readout_length_ef
+                        local_amplitude_mode = rbcfg.expt.full_mux_expt
+                        # local_amplitude_mode = True
+
+                        rbcfg.expt.reps = rbcfg.expt.reps_f
 
                         randbench = RBEgGfProgram(
                             soccfg=self.soccfg,
@@ -1995,7 +2123,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             threshold=thresholds_f_q,
                             ge_avgs=gf_avgs_q,
                             post_process=self.cfg.expt.post_process,
-                            amplitude_mode=full_mux_expt,
+                            amplitude_mode=local_amplitude_mode,
                             flip_threshold_all_q=flip_threshold_all_q,
                         )
                         assert (
@@ -2006,19 +2134,15 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             shots, _ = randbench.get_shots(
                                 angle=angles_f_q,
                                 threshold=thresholds_f_q,
-                                amplitude_mode=full_mux_expt,
+                                amplitude_mode=local_amplitude_mode,
                                 flip_threshold_all_q=flip_threshold_all_q,
                             )
                             # 00, 02, 10, 12
                             counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])
-                            data["counts_raw"][1].append(counts)
+                            data["counts_raw"][1, loop, i_depth, var, :] = counts
                             # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
-        # print('shape', np.shape(data['counts_raw']))
-        for icounts in range(len(data["counts_raw"])):
-            data["counts_raw"][icounts] = np.reshape(
-                data["counts_raw"][icounts], (self.cfg.expt.loops, len(depths), self.cfg.expt.variations, 4)
-            )
+        data["xpts"] = np.reshape(data["xpts"], (self.cfg.expt.variations, self.cfg.expt.expts))
 
         for k, a in data.items():
             # print(k)
@@ -2044,33 +2168,53 @@ class SimultaneousRBEgGfExperiment(Experiment):
             self.cfg.expt.qubits = [q_other, q_measure_f]
         qA, qB = self.cfg.expt.qubits
 
-        data["xpts"] = np.asarray(data["xpts"])
-        unique_depths = np.average(data["xpts"], axis=1)
+        unique_depths = np.average(data["xpts"], axis=0)
+        print(unique_depths)
 
         assert self.measure_f
+        self.measure_f_only = True
+        if "measure_f_only" in self.cfg.expt:
+            self.measure_f_only = self.cfg.expt.measure_f_only
 
-        data["counts_calib_total"] = np.concatenate((data["counts_calib_loops"], data["counts_calib_f_loops"]), axis=2)
-        data["counts_raw_total"] = np.concatenate((data["counts_raw"][0], data["counts_raw"][1]), axis=3)
-        # print('counts calib total shape', np.shape(data['counts_calib_total']))
-        # print(data['counts_calib_total'])
-        # print('counts raw shape', np.shape(data['counts_raw_total']))
+        if not self.measure_f_only and self.measure_f:
+            data["counts_calib_total"] = np.concatenate(
+                (data["counts_calib_loops"], data["counts_calib_f_loops"]), axis=2
+            )
+            data["counts_raw_total"] = np.concatenate(
+                (data["counts_raw"][0] / self.cfg.expt.reps, data["counts_raw"][1] / self.cfg.expt.reps_f), axis=3
+            )
+
+            # gg, ge, eg, ee, gf, ef
+            data["poplns_2q_loops"] = np.zeros(
+                shape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations, 6)
+            )
+
+        elif self.measure_f_only:
+            # gg, gf, eg, ef
+            data["poplns_2q_loops"] = np.zeros(
+                shape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations, 4)
+            )
+            data["counts_calib_total"] = data["counts_calib_f_loops"]
+            data["counts_raw_total"] = data["counts_raw"][1] / self.cfg.expt.reps_f
+
+        print("counts calib total shape", np.shape(data["counts_calib_total"]))
+        print(data["counts_calib_total"])
+        print("counts raw shape", np.shape(data["counts_raw_total"]))
         # print(data['counts_raw'])
-        # print('counts raw total', np.shape(data['counts_raw_total']))
-
-        # gg, ge, eg, ee, gf, ef
-        data["poplns_2q_loops"] = np.zeros(
-            shape=(self.cfg.expt.loops, len(unique_depths), self.cfg.expt.variations, 6)
-        )
 
         for loop in range(self.cfg.expt.loops):
             for idepth, depth in enumerate(tqdm(unique_depths)):
                 for ivar in range(self.cfg.expt.variations):
                     # after correcting readout error, counts corrected should correspond to counts in [gg, ge, eg, ee, gf, ef] (the calib_order)
                     # instead of [ggA, geA, egA, eeA, ggB, gfB, egB, efB] (the raw counts)
+                    # or if measure_f_only, [gg, gf, eg, ef] (the calib_order, which = raw counts order)
                     tomo_analysis = TomoAnalysis(nb_qubits=2)
                     counts_corrected = tomo_analysis.correct_readout_err(
                         [data["counts_raw_total"][loop, idepth, ivar]], data["counts_calib_total"][loop]
                     )
+                    # print("counts raw", data["counts_raw_total"][loop, idepth, ivar])
+                    # print("counts_corrected", counts_corrected)
+                    # print(data["counts_calib_total"][loop])
                     # counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
                     data["poplns_2q_loops"][loop, idepth, ivar, :] = counts_corrected / np.sum(counts_corrected)
 
@@ -2079,10 +2223,14 @@ class SimultaneousRBEgGfExperiment(Experiment):
         print("poplns_2q_loops shape", np.shape(data["poplns_2q_loops"]))
         print("poplns_2q shape", np.shape(data["poplns_2q"]))
 
-        # [gg, ge, eg, ee, gf, ef]
-
-        probs_eg = data["poplns_2q"][:, :, 2]
-        probs_gf = data["poplns_2q"][:, :, 4]
+        if not self.measure_f_only and self.measure_f:
+            # [gg, ge, eg, ee, gf, ef]
+            probs_eg = data["poplns_2q"][:, :, 2]
+            probs_gf = data["poplns_2q"][:, :, 4]
+        elif self.measure_f_only:
+            # gg, gf, eg, ef
+            probs_eg = data["poplns_2q"][:, :, 2]
+            probs_gf = data["poplns_2q"][:, :, 1]
 
         data["popln_eg_std"] = np.std(probs_eg, axis=1)
         data["popln_eg_avg"] = np.average(probs_eg, axis=1)
@@ -2139,10 +2287,18 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
         depths = data["xpts"]
-        unique_depths = np.average(depths, axis=1)
+        unique_depths = np.average(depths, axis=0)
         flat_depths = np.concatenate(depths)
-        # [gg, ge, eg, ee, gf, ef]
-        flat_probs_eg = np.concatenate(data["poplns_2q"][:, :, 2])
+        print(flat_depths)
+        if not self.measure_f_only and self.measure_f:
+            # [gg, ge, eg, ee, gf, ef]
+            flat_probs_eg = np.concatenate(data["poplns_2q"][:, :, 2])
+        elif self.measure_f_only:
+            # gg, gf, eg, ef
+            flat_probs_eg = np.concatenate(data["poplns_2q"][:, :, 2])
+
+        print("flat_probs_eg", flat_probs_eg)
+        print("all poplns_2q\n", np.round(data["poplns_2q"], 3))
         flat_probs_subspace = np.concatenate(data["popln_subspace"])
         if show_all_vars:
             plt.plot(flat_depths, flat_probs_eg, "x", color="tab:grey")

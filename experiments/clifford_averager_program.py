@@ -1480,7 +1480,9 @@ class CliffordAveragerProgram(AveragerProgram):
                         play=False,
                         set_reg=True,
                     )
-                    adc_readout_freqs[q] = self.cfg.device.readout.frequency[q] + self.cfg.hw.soc.dacs.readout.mixer_freq[q]
+                    adc_readout_freqs[q] = (
+                        self.cfg.device.readout.frequency[q] + self.cfg.hw.soc.dacs.readout.mixer_freq[q]
+                    )
                     self.measure_chs.append(self.res_chs[q])
                     self.meas_ch_types.append(self.res_ch_types[q])
                     self.meas_ch_qs.append(q)
@@ -1888,7 +1890,9 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
         self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
-        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
+        self.res_chs = np.copy(
+            self.cfg.hw.soc.dacs.readout.ch
+        )  # otherwise if you change back and forth between mux and full mux you might change the original cfg file in very hard to debug ways...
         self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
         self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
         self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
@@ -2651,6 +2655,7 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
         add_virtual_Z=False,
         play=False,
         reload=None,
+        sync_after=False,
     ):
         phase_adjust = 180
         if pihalf:
