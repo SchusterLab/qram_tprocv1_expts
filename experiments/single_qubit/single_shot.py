@@ -441,19 +441,28 @@ def hist(
 ):
     Ig = data["Ig"]
     Qg = data["Qg"]
-    Ie = data["Ie"]
-    Qe = data["Qe"]
-    iqshots = [(Ig, Qg), (Ie, Qe)]
-    state_labels = ["g", "e"]
-    g_states = [0]
-    e_states = [1]
+    if "Ie" in data.keys():
+        Ie = data["Ie"]
+        Qe = data["Qe"]
+        iqshots = [(Ig, Qg), (Ie, Qe)]
+        state_labels = ["g", "e"]
+        g_states = [0]
+        e_states = [1]
 
-    if "If" in data.keys():
-        If = data["If"]
-        Qf = data["Qf"]
-        iqshots.append((If, Qf))
-        state_labels.append("f")
-        e_states = [2]
+        if "If" in data.keys():
+            If = data["If"]
+            Qf = data["Qf"]
+            iqshots.append((If, Qf))
+            state_labels.append("f")
+            e_states = [2]
+    else:
+        if "If" in data.keys():
+            If = data["If"]
+            Qf = data["Qf"]
+            iqshots = [(Ig, Qg), (If, Qf)]
+            state_labels = ["g", "f"]
+            g_states = [0]
+            e_states = [1]
 
     return general_hist(
         iqshots=iqshots,
@@ -795,6 +804,10 @@ class SingleShotOptExperiment(Experiment):
 
         qTest = self.cfg.expt.qTest
 
+        full_mux_expt = False
+        if "full_mux_expt" in self.cfg.expt:
+            full_mux_expt = self.cfg.expt.full_mux_expt
+
         for f_ind, f in enumerate(tqdm(fpts, disable=not progress)):
             for g_ind, gain in enumerate(gainpts):
                 for l_ind, l in enumerate(lenpts):
@@ -815,18 +828,16 @@ class SingleShotOptExperiment(Experiment):
                         check_f=check_f,
                         qTest=self.cfg.expt.qTest,
                     )
+
                     # print(shot.cfg)
                     shot.go(analyze=False, display=False, progress=False, save=False)
-                    results = shot.analyze(verbose=False)
-                    fid[f_ind, g_ind, l_ind] = results["fids"][0] if not check_f else results["fids"][1]
-                    threshold[f_ind, g_ind, l_ind] = (
-                        results["thresholds"][0] if not check_f else results["thresholds"][1]
-                    )
+                    results = shot.analyze(verbose=False, amplitude_mode=full_mux_expt)
+                    # For check_f, all the values are put in the first index as if it were the e state
+                    fid[f_ind, g_ind, l_ind] = results["fids"][0]
+                    threshold[f_ind, g_ind, l_ind] = results["thresholds"][0]
                     angle[f_ind, g_ind, l_ind] = results["angle"]
                     print(f"freq: {f}, gain: {gain}, len: {l}")
-                    print(f'\tfid ge [%]: {100*results["fids"][0]}')
-                    if check_f:
-                        print(f'\tfid gf [%]: {100*results["fids"][1]}')
+                    print(f'\tfid [%]: {100*results["fids"][0]}')
 
         self.data = dict(
             fpts=fpts,
@@ -868,6 +879,7 @@ class SingleShotOptExperiment(Experiment):
         fpts = data["fpts"]  # outer sweep, index 0
         gainpts = data["gainpts"]  # middle sweep, index 1
         lenpts = data["lenpts"]  # inner sweep, index 2
+        plt.figure()
 
         # lenpts = [data['lenpts'][0]]
         for g_ind, gain in enumerate(gainpts):

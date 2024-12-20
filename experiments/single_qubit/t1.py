@@ -177,8 +177,17 @@ class T1Experiment(Experiment):
 
         qTest = self.cfg.expt.qTest
 
+        checkEF = False
+        if "checkEF" in self.cfg.expt:
+            checkEF = self.cfg.expt.checkEF
+
         plt.figure(figsize=(10, 5))
-        plt.subplot(111, title="$T_1$", xlabel="Wait Time [us]", ylabel="Amplitude [ADC level]")
+        plt.subplot(
+            111,
+            title="$T_1$" + (" EF" if checkEF else "") + f" on Q{qTest}",
+            xlabel="Wait Time [us]",
+            ylabel="Amplitude [ADC level]",
+        )
         plt.plot(data["xpts"], data["amps"], ".-")
         if fit:
             p = data["fit_amps"]

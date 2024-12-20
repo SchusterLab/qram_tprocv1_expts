@@ -24,8 +24,8 @@ import sys
 
 import qutip as qt
 import qutip.visualization as qplt
-from qutip_qip.operations import rz
 import scipy as sp
+from qutip_qip.operations import rz
 from slab import AttrDict, get_next_filename
 from slab.datamanagement import SlabFile
 from slab.experiment import Experiment
@@ -219,7 +219,7 @@ class TomoAnalysis:
         angles=None,
         all_qshots_raw_q_preps=None,
         verbose=False,
-        amplitude_mode=False, 
+        amplitude_mode=False,
     ):
         assert len(all_ishots_raw_q_preps.shape) == 4
         assert all_ishots_raw_q_preps.shape[1] == self.nb_qubits_tot
@@ -229,7 +229,7 @@ class TomoAnalysis:
             assert all_qshots_raw_q_preps.shape == all_ishots_raw_q_preps.shape
         if nprep is None:
             nprep = all_ishots_raw_q_preps.shape[0]
-            
+
         counts_all = np.zeros((nprep, 2**self.nb_qubits))
         for iprep in range(nprep):
             ps_thresholds = thresholds
@@ -237,8 +237,11 @@ class TomoAnalysis:
                 print("ps thresholds", ps_thresholds)
             if ps_adjust is not None:
                 ps_thresholds = ps_threshold_adjust(
-                    ps_thresholds_init=thresholds, adjust=ps_adjust, ge_avgs=ge_avgs, angles=angles, 
-                    amplitude_mode=amplitude_mode
+                    ps_thresholds_init=thresholds,
+                    adjust=ps_adjust,
+                    ge_avgs=ge_avgs,
+                    angles=angles,
+                    amplitude_mode=amplitude_mode,
                 )
                 if verbose:
                     print("new ps thresholds", ps_thresholds)
@@ -294,7 +297,7 @@ class TomoAnalysis:
             assert "qshots_raw" in data
             assert "calib_ishots_raw" in data
             assert "calib_qshots_raw" in data
-            
+
             amplitude_mode = False
             if "full_mux_expt" in cfg.expt:
                 amplitude_mode = cfg.expt.full_mux_expt
@@ -349,8 +352,6 @@ class TomoAnalysis:
             assert "counts_calib" in data
             n_tomo_raw = np.array(data["counts_tomo"])
             n_calib = np.array(data["counts_calib"])
-            
-        
 
         return n_tomo_raw, n_calib
 
@@ -808,7 +809,7 @@ class TomoAnalysis:
                     # print('flag', pulse_cfg['flag'])
                     if pulse_cfg["flag"] != "ZZcorrection":
                         continue
-                    # print(pulse_name)
+                    print(pulse_name)
                     pulse_qubit = int(pulse_cfg["name"][-1])  # get the qubit number
                     assert pulse_qubit in tomo_qubits
                     # convert drive qubit out of 4 to drive qubit in an nQ Hamiltonian, proceed if this is the drive qubit we want
@@ -857,7 +858,7 @@ class TomoAnalysis:
 
                         if debug:
                             print(
-                                "add pi pulse on qubit",
+                                "add pi/2 pulse on qubit",
                                 tomo_qubits[drive_qubit],
                                 "with freq",
                                 freq,
@@ -886,8 +887,16 @@ class TomoAnalysis:
                         times_ns = np.array(pulse_cfg["times_us"]) * 1e3
 
                         if debug:
+                            print(
+                                "add (robust) pi/2 pulse on qubit",
+                                tomo_qubits[drive_qubit],
+                                "with freq",
+                                freq,
+                            )
+
+                        if debug:
                             plt.figure()
-                            plt.title(f"Q{drive_qubit}")
+                            plt.title(f"Q{tomo_qubits[drive_qubit]}")
                             plt.plot(times_ns, I_ghz_vs_ns, label="I")
                             plt.plot(times_ns, Q_ghz_vs_ns, label="Q")
                             plt.ylabel("Drive Amplitude (GHz)")
@@ -963,7 +972,7 @@ class TomoAnalysis:
                     states_inds.append(self.state_name_to_state_ind(psi_name, cutoffs))
                 if debug:
                     print("truncating to states inds", states_inds)
-                
+
                 _evol_ket = evol_ket.full()
                 _evol_ket = _evol_ket[states_inds, :]
                 idnq = qt.tensor(*[qt.basis(2, 0)] * self.nb_qubits)
@@ -1367,7 +1376,7 @@ class TomoAnalysis:
         #     plt.style.use("dark_background")
 
         labels = self.calib_order_numeric
-        
+
         if size is None:
             if rho_id is None:
                 size = (9.5, 5)
@@ -1516,11 +1525,10 @@ class TomoAnalysis:
             gates.append(rz(np.pi / 180 * phi))
         return qt.tensor(*gates)
 
-    """
-    The experimental density matrix from MLE may be offset from the simulated/ideal density matrix by a Z gate - due to different pulse times, ac stark shifts, etc.
-    """
-
-    def opt_virtualZ_MLE(self, rho_MLE, rho_id, phis=None, progress=True):  # phis in deg
+    def opt_virtualZ_MLE(self, rho_MLE, rho_id, phis=None, progress=True, verbose=True):  # phis in deg
+        """
+        The experimental density matrix from MLE may be offset from the simulated/ideal density matrix by a Z gate - due to different pulse times, ac stark shifts, etc.
+        """
         phis_vec = []
         if phis is None:
             for i in range(self.nb_qubits):
@@ -1551,7 +1559,8 @@ class TomoAnalysis:
                 best_fid = fid
                 best_phis = phi
                 best_rho_MLE = rho_MLE_rot
-        print(f"Improved fidelity by (%) {(best_fid - qt.fidelity(rho_MLE, rho_id)**2)*100}")
+        if verbose:
+            print(f"Improved fidelity by (%) {(best_fid - qt.fidelity(rho_MLE, rho_id)**2)*100}")
         return best_rho_MLE, best_phis, best_fid, fids_grid
 
     # =========================== The Function =========================== #

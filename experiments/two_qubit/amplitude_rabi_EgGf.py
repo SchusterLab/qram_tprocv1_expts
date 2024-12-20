@@ -323,8 +323,12 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
                 )
             self.mathi(self.ch_page(self.swap_chs[qSort]), self.r_gain_swap, self.r_gain_swap_update, "+", 0)
             # print('driving', self.swap_chs[qSort])
-            if pulse_type != "flat_top" or length > 0:
-                self.pulse(ch=self.swap_chs[qSort])
+            n_pulse = 1
+            if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
+                n_pulse = 2
+            for i in range(n_pulse):
+                if pulse_type != "flat_top" or length > 0:
+                    self.pulse(ch=self.swap_chs[qSort])
         self.sync_all(5)
 
         # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
@@ -854,7 +858,20 @@ class EgGfFreqGainChevronExperiment(Experiment):
         # Output data: fit{data_name}: (len(measure_qubits), len(x_sweep), len(fitparams))
         return data
 
-    def display(self, data=None, fit=True, plot_freq=None, plot_gain=None, saveplot=False, **kwargs):
+    def display(
+        self,
+        data=None,
+        fit=True,
+        plot_freq=None,
+        plot_gain=None,
+        saveplot=False,
+        range_start=0,
+        range_end=-1,
+        **kwargs,
+    ):
+        """
+        range_start, range_end are gain indices to fit the chevron
+        """
         if data is None:
             data = self.data
 
@@ -976,9 +993,14 @@ class EgGfFreqGainChevronExperiment(Experiment):
         fit_qind = 0 if self.cfg.expt.qubits[0] == self.cfg.expt.qDrive else 1
         fit_freqs = np.array([f[2] if f is not None else np.nan for f in data["fitamps"][fit_qind]])
 
-        fitparams = [x_sweep[0], fit_freqs[0], fit_freqs[-1] - fit_freqs[0]]
-        fit_xsweep_set = x_sweep[5:15]
-        fit_freqs_set = fit_freqs[5:15]
+        fit_xsweep_set = x_sweep[range_start:range_end]
+        fit_freqs_set = fit_freqs[range_start:range_end]
+        fitparams = [
+            None,
+            None,
+            (fit_freqs_set[-1] - fit_freqs_set[0]) / (fit_xsweep_set[-1] - fit_xsweep_set[0]) ** 2,
+        ]
+        fitparams = None
         p, pCov = fitter.fitquadratic(fit_xsweep_set, fit_freqs_set, fitparams=fitparams)
         fit_freqs_fit = fitter.quadraticfunc(x_sweep, *p)
         print("fit_gain_sweep =", x_sweep.tolist())

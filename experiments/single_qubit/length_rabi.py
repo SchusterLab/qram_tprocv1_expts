@@ -827,7 +827,13 @@ class NPulseExperiment(Experiment):
             print(f"From avgi: adjust amplitude to {current_gain} / {amp_ratio} = {current_gain/amp_ratio}")
         plt.ylim(-0.1, 1.1)
 
-        label = "($X_{\pi/2}, X_{" + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2") + "}^{2n}$)"
+        label = (
+            "($X_{\pi/2}, X_{"
+            + ("\pi" if not self.cfg.expt.test_pi_half else "\pi/2")
+            + "}^{"
+            + (str(2) if self.cfg.expt.test_pi_half else "")
+            + "n}$)"
+        )
         plt.subplot(212, xlabel=f"Number repeated gates {label} [n]", ylabel="Q (scaled)")
         plot_data = data["avgq"]
         if scale is not None:

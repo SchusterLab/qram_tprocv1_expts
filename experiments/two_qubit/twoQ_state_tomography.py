@@ -190,13 +190,6 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
         assert basis in "IXYZ"
         assert len(basis) == 1
         if basis == "X":
-        #     print('Warning q1 is using gauss')
-        #     if qubit ==1:
-        #         special = 'gauss'
-        #     else:
-                # special = 'robust'
-                
-                
             self.Y_pulse(
                 qubit,
                 pihalf=True,
@@ -275,8 +268,12 @@ class AbstractStateTomo2QProgram(QutritAveragerProgram):
             syncdelay=syncdelay,
         )
 
-    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False, flip_threshold=False):
-        shots, _ = self.get_shots(angle=angle, threshold=threshold, amplitude_mode=amplitude_mode, flip_threshold=flip_threshold)
+    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False, flip_threshold_all_q=None):
+        if flip_threshold_all_q is None:
+            flip_threshold_all_q = [False] * len(self.ro_chs)
+        shots, _ = self.get_shots(
+            angle=angle, threshold=threshold, amplitude_mode=amplitude_mode, flip_threshold_all_q=flip_threshold_all_q
+        )
         # collect shots for all adcs, then sorts into e, g based on >/< threshold and angle rotation
 
         qubits = self.cfg.expt.tomo_qubits
@@ -695,7 +692,10 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
         self.sync_all()  # DO NOT HAVE A WAIT TIME HERE
 
         # Go to the basis for the tomography measurement
-        self.setup_measure(basis=self.basis[0], play=True)
+        ZZ_qubit = None
+        if "ZZ_qubit" in self.cfg.expt and self.cfg.expt.ZZ_qubit is not None:
+            ZZ_qubit = self.cfg.expt.ZZ_qubit
+        self.setup_measure(basis=self.basis[0], ZZ_qubit=ZZ_qubit, play=True)
         self.sync_all()
 
         # Simultaneous measurement
@@ -708,8 +708,12 @@ class AbstractStateTomo1QProgram(AbstractStateTomo2QProgram):
             syncdelay=syncdelay,
         )
 
-    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False, flip_threshold=False):
-        ishots, _ = self.get_shots(angle=angle, threshold=threshold, amplitude_mode=amplitude_mode, flip_threshold=flip_threshold)
+    def collect_counts(self, angle=None, threshold=None, amplitude_mode=False, flip_threshold_all_q=None):
+        if flip_threshold_all_q is None:
+            flip_threshold_all_q = [False] * len(self.ro_chs)
+        ishots, _ = self.get_shots(
+            angle=angle, threshold=threshold, amplitude_mode=amplitude_mode, flip_threshold_all_q=flip_threshold_all_q
+        )
         # get the shots for the qubits we care about
         shots = ishots[self.adc_chs[self.qubit]]
 

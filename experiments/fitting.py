@@ -426,7 +426,7 @@ def fitquadratic(xdata, ydata, fitparams=None):
     if fitparams[1] is None:
         fitparams[1] = np.mean(ydata)
     if fitparams[2] is None:
-        fitparams[2] = np.max(ydata) - np.min(ydata)
+        fitparams[2] = (np.max(ydata) - np.min(ydata)) / (np.max(xdata) - np.min(xdata)) ** 2
     # bounds = (
     #     [0.5*fitparams[0], 0.2/(max(xdata)-min(xdata)), -360, np.min(ydata)],
     #     [2*fitparams[0], 5/(max(xdata)-min(xdata)), 360, np.max(ydata)]

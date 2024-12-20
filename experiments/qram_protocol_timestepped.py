@@ -12,7 +12,7 @@ from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
 from experiments.clifford_averager_program import (
-    CliffordAveragerProgram,
+    CliffordEgGfAveragerProgram,
     post_select_shots,
     ps_threshold_adjust,
 )
@@ -43,7 +43,7 @@ linestyle_cycle = ["solid", "dashed", "dotted", "dashdot"]
 marker_cycle = ["o", "*", "s", "^"]
 
 
-class QramProtocolProgram(AbstractStateTomo2QProgram):
+class QramProtocolProgram(AbstractStateTomo2QProgram, CliffordEgGfAveragerProgram):
     def initialize(self):
         super().initialize()
         cfg = AttrDict(self.cfg)
@@ -51,80 +51,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
         self.cfg.expt.state_prep_kwargs = None
         self.all_qubits = self.cfg.all_qubits
 
-        self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
-        self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-        self.f_EgGf_regs = [self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf, self.swap_chs)]
-
-        self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
-        self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
-        self.f_EgGf_Q_regs = [
-            self.freq2reg(f, gen_ch=ch) for f, ch in zip(self.cfg.device.qubit.f_EgGf_Q, self.swap_chs)
-        ]
-
-        # declare swap dac indexed by qSort
-        for qSort in self.all_qubits:
-            if qSort == 1:
-                continue
-            mixer_freq = None
-            if self.swap_ch_types[qSort] == "int4":
-                mixer_freq = self.cfg.hw.soc.dacs.swap.mixer_freq[qSort]
-            if self.swap_chs[qSort] not in self.gen_chs:
-                self.declare_gen(
-                    ch=self.swap_chs[qSort], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qSort], mixer_freq=mixer_freq
-                )
-
-            mixer_freq = None
-            if self.swap_Q_ch_types[qSort] == "int4":
-                mixer_freq = self.cfg.hw.soc.dacs.swap_Q.mixer_freq[qSort]
-            if self.swap_Q_chs[qSort] not in self.gen_chs:
-                self.declare_gen(
-                    ch=self.swap_Q_chs[qSort], nqz=self.cfg.hw.soc.dacs.swap_Q.nyquist[qSort], mixer_freq=mixer_freq
-                )
-
-        # get aliases for the sigmas we need in clock cycles
-        self.pi_EgGf_types = self.cfg.device.qubit.pulses.pi_EgGf.type
-        assert all(type == "flat_top" for type in self.pi_EgGf_types)
-        self.pi_EgGf_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf.sigma
-
-        self.pi_EgGf_Q_types = self.cfg.device.qubit.pulses.pi_EgGf_Q.type
-        assert all(type == "flat_top" for type in self.pi_EgGf_Q_types)
-        self.pi_EgGf_Q_sigmas_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma
-
         # update timestep in outer loop over averager program
         self.timestep_us = np.inf
         if "timestep" in cfg.expt:
             self.timestep_us = cfg.expt.timestep
-
-        # add 2Q pulses to respective channels
-        for q in self.all_qubits:
-            if q != 1:
-                if self.pi_EgGf_types[q] == "gauss":
-                    pi_EgGf_sigma_cycles = self.us2cycles(self.pi_EgGf_sigmas_us[q], gen_ch=self.swap_chs[1])
-                    self.add_gauss(
-                        ch=self.swap_chs[q],
-                        name=f"pi_EgGf_swap{q}",
-                        sigma=pi_EgGf_sigma_cycles,
-                        length=pi_EgGf_sigma_cycles * 4,
-                    )
-                elif self.pi_EgGf_types[q] == "flat_top":
-                    sigma_ramp_cycles = 3
-                    self.add_gauss(
-                        ch=self.swap_chs[q],
-                        name=f"pi_EgGf_swap{q}_ramp",
-                        sigma=sigma_ramp_cycles,
-                        length=sigma_ramp_cycles * 4,
-                    )
-
-                if self.pi_EgGf_Q_types[q] == "flat_top":
-                    sigma_ramp_cycles = 3
-                    self.add_gauss(
-                        ch=self.swap_Q_chs[q],
-                        name=f"pi_EgGf_Q_swap{q}_ramp",
-                        sigma=sigma_ramp_cycles,
-                        length=sigma_ramp_cycles * 4,
-                    )
-
-        # self.X_pulse(q=1, adiabatic=True, reload=True, play=False) # initialize adiabatic pulse waveform
 
         init_state = self.cfg.expt.init_state
         if init_state in ["|0+1>|0+1>", "|0+1>|1>", "|1>|0+1>"] and self.cfg.expt.use_IQ_pulse:
@@ -173,6 +103,20 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                     reload=True,
                     play=False,
                     plot_IQ=self.cfg.expt.plot_IQ,
+                )
+
+        # initialize swaps
+        self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
+        self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
+        for q in self.qubits:
+            if q == 1:
+                continue
+            mixer_freq = 0
+            if self.swap_Q_ch_types[q] == "int4":
+                mixer_freq = self.cfg.hw.soc.dacs.swap_Q.mixer_freq[q]
+            if self.swap_Q_chs[q] not in self.gen_chs:
+                self.declare_gen(
+                    ch=self.swap_Q_chs[q], nqz=self.cfg.hw.soc.dacs.swap_Q.nyquist[q], mixer_freq=mixer_freq
                 )
 
         self.sync_all(200)
@@ -280,57 +224,16 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
 
     def gegg_ggfg(self, count_us, add_phase=False, pihalf=False, sync_after=True):
         # 2Q on Q2
-        phase_deg = self.overall_phase[2]
-        phase = self.deg2reg(phase_deg, gen_ch=self.swap_Q_chs[2])
-        sigma_us = self.pi_EgGf_Q_sigmas_us[2]
-        waveform = "pi_EgGf_Q_swap2"
-        if pihalf:
-            sigma_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[2]
-        count_us = self.handle_next_pulse(
-            count_us=count_us,
-            ch=self.swap_Q_chs[2],
-            freq_reg=self.f_EgGf_Q_regs[2],
-            type=self.pi_EgGf_Q_types[2],
-            phase=phase,
-            gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[2],
-            sigma_us=sigma_us,
-            waveform=waveform,
+        self.XEgGf_pulse(
+            qDrive=2, qNotDrive=1, pihalf=pihalf, add_virtual_Z=add_phase, sync_after=sync_after, play=True
         )
-        if add_phase:  # virtual Z
-            virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.phase[2]
-            if pihalf:
-                virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[2]
-            self.overall_phase[2] += virtual_Z
-            # print('virtual Z', virtual_Z)
-        if sync_after:
-            self.sync_all()
         return count_us
 
     def eegg_eggf(self, count_us, add_phase=False, pihalf=False, sync_after=True):
         # 2Q on Q3
-        phase_deg = self.overall_phase[3]
-        phase = self.deg2reg(phase_deg, gen_ch=self.swap_Q_chs[3])
-        sigma_us = self.pi_EgGf_Q_sigmas_us[3]
-        waveform = "pi_EgGf_Q_swap3"
-        if pihalf:
-            sigma_us = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[3]
-        count_us = self.handle_next_pulse(
-            count_us=count_us,
-            ch=self.swap_Q_chs[3],
-            freq_reg=self.f_EgGf_Q_regs[3],
-            type=self.pi_EgGf_Q_types[3],
-            phase=phase,
-            gain=self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[3],
-            sigma_us=sigma_us,
-            waveform=waveform,
+        self.XEgGf_pulse(
+            qDrive=3, qNotDrive=1, pihalf=pihalf, add_virtual_Z=add_phase, sync_after=sync_after, play=True
         )
-        if add_phase:  # virtual Z
-            virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.phase[3]
-            if pihalf:
-                virtual_Z = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_phase[3]
-            self.overall_phase[3] += virtual_Z
-        if sync_after:
-            self.sync_all()
         return count_us
 
     def q2_ef(self, count_us, pihalf=False, ZZ_qubit=None, sync_after=True):
@@ -345,12 +248,10 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
             assert False, "no time stepping on the ef pulse right now"
         return 0
 
-    def state_prep_pulse(self, qubits=None, **kwargs):
-        cfg = AttrDict(self.cfg)
-
-        # ================= #
-        # Initial states
-        # ================= #
+    def initialize_state_prep(self):
+        """
+        Initial states
+        """
 
         init_state = self.cfg.expt.init_state
 
@@ -518,11 +419,21 @@ class QramProtocolProgram(AbstractStateTomo2QProgram):
                 self.Y_pulse(q=qb, play=True)  # -> 1
                 self.Y_pulse(q=qa, ZZ_qubit=qb, pihalf=True, play=True)
 
+            elif init_state_other == "|1>|2>":
+                self.Y_pulse(q=qa, play=True)
+                self.Y_pulse(q=qb, play=True)
+                self.Yef_pulse(q=qb, ZZ_qubit=qa, play=True)
+
             else:
                 assert False, f"Init state {init_state} not valid"
 
         else:
             assert False, f"Init state {init_state} not valid"
+
+    def state_prep_pulse(self, qubits=None, **kwargs):
+        cfg = AttrDict(self.cfg)
+
+        self.initialize_state_prep()
 
         count_us = 0
         self.end_times_us = []
@@ -1558,10 +1469,12 @@ class QramProtocol1QTomoExperiment(Experiment):
                 Qes=Qe[self.qubit],
                 amplitude_mode=full_mux_expt,
             )
-            print(f"Qubit ({self.qubit}) ge")
-            print(
-                f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[self.qubit]} \t threshold ge: {thresholds_q[self.qubit]}"
-            )
+
+            if debug:
+                print(f"Qubit ({self.qubit}) ge")
+                print(
+                    f"ge fidelity (%): {100*fid[0]} \t angle (deg): {angles_q[self.qubit]} \t threshold ge: {thresholds_q[self.qubit]}"
+                )
 
             # Process the shots taken for the confusion matrix with the calibration angles
             for iprep, prep_state in enumerate(self.calib_order):
