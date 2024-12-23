@@ -129,6 +129,8 @@ clifford_1q["-Y/2"] = np.matrix(
     ]
 )
 identity = np.diag([1] * 6)  # DO NOT PICK FROM THIS FROM THE SET THOUGH! JUST TO DO THE INVERSION
+clifford_1q["I"] = identity
+
 
 # Read pulse as a matrix product acting on state (meaning apply pulses in reverse order of the tuple)
 # two_step_pulses = [
@@ -178,13 +180,11 @@ for pulse in step_pulses:
         new_mat = new_mat @ clifford_1q[p]
     clifford_1q[pulse[0] + "," + ",".join(pulse[1:])] = new_mat
     
-clifford_1q_names = list(clifford_1q.keys())
-for name, matrix in clifford_1q.items():
-    z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
-    x_new = np.argmax(matrix[:, 1])  # +X goes to row where col 1 is 1
-    clifford_1q[name] = (matrix, (z_new, x_new))
-
-
+# clifford_1q_names = list(clifford_1q.keys())
+# for name, matrix in clifford_1q.items():
+#     z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
+#     x_new = np.argmax(matrix[:, 1])  # +X goes to row where col 1 is 1
+#     clifford_1q[name] = (matrix, (z_new, x_new))
 
 # two_step_pulses = []
 # for pulse0 in ["X/2", "-X/2", "Y/2", "-Y/2", "X", "Y"]:
@@ -201,15 +201,15 @@ for name, matrix in clifford_1q.items():
 #             repeat = True
 #     if not repeat:
 #         clifford_1q[pulse[0] + "," + pulse[1]] = new_mat
-# clifford_1q_names = list(clifford_1q.keys())
-# # print(len(clifford_1q_names), "elements in clifford_1q")
-# # print(clifford_1q_names)
+clifford_1q_names = list(clifford_1q.keys())
+# print(len(clifford_1q_names), "elements in clifford_1q")
+# print(clifford_1q_names)
 
-# for name, matrix in clifford_1q.items():
-#     z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
-#     x_new = np.argmax(matrix[:, 1])  # +X goes to row where col 1 is 1
-#     # print(name, z_new, x_new)
-#     clifford_1q[name] = (matrix, (z_new, x_new))
+for name, matrix in clifford_1q.items():
+    z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
+    x_new = np.argmax(matrix[:, 1])  # +X goes to row where col 1 is 1
+    # print(name, z_new, x_new)
+    clifford_1q[name] = (matrix, (z_new, x_new))
 
 
 def gate_sequence(rb_depth, pulse_n_seq=None, debug=False):
@@ -895,7 +895,17 @@ class SimultaneousRBEFExperiment(Experiment):
             data["gf_avgs_loops"] = []
             data["counts_calib_f_loops"] = []
         data["xpts"] = []
-        depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+        
+        
+        if "depths" not in self.cfg.expt or self.cfg.expt.depths is None:
+            print('WARNING: depths not in expt config, calculating depths')
+            self.cfg.expt.depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+        else:
+            print('depths', self.cfg.expt.depths)
+            depths = self.cfg.expt.depths
+            
+        print('depths', depths)
+        
         gate_list_variations = [None] * len(depths)
 
         if "loops" not in self.cfg.expt:
@@ -1624,7 +1634,17 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
 
         self.X_pulse(
             q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
-        )  # this is the g->e pulse from CliffordAveragerProgram, always have the "overall phase" of the normal qubit subspace be 0 because it is just a state prep pulse
+        ) 
+        
+        # self.X_pulse(
+        #     q=self.qDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
+        # ) 
+        # self.Xef_pulse(q=self.qDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
+        # )
+        
+        
+        
+        # this is the g->e pulse from CliffordAveragerProgram, always have the "overall phase" of the normal qubit subspace be 0 because it is just a state prep pulse
         self.sync_all()
 
         # self.setup_and_pulse(ch=self.qubit_chs[1], style='arb', freq=self.f_Q1_ZZ_regs[self.qA], phase=self.deg2reg(-90, gen_ch=self.qA), gain=self.cfg.device.qubit.pulses.pi_Q1_ZZ.gain[self.qA] // 2, waveform=f'qubit1_ZZ{self.qA}')
@@ -1778,7 +1798,15 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 self.calib_order = ["gg", "gf", "eg", "ef"]
 
         data["xpts"] = []
-        depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+        
+        if "depths" not in self.cfg.expt or self.cfg.expt.depths is None:
+            print('WARNING: depths not in expt config, calculating depths')
+            depths = self.cfg.expt.start + self.cfg.expt.step * np.arange(self.cfg.expt.expts)
+        else:
+            print('depths', self.cfg.expt.depths)
+            depths = self.cfg.expt.depths
+            
+        print('depths', depths)
 
         gate_list_variations = [None] * len(depths)
 
@@ -2142,7 +2170,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             data["counts_raw"][1, loop, i_depth, var, :] = counts
                             # print('variation', var, 'gate list', gate_list, 'counts', counts)
 
-        data["xpts"] = np.reshape(data["xpts"], (self.cfg.expt.variations, self.cfg.expt.expts))
+        data["xpts"] = np.reshape(data["xpts"], (self.cfg.expt.variations, len(self.cfg.expt.depths)))
 
         for k, a in data.items():
             # print(k)
@@ -2217,6 +2245,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     # print(data["counts_calib_total"][loop])
                     # counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
                     data["poplns_2q_loops"][loop, idepth, ivar, :] = counts_corrected / np.sum(counts_corrected)
+                print('depth:', idepth)
+                print('count', data["counts_raw_total"][loop, idepth, ivar])
+                
 
         data["poplns_2q"] = np.average(data["poplns_2q_loops"], axis=0)
 
@@ -2227,21 +2258,63 @@ class SimultaneousRBEgGfExperiment(Experiment):
             # [gg, ge, eg, ee, gf, ef]
             probs_eg = data["poplns_2q"][:, :, 2]
             probs_gf = data["poplns_2q"][:, :, 4]
+            probs_gg = data["poplns_2q"][:, :, 0]
+            probs_ef = data["poplns_2q"][:, :, 5]
+            probs_ge = data["poplns_2q"][:, :, 1]
+            probs_ee = data["poplns_2q"][:, :, 3]
         elif self.measure_f_only:
             # gg, gf, eg, ef
             probs_eg = data["poplns_2q"][:, :, 2]
             probs_gf = data["poplns_2q"][:, :, 1]
+            probs_gg = data["poplns_2q"][:, :, 0]
+            probs_ef = data["poplns_2q"][:, :, 3]
 
         data["popln_eg_std"] = np.std(probs_eg, axis=1)
         data["popln_eg_avg"] = np.average(probs_eg, axis=1)
+        data["popln_eg_err"] = np.std(probs_eg, axis=1)/np.sqrt(np.shape(probs_eg)[1])
+        
+        
+        data["popln_gf_std"] = np.std(probs_gf, axis=1)
+        data["popln_gf_err"] = np.std(probs_gf, axis=1)/np.sqrt(np.shape(probs_gf)[1])
+        data["popln_gf_avg"] = np.average(probs_gf, axis=1)
+        
+        data["popln_gg_std"] = np.std(probs_gg, axis=1)
+        data["popln_gg_avg"] = np.average(probs_gg, axis=1)
+        data["popln_gg_err"] = np.std(probs_gg, axis=1)/np.sqrt(np.shape(probs_gg)[1])
+        
+        
+        data["popln_ef_std"] = np.std(probs_ef, axis=1)
+        data["popln_ef_avg"] = np.average(probs_ef, axis=1)
+        data["popln_ef_err"] = np.std(probs_ef, axis=1)/np.sqrt(np.shape(probs_ef)[1])
+        
+        if not(self.measure_f_only) and self.measure_f: 
+            data["popln_ge_std"] = np.std(probs_ge, axis=1)
+            data["popln_ge_avg"] = np.average(probs_ge, axis=1)
+            data["popln_ge_err"] = np.std(probs_ge, axis=1)/np.sqrt(np.shape(probs_ge)[1])
+            data["popln_ee_std"] = np.std(probs_ee, axis=1)
+            data["popln_ee_avg"] = np.average(probs_ee, axis=1)
+            data["popln_ee_err"] = np.std(probs_ee, axis=1)/np.sqrt(np.shape(probs_ee)[1])
 
         sum_prob_subspace = probs_eg + probs_gf
         data["popln_subspace"] = sum_prob_subspace
         data["popln_subspace_std"] = np.std(sum_prob_subspace, axis=1)
         data["popln_subspace_avg"] = np.average(sum_prob_subspace, axis=1)
+        data["popln_subspace_err"] = np.std(sum_prob_subspace, axis=1)/np.sqrt(np.shape(sum_prob_subspace)[1])
+        
+        
         data["popln_eg_subspace"] = probs_eg / sum_prob_subspace
         data["popln_eg_subspace_std"] = np.std(probs_eg / sum_prob_subspace, axis=1)
         data["popln_eg_subspace_avg"] = np.average(probs_eg / sum_prob_subspace, axis=1)
+        data["popln_eg_subspace_err"] = np.std(probs_eg / sum_prob_subspace, axis=1)/np.sqrt(np.shape(probs_eg / sum_prob_subspace)[1])
+        
+        
+        data["popln_gf_subspace"] = probs_gf / sum_prob_subspace
+        data["popln_gf_subspace_std"] = np.std(probs_gf / sum_prob_subspace, axis=1)
+        data["popln_gf_subspace_avg"] = np.average(probs_gf / sum_prob_subspace, axis=1)
+        data["popln_gf_subspace_err"] = np.std(probs_gf / sum_prob_subspace, axis=1)/np.sqrt(np.shape(probs_gf / sum_prob_subspace)[1])
+        
+    
+        
         print("shape sum prob_eg + prob_gf", np.shape(sum_prob_subspace))
         print(
             "shape average sum over each depth",
@@ -2306,10 +2379,33 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         probs_eg_avg = data["popln_eg_avg"]
         probs_eg_std = data["popln_eg_std"]
+        probs_eg_err = data["popln_eg_err"]
         probs_subspace_avg = data["popln_subspace_avg"]
         probs_subspace_std = data["popln_subspace_std"]
+        probs_subspace_err = data["popln_subspace_err"]
         probs_eg_subspace_avg = data["popln_eg_subspace_avg"]
         probs_eg_subspace_std = data["popln_eg_subspace_std"]
+        probs_eg_subspace_err = data["popln_eg_subspace_err"]
+        
+        probs_gg_avg = data["popln_gg_avg"]
+        probs_gg_std = data["popln_gg_std"]
+        probs_gg_err = data["popln_gg_err"]
+        probs_gf_avg = data["popln_gf_avg"]
+        probs_gf_std = data["popln_gf_std"]
+        probs_gf_err = data["popln_gf_err"]
+        probs_ef_avg = data["popln_ef_avg"]
+        probs_ef_std = data["popln_ef_std"]
+        probs_ef_err = data["popln_ef_err"]
+        
+        if not(self.measure_f_only) and self.measure_f:
+            probs_ge_avg = data["popln_ge_avg"]
+            probs_ge_std = data["popln_ge_std"]
+            probs_ge_err = data["popln_ge_err"]
+            probs_ee_avg = data["popln_ee_avg"]
+            probs_ee_std = data["popln_ee_std"]
+            probs_ee_err = data["popln_ee_err"]
+            print("probs_ge_avg", probs_ge_avg, "+/-", probs_ge_std)
+            print("probs_ee_avg", probs_ee_avg, "+/-", probs_ee_std)
 
         print("prob_eg_avg", probs_eg_avg, "+/-", probs_eg_std)
         print("prob_subspace_avg", probs_subspace_avg, "+/-", probs_subspace_std)
@@ -2319,7 +2415,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             unique_depths,
             probs_eg_avg,
             fmt="x",
-            yerr=probs_eg_std,
+            yerr=probs_eg_err,
             color=default_colors[0],
             elinewidth=0.75,
             label="eg probability",
@@ -2328,7 +2424,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             unique_depths,
             probs_subspace_avg,
             fmt="v",
-            yerr=probs_subspace_std,
+            yerr=probs_subspace_err,
             color=default_colors[1],
             elinewidth=0.75,
             label="subspace probability",
@@ -2337,11 +2433,67 @@ class SimultaneousRBEgGfExperiment(Experiment):
             unique_depths,
             probs_eg_subspace_avg,
             fmt="o",
-            yerr=probs_eg_subspace_std,
+            yerr=probs_eg_subspace_err,
             color=default_colors[2],
             elinewidth=0.75,
             label="eg/subspace probability",
         )
+        
+        plt.errorbar(
+            unique_depths,
+            probs_gg_avg,
+            fmt="x",
+            yerr=probs_gg_err,
+            color=default_colors[3],
+            elinewidth=0.75,
+            label="gg probability",
+        )
+        
+        plt.errorbar(
+            unique_depths,
+            probs_gf_avg,
+            fmt="x",
+            yerr=probs_gf_err,
+            color=default_colors[4],
+            elinewidth=0.75,
+            label="gf probability",
+        )
+        
+        plt.errorbar(
+            unique_depths,
+            probs_ef_avg,
+            fmt="x",
+            yerr=probs_ef_err,
+            color=default_colors[0],
+            elinewidth=0.75,
+            label="ef probability",
+        )
+        
+        
+        
+        if not(self.measure_f_only) and self.measure_f:
+            
+            plt.errorbar(
+                unique_depths,
+                probs_ge_avg,
+                fmt="x",
+                yerr=probs_ge_err,
+                color=default_colors[6],
+                elinewidth=0.75,
+                label="ge probability",
+            )
+            
+            plt.errorbar(
+                unique_depths,
+                probs_ee_avg,
+                fmt="x",
+                yerr=probs_ee_err,
+                color=default_colors[7],
+                elinewidth=0.75,
+                label="ee probability",
+            )
+            
+        
 
         if fit:
             pcov1 = data["fit1_err"]
