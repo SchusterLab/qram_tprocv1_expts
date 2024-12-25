@@ -591,11 +591,13 @@ class HistogramProgram(QutritAveragerProgram):
         qTest = self.cfg.expt.qTest
         qZZ = None
         self.checkZZ = False
-        if "qZZ" in self.cfg.expt and self.cfg.expt.qZZ is not None:
+        qZZ = None
+        if "qZZ" in self.cfg.expt:
             qZZ = self.cfg.expt.qZZ
-            self.checkZZ = True
         if qZZ is None:
             qZZ = qTest
+        if qZZ != qTest:
+            self.checkZZ = True
 
         self.reset_and_sync()
 

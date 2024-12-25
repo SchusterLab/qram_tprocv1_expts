@@ -155,7 +155,7 @@ class ResonatorSpectroscopyExperiment(Experiment):
         plt.figure(figsize=(10, 10))
         plt.subplot(
             311,
-            title=f"Resonator Spectroscopy Q{qTest} at gain {self.cfg.device.readout.gain[qTest]}",
+            title=f"Resonator Spectroscopy Q{qTest}{' pulse E' if self.cfg.expt.pulse_e else ''}{' pulse F' if self.cfg.expt.pulse_f else ''} at gain {self.cfg.device.readout.gain[qTest]}",
             ylabel="Amps [ADC units]",
         )
         baseline = np.mean(np.sort(ydata)[-20:])

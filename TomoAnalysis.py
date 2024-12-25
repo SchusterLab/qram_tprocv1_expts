@@ -485,74 +485,6 @@ class TomoAnalysis:
     """
     From https://github.com/qiskit-community/qiskit-community-tutorials/blob/master/ignis/measurement_error_mitigation.ipynb
     """
-    # def correct_readout_err(self, n, n_conf, verbose=False, method='SLSQP'):
-
-    #     n= np.array(n ,dtype=float)
-    #     conf_mat = np.array(n_conf, dtype=float)
-
-    #     # normalize the conf_mat
-    #     for r, row in enumerate(conf_mat):
-    #         conf_mat[r] /= sum(row)
-
-    #     # normalize the counts
-    #     if len(n.shape) == 1: n /= sum(n)
-    #     else:
-    #         for r, row in enumerate(n):
-    #             n[r] /= sum(row)
-
-    #     # transpose the shots so that each measurement is a column
-    #     n = np.transpose(n)
-
-    #     # define the objective function
-    #     def objective(x_flat, n, conf_mat, shape):
-    #         x = np.reshape(x_flat, shape)
-    #         return np.linalg.norm(conf_mat @ x - n)
-    #     # define the constraints
-    #     def constraint_norm(x_flat, shape):
-    #         x = np.reshape(x_flat, shape)
-    #         return np.sum(x, axis=0) - 1 # constrain to ensure that each column sums to 1
-
-    #     def constraint_norm_lower(x_flat, shape, tol):
-    #         x = np.reshape(x_flat, shape)
-    #         return np.sum(x, axis=0) - (1 - tol) # constrain to ensure that each column sums to 1
-
-    #     def constraint_norm_upper(x_flat, shape, tol):
-    #         x = np.reshape(x_flat, shape)
-    #         return (1 + tol) - np.sum(x, axis=0) # constrain to ensure that each column sums to 1
-
-    #     # constrain to ensure that each element is in [0,1]
-    #     def constraint_zero(x_flat):
-    #         return x_flat
-
-    #     # define the initial guess
-    #     x0_flat = n.flatten()
-    #     shape = np.shape(n)
-
-    #     if method == 'SLSQP':
-    #         cons = [{'type': 'eq', 'fun': constraint_norm, 'args': (shape,)},
-    #                 {'type': 'ineq', 'fun': constraint_zero}]
-    #     elif method == 'COBYLA':
-    #         cons = [{'type': 'ineq', 'fun': constraint_norm_lower, 'args': (shape, 1e-10)}]
-    #         cons += [{'type': 'ineq', 'fun': constraint_norm_upper, 'args': (shape, 1e-10)}]
-    #         cons += [{'type': 'ineq', 'fun': constraint_zero}]
-
-    #     # minimize the objective function
-
-    #     result = minimize(objective, x0_flat, args=(n, conf_mat, shape),
-    #                       constraints=cons, method=method, options={'ftol': 1e-20, 'disp': False}, tol=1e-20)
-    #     n_corrected = result.x.reshape(shape)
-
-    #     # if result.fun > 1e-1:
-    #     #     print('Optimization did not converge')
-    #     #     print('result', result)
-
-    #     if result.success is False:
-    #         print('Optimization did not converge')
-
-    #     if verbose:
-    #         print('result', result)
-
-    #     return n_corrected.T
 
     def correct_readout_err(self, n, n_conf, verbose=False, method="SLSQP"):
 
@@ -633,8 +565,11 @@ class TomoAnalysis:
             print("Optimization did not converge")
 
         if verbose:
-            print("result", result)
-
+            # print("result", result)
+            for r, n_row in enumerate(n):
+                # transpose the shots so that each measurement is a column
+                n_row = np.transpose(n_row)
+                print("minimization error", objective(n_corrected, n_row, conf_mat))
         return out_n
         # return n_corrected.T
 

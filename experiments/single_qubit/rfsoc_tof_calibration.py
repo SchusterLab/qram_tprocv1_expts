@@ -50,7 +50,7 @@ class ToFCalibrationProgram(AveragerProgram):
         print(self.pulse_length, self.readout_length)
 
         mask = None
-        mixer_freq = None  # MHz
+        mixer_freq = 0  # MHz
         mux_freqs = None  # MHz
         mux_gains = None
         ro_ch = None
@@ -82,8 +82,8 @@ class ToFCalibrationProgram(AveragerProgram):
         if self.dac_ch_type == "mux4":
             self.set_pulse_registers(ch=self.dac_ch, style="const", length=self.pulse_length, mask=mask)
         else:
-            if cfg.device.readout.gain < 1:
-                self.gain = int(cfg.device.readout.gain * 2**15)
+            if self.gain < 1:
+                self.gain = int(self.gain * 2**15)
             self.set_pulse_registers(
                 ch=self.dac_ch,
                 style="const",
@@ -170,6 +170,7 @@ class ToFCalibrationExperiment(Experiment):
         q_ind = self.cfg.expt.qubit
         adc_ch = self.cfg.hw.soc.adcs.readout.ch[q_ind]
         dac_ch = self.cfg.hw.soc.dacs.readout.ch[q_ind]
+        plt.figure()
         plt.subplot(
             111,
             title=f"Time of flight calibration: dac ch {dac_ch} to adc ch {adc_ch}",
