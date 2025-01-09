@@ -128,7 +128,7 @@ clifford_1q["-Y/2"] = np.matrix(
         [0, 0, 0, 0, 0, 1],
     ]
 )
-identity = np.diag([1] * 6)  # DO NOT PICK FROM THIS FROM THE SET THOUGH! JUST TO DO THE INVERSION
+identity = np.diag([1] * 6)
 clifford_1q["I"] = identity
 
 
@@ -178,22 +178,20 @@ for pulse in step_pulses:
     new_mat = clifford_1q[pulse[0]]
     for p in pulse[1:]:
         new_mat = new_mat @ clifford_1q[p]
-    clifford_1q[pulse[0] + "," + ",".join(pulse[1:])] = new_mat
-
-# # Get rid of repeats
-# # for pulse in two_step_pulses:
-# for pulse in step_pulses:
-#     new_mat = clifford_1q[pulse[0]] @ clifford_1q[pulse[1]]
-#     repeat = False
-#     for existing_pulse_name, existing_pulse in clifford_1q.items():
-#         if np.array_equal(new_mat, existing_pulse):
-#             # print(pulse, existing_pulse_name)
-#             repeat = True
-#     if not repeat:
-#         clifford_1q[pulse[0] + "," + pulse[1]] = new_mat
+    repeat = False
+    # Make sure there are no repeats
+    for existing_pulse_name, existing_pulse in clifford_1q.items():
+        if np.array_equal(new_mat, existing_pulse):
+            print("found repeat", pulse, existing_pulse_name)
+            repeat = True
+    if not repeat:
+        clifford_1q[pulse[0] + "," + ",".join(pulse[1:])] = new_mat
 clifford_1q_names = list(clifford_1q.keys())
-# print(len(clifford_1q_names), "elements in clifford_1q")
-# print(clifford_1q_names)
+assert (
+    len(clifford_1q_names) == 24
+), f"you have {len(clifford_1q_names)} elements in your Clifford group instead of 24!"
+print(len(clifford_1q_names), "elements in clifford_1q")
+print(clifford_1q_names)
 
 for name, matrix in clifford_1q.items():
     z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
@@ -1651,11 +1649,16 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
             self.X_pulse(q=0, play=True)  # ZZ qubit for the q3/q1 swap
             ZZ_qubit = 0
 
+        # print('CAREFULL NOT INITIATING Q1 IN E')
+
         self.X_pulse(
             q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
         )
 
         # print("WARNING INITIATING IN GF")
+        # self.X_pulse(
+        #     q=self.qDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
+        # )
         # self.Xef_pulse(
         #     q=self.qDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
         # )
@@ -1998,7 +2001,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 if loop % 2 == 1:
                     loop_order = range(len(depths) - 1, -1, -1)
                 for i_depth in tqdm(loop_order, disable=not progress):
-                    print("depth", i_depth)
+                    # print("depth", i_depth)
                     # print(f'depth {depth} gate list (last gate is the total gate)')
                     for var in range(self.cfg.expt.variations):
                         gate_list = gate_list_variations[i_depth][var]
@@ -2028,7 +2031,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             self.cfg.expt.post_process == "threshold"
                         ), "Can only bin EgGf RB properly using threshold"
 
-                        if self.cfg.expt.post_process == "threshold":
+                        if self.cfg.expt.post_process == "threshold":                            
                             shots, _ = randbench.get_shots(
                                 angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
                             )
@@ -2406,6 +2409,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
         probs_eg_subspace_avg = data["popln_eg_subspace_avg"]
         probs_eg_subspace_std = data["popln_eg_subspace_std"]
         probs_eg_subspace_err = data["popln_eg_subspace_err"]
+        probs_gf_subspace_avg = data["popln_gf_subspace_avg"]
+        probs_gf_subspace_std = data["popln_gf_subspace_std"]
+        probs_gf_subspace_err = data["popln_gf_subspace_err"]
 
         probs_gg_avg = data["popln_gg_avg"]
         probs_gg_std = data["popln_gg_std"]
@@ -2457,6 +2463,16 @@ class SimultaneousRBEgGfExperiment(Experiment):
             color=default_colors[2],
             elinewidth=0.75,
             label="eg/subspace probability",
+        )
+
+        plt.errorbar(
+            unique_depths,
+            probs_gf_subspace_avg,
+            fmt="o",
+            yerr=probs_gf_subspace_err,
+            color=default_colors[5],
+            elinewidth=0.75,
+            label="gf/subspace probability",
         )
 
         plt.errorbar(
