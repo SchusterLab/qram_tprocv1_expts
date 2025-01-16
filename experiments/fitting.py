@@ -419,8 +419,8 @@ def quadraticfunc(x, *p):
 def fitquadratic(xdata, ydata, fitparams=None):
     if fitparams is None:
         fitparams = [None] * 3
-    else:
-        fitparams = np.copy(fitparams)
+    # else:
+    #     fitparams = np.copy(fitparams)
     if fitparams[0] is None:
         fitparams[0] = np.mean(xdata)
     if fitparams[1] is None:
@@ -913,7 +913,7 @@ def rb_fidelity_l1_l2(d, p2, l1, p2_err=None, l1_err=None):  # d = dim of subspa
 
 
 # offset should be passed in from fit using regular rb decay
-def fitrb_l1_l2(xdata, ydata, p1, offset, fitparams=None):
+def fitrb_l1_l2(xdata, ydata, p1, offset=0.5, fitparams=None, sigma=None):
     if fitparams is None:
         fitparams = [None] * 4
     else:
@@ -940,6 +940,7 @@ def fitrb_l1_l2(xdata, ydata, p1, offset, fitparams=None):
             lambda depth, a0, b0, c0, p2: rb_decay_l1_l2(depth, p1, a0, b0, c0, p2),
             xdata,
             ydata,
+            sigma=sigma,  # use the standard error std/sqrt(n)
             p0=fitparams,
             bounds=bounds,
         )

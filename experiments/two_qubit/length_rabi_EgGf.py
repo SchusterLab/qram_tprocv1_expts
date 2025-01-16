@@ -83,7 +83,12 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=self.sigma_test, length=self.sigma_test * 4
             )
         elif self.cfg.expt.pulse_type.lower() == "flat_top" and self.cfg.expt.sigma_test > 0:
-            self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=3, length=3 * 4)
+            sigma_ramp_cycles = 3
+            if "sigma_ramp_cycles" in self.cfg.expt:
+                sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
+            self.add_gauss(
+                ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles * 4
+            )
 
         # add second (calibrated) swap pulse
         if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
@@ -345,6 +350,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 if not self.pi_minuspi:
                     if not skip_first_pi2:
                         # play the pihalf initialization for the error amplification
+                        print("Playing pi/2 initialization")
                         pulse_type = cfg.expt.pulse_type.lower()
                         if pulse_type == "gauss":
                             self.setup_and_pulse(
@@ -392,6 +398,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
 
             # set pulse regs to save memory for iteration
             pulse_type = cfg.expt.pulse_type.lower()
+            # pulse_type = "const"
+            # print("WARNING OVERRIDING PULSE TYPE")
             if pulse_type == "gauss":
                 self.set_pulse_registers(
                     ch=self.swap_chs[qSort],
@@ -407,9 +415,12 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
                 flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
                 # print(
+                #     "gain",
                 #     cfg.expt.gain,
+                #     "len",
                 #     self.cycles2us(flat_length_cycles, gen_ch=self.swap_chs[qSort]),
-                #     self.freq2reg(self.f_EgGf_reg, gen_ch=self.swap_chs[qSort]),
+                #     "freq",
+                #     self.reg2freq(self.f_EgGf_reg, gen_ch=self.swap_chs[qSort]),
                 # )
                 if flat_length_cycles >= 3:
                     self.set_pulse_registers(
@@ -455,7 +466,6 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                                 waveform="pi_EgGf_swap_simul",
                             )
                         elif pulse_type == "flat_top":
-                            sigma_ramp_cycles = 3
                             flat_length_cycles = self.sigma_EgGf_cycles_simul - sigma_ramp_cycles * 4
                             if flat_length_cycles >= 3:
                                 self.pulse(ch=self.swap_chs_simul[self.qSort_simul])
@@ -502,9 +512,24 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     )
                     for k in range(num_test_pulses):
                         if play_pulse:
+                            # if j % 2 == 1:
+                            #     phase = 180
+                            # else:
+                            #     phase = 0
+                            # print("WARNING UPDATING PHASE OF PI/2 PULSE TO", phase)
+                            # self.safe_regwi(
+                            #     self.swap_rps[self.qSort],
+                            #     self.swap_rphase,
+                            #     self.deg2reg(phase, gen_ch=self.swap_chs[qSort]),
+                            # )
+
                             self.pulse(ch=self.swap_chs[qSort])
+                            # print("pulse", i, j, k)
+
                             # print("playing pulse with phase", phase)
-                            self.sync_all()
+                            # print("WARNING ADDING WAIT TIME BEFORE SECOND PULSE")
+                            # self.sync_all(150)
+                    self.sync_all()
 
         setup_measure = None
         if "setup_measure" in self.cfg.expt:
@@ -1853,15 +1878,30 @@ class EgGfFreqLenChevronExperiment(Experiment):
         self.cfg.expt.step = self.cfg.expt.step_len
         self.cfg.expt.expts = self.cfg.expt.expts_len
 
-        if "gain" not in self.cfg.expt:
-            if qDrive == 1:
+        test_pi_half = False
+        if "test_pi_half" in self.cfg.expt:
+            test_pi_half = self.cfg.expt.test_pi_half
+
+        if qDrive == 1:
+            self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort]
+            if test_pi_half:
+                assert False, "not implemented test pi half with qdrive = 1"
+            if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort]
-            else:
-                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
-        if "pulse_type" not in self.cfg.expt:
-            if qDrive == 1:
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qSort]
+            if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
-            else:
+        else:
+            if test_pi_half:
+                self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
+                    qSort
+                ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
+            if "gain" not in self.cfg.expt:
+                self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
+                if test_pi_half:
+                    self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qSort]
+            if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort]
 
         expt_prog = LengthRabiEgGfExperiment(
@@ -1872,9 +1912,15 @@ class EgGfFreqLenChevronExperiment(Experiment):
         start_time = time.time()
         for freq in tqdm(freqpts, disable=not progress):
             if qDrive == 1:
-                expt_prog.cfg.device.qubit.f_EgGf[qSort] = float(freq)
+                if test_pi_half:
+                    expt_prog.cfg.device.qubit.f_EgGf_half[qSort] = float(freq)
+                else:
+                    expt_prog.cfg.device.qubit.f_EgGf[qSort] = float(freq)
             else:
-                expt_prog.cfg.device.qubit.f_EgGf_Q[qSort] = float(freq)
+                if test_pi_half:
+                    expt_prog.cfg.device.qubit.f_EgGf_Q_half[qSort] = float(freq)
+                else:
+                    expt_prog.cfg.device.qubit.f_EgGf_Q[qSort] = float(freq)
             expt_prog.go(analyze=False, display=False, progress=False, save=False)
             for q_ind, q in enumerate(self.cfg.expt.measure_qubits):
                 data["avgi"][q_ind].append(expt_prog.data["avgi"][q_ind])
@@ -2824,41 +2870,24 @@ class PiMinusPiEgGfExperiment(Experiment):
         # Amps shape: (measure_qubits, cycles, freqs)
         prods = np.zeros((len(self.cfg.expt.measure_qubits), len(data["freq_sweep"])))
         data_name = "amps"
-        # data_name = "avgi"
-        for iq, q in enumerate(self.cfg.expt.measure_qubits):
-            scaled_e = np.max(data[data_name][iq])
-            scaled_g = np.min(data[data_name][iq])
-            scale = np.max(data[data_name][iq]) - np.min(data[data_name][iq])
-            if q == qDrive:
-                prods[iq] = np.sqrt(
-                    np.prod((scaled_e - data[data_name][iq]) / scale, axis=0)
-                )  # product over g population in all cycles
-            else:
-                prods[iq] = np.sqrt(
-                    np.prod((data[data_name][iq] - scaled_g) / scale, axis=0)
-                )  # expect to end in e, so we compare relative to e
+        scaled_data = np.zeros_like(data[data_name])
+        for iq, q in enumerate(self.cfg.expt.qubits):
+            for iN, N in enumerate(data["cycle_sweep"]):
+                # Rescale for each given N
+                scaled_e = np.max(data[data_name][iq, iN, :])
+                scaled_g = np.min(data[data_name][iq, iN, :])
+                scale = np.max(data[data_name][iq, iN]) - np.min(data[data_name][iq, iN])
+                if q == qDrive:
+                    scaled_data[iq, iN, :] = (
+                        scaled_e - data[data_name][iq, iN, :]
+                    ) / scale  # product over g population in all cycles
+                else:
+                    scaled_data[iq, iN, :] = (
+                        data[data_name][iq, iN, :] - scaled_g
+                    ) / scale  # expect to end in e, so we compare relative to e
+            prods[iq] = np.sqrt(np.prod(scaled_data[iq], axis=0))
+        data["products"] = prods
 
-        label = "($X_{\pi}, X_{-\pi})^N$"
-        if self.cfg.expt.test_pi_half:
-            label = "($X_{\pi/2}, X_{-\pi/2})^N$"
-        title = (
-            f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
-        )
-        plt.figure(figsize=(8, 8))
-        plt.suptitle(title, fontsize=20)
-
-        ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        ax_qA.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
-        ax_qA.tick_params(axis="both", which="major", labelsize=16)
-        plt.plot(data["freq_sweep"], prods[0], "o", label="Data")
-
-        ax_qB = plt.subplot(212, title=f"QB ({qB})")
-        ax_qB.tick_params(axis="both", which="major", labelsize=16)
-        ax_qB.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
-        plt.plot(data["freq_sweep"], prods[1], "o", label="Data")
-        ax_qB.set_xlabel("Frequency [MHz]", fontsize=18)
-
-        axs = [ax_qA, ax_qB]
         if fit:
             for iq, q in enumerate(self.cfg.expt.measure_qubits):
                 popt, pcov = fitter.fit_gauss(data["freq_sweep"], np.array(prods[iq]))
@@ -2870,20 +2899,14 @@ class PiMinusPiEgGfExperiment(Experiment):
                     old_freq = self.cfg.device.qubit.f_EgGf[qSort]
                 else:
                     old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
-                print("Fit best freq (qA)", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
-
-                plt.sca(axs[iq])
-                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt), label="Fit")
-                plt.axvline(fit_freq, color="r", linestyle="--")
-                plt.legend(fontsize=18)
-                print(f"Best freq from pi/-pi on Q{q}", fit_freq)
+                print(
+                    f"Fit best freq (Q{q})", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq
+                )
             best_fit, best_fit_err = fitter.get_best_fit(
                 data, prefixes=[f"fit_q{qA}", f"fit_q{qB}"], check_measures=[data_name]
             )
             data["best_freq"] = np.average([best_fit[1] for q in self.cfg.expt.measure_qubits])
-
-        plt.tight_layout()
-        plt.show()
+            print(f"Best freq fitted", data["best_freq"])
 
         return data
 
@@ -2897,11 +2920,6 @@ class PiMinusPiEgGfExperiment(Experiment):
         if qA == 1:
             qSort = qB
         qDrive = self.cfg.expt.qDrive
-
-        if qDrive == 1:
-            old_freq = self.cfg.device.qubit.f_EgGf[qSort]
-        else:
-            old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
 
         label = "($X_{\pi}, X_{-\pi})^N$"
         if self.cfg.expt.test_pi_half:
@@ -2928,25 +2946,340 @@ class PiMinusPiEgGfExperiment(Experiment):
         scaled_e = np.max(plot_data)
         scaled_g = np.min(plot_data)
         scale_ge = scaled_e - scaled_g
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
+        plt.pcolormesh(x_sweep, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
         if fit:
-            plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
+            plt.axvline(data["best_freq"], color="r", linestyle="--")
         cbar = plt.colorbar()
         cbar.ax.tick_params(labelsize=18)
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
         ax_qB.set_ylabel(f"N", fontsize=18)
-        ax_qB.set_xlabel("$f-f_0$ [MHz]", fontsize=18)
+        ax_qB.set_xlabel("Frequency [MHz]", fontsize=18)
         ax_qB.tick_params(axis="both", which="major", labelsize=16)
         plot_data = data[data_name][1]
         scaled_e = np.max(plot_data)
         scaled_g = np.min(plot_data)
         scale_ge = scaled_e - scaled_g
-        plt.pcolormesh(x_sweep - old_freq, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
+        plt.pcolormesh(x_sweep, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
         if fit:
-            plt.axvline(data["best_freq"] - old_freq, color="r", linestyle="--")
+            plt.axvline(data["best_freq"], color="r", linestyle="--")
         cbar = plt.colorbar()
         cbar.ax.tick_params(labelsize=18)
+
+        plt.tight_layout()
+        plt.show()
+
+        # ==== The product plot ====
+        prods = data["products"]
+        plt.figure(figsize=(8, 8))
+        plt.suptitle(title, fontsize=20)
+
+        ax_qA = plt.subplot(211, title=f"QA ({qA})")
+        ax_qA.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plt.plot(data["freq_sweep"], prods[0], "o", label="Data")
+
+        ax_qB = plt.subplot(212, title=f"QB ({qB})")
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qB.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        plt.plot(data["freq_sweep"], prods[1], "o", label="Data")
+        ax_qB.set_xlabel("Frequency [MHz]", fontsize=18)
+
+        axs = [ax_qA, ax_qB]
+        if fit:
+            for iq, q in enumerate(self.cfg.expt.measure_qubits):
+                data_name = "amps"
+                popt = data[f"fit_q{q}_{data_name}"]
+                fit_freq = popt[1]
+                plt.sca(axs[iq])
+                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt), label="Fit")
+                plt.axvline(fit_freq, color="r", linestyle="--")
+                plt.legend(fontsize=18)
+
+        plt.tight_layout()
+        plt.show()
+
+        # Vertical slice through
+
+        # plt.figure(figsize=(8, 6))
+        # plot_data = data[data_name][0]
+        # scaled_e = np.max(plot_data)
+        # scaled_g = np.min(plot_data)
+        # scale_ge = scaled_e - scaled_g
+        # plt.plot(y_sweep, ((plot_data - scaled_g) / scale_ge)[:, 18], label="QA")
+        # plot_data = data[data_name][1]
+        # scaled_e = np.max(plot_data)
+        # scaled_g = np.min(plot_data)
+        # scale_ge = scaled_e - scaled_g
+        # plt.plot(y_sweep, ((plot_data - scaled_g) / scale_ge)[:, 18], label="QB")
+        # plt.xlabel("N")
+        # plt.legend()
+        # plt.ylim(0, 1)
+        # plt.show()
+
+    def save_data(self, data=None):
+        print(f"Saving {self.fname}")
+        super().save_data(data=data)
+        return self.fname
+
+
+class PiTrainEgGfGainSweepExperiment(Experiment):
+    """
+    Sweep pi/pi varying N and gain
+    expt = dict(
+        start_gain
+        step_gain
+        expts_gain
+        start_N: the number of pi swaps (if test_pi_half, still the number of pi swaps!)
+        step_N
+        expts_N
+        reps: number of reps,
+        gain: (optional) overrides default gain
+        qubits: qubits to swap between
+        qDrive: drive qubit
+        measure_qubits: qubits to save the readout
+        singleshot: (optional) if true, uses threshold
+        test_pi_half
+    )
+    """
+
+    def __init__(self, soccfg=None, path="", prefix="PiTrainEgGfGainSweepExpt", config_file=None, progress=None):
+        super().__init__(path=path, soccfg=soccfg, prefix=prefix, config_file=config_file, progress=progress)
+
+    def acquire(self, progress=False, debug=True):
+        test_pi_half = self.cfg.expt.test_pi_half
+
+        qA, qB = self.cfg.expt.qubits
+
+        qSort = qA
+        if qA == 1:
+            qSort = qB
+        qDrive = 1
+        if "qDrive" in self.cfg.expt and self.cfg.expt.qDrive is not None:
+            qDrive = self.cfg.expt.qDrive
+
+        gain_sweep = self.cfg.expt.start_gain + self.cfg.expt.step_gain * np.arange(self.cfg.expt.expts_gain)
+        cycle_sweep = self.cfg.expt.start_N + self.cfg.expt.step_N * np.arange(self.cfg.expt.expts_N)
+
+        # print("gain_sweep", gain_sweep.tolist())
+        # print("cycle_sweep (number of pi swap cycles (pi, pi)^N)", cycle_sweep.tolist())
+
+        self.data = dict(
+            avgi=np.zeros((2, len(cycle_sweep), len(gain_sweep))),
+            avgq=np.zeros((2, len(cycle_sweep), len(gain_sweep))),
+            amps=np.zeros((2, len(cycle_sweep), len(gain_sweep))),
+            gain_sweep=gain_sweep,
+            cycle_sweep=cycle_sweep,
+        )
+
+        angles = thresholds = ge_avgs = counts_calib = None
+        if self.cfg.expt.post_process is not None:
+            if (
+                "angles" in self.cfg.expt
+                and "thresholds" in self.cfg.expt
+                and "ge_avgs" in self.cfg.expt
+                and "counts_calib" in self.cfg.expt
+                and self.cfg.expt.angles is not None
+                and self.cfg.expt.thresholds is not None
+                and self.cfg.expt.ge_avgs is not None
+                and self.cfg.expt.counts_calib is not None
+            ):
+                angles = self.cfg.expt.angles
+                thresholds = self.cfg.expt.thresholds
+                ge_avgs = np.asarray(self.cfg.expt.ge_avgs)
+                counts_calib = self.cfg.expt.counts_calib
+                if debug:
+                    print("Re-using provided angles, thresholds, ge_avgs")
+
+        npulsecalib = NPulseEgGfExperiment(
+            soccfg=self.soccfg, path=self.path, prefix=f"NPulseExptEgGf", config_file=self.config_file
+        )
+        npulsecalib.cfg = deepcopy(self.cfg)
+        npulsecalib.cfg.expt.update(
+            dict(
+                start=2 * self.cfg.expt.start_N,  # number (pi, pi)^N, npulsecalib does (pi)^N
+                step=2 * self.cfg.expt.step_N,
+                expts=self.cfg.expt.expts_N,
+                skip_first_pi2=True,
+                angles=angles,
+                thresholds=thresholds,
+                ge_avgs=ge_avgs,
+                counts_calib=counts_calib,
+            )
+        )
+
+        for i_gain, gain in enumerate(tqdm(gain_sweep)):
+
+            npulsecalib.cfg.expt.update(
+                dict(
+                    angles=angles,
+                    thresholds=thresholds,
+                    ge_avgs=ge_avgs,
+                    counts_calib=counts_calib,
+                )
+            )
+
+            npulsecalib.cfg.expt.gain = int(gain)
+            npulsecalib.acquire(progress=False, debug=False)
+
+            for data_name in ["avgi", "avgq", "amps"]:
+                self.data[data_name][:, :, i_gain] = npulsecalib.data[data_name]
+
+            data = npulsecalib.data
+            angles = data["angles"]
+            thresholds = data["thresholds"]
+            ge_avgs = data["ge_avgs"]
+            counts_calib = data["counts_calib"]
+
+        self.data["thresholds"] = thresholds
+        self.data["angles"] = angles
+        self.data["ge_avgs"] = ge_avgs
+        self.data["counts_calib"] = np.array(counts_calib)
+
+    def analyze(self, data=None, fit=True, scale=None):
+        # scale should be [Ig, Qg, Ie, Qe] single shot experiment
+        if data is None:
+            data = self.data
+
+        qA, qB = self.cfg.expt.qubits
+
+        qSort = qA
+        if qA == 1:
+            qSort = qB
+        qDrive = self.cfg.expt.qDrive
+
+        data_name = "avgi"
+        gain_sweep = data["gain_sweep"]
+        prods = np.zeros((2, len(gain_sweep)))
+
+        scaled_data = np.zeros_like(data[data_name])
+
+        for iq, q in enumerate(self.cfg.expt.qubits):
+            for iN, N in enumerate(data["cycle_sweep"]):
+                # Rescale for each given N
+                scaled_e = np.max(data[data_name][iq, iN, :])
+                scaled_g = np.min(data[data_name][iq, iN, :])
+                scale = np.max(data[data_name][iq, iN]) - np.min(data[data_name][iq, iN])
+                if q == qDrive:
+                    scaled_data[iq, iN, :] = (
+                        scaled_e - data[data_name][iq, iN, :]
+                    ) / scale  # product over g population in all cycles
+                else:
+                    scaled_data[iq, iN, :] = (
+                        data[data_name][iq, iN, :] - scaled_g
+                    ) / scale  # expect to end in e, so we compare relative to e
+            prods[iq] = np.sqrt(np.prod(scaled_data[iq], axis=0))
+        data["products"] = prods
+
+        if fit:
+            for iq, q in enumerate(self.cfg.expt.qubits):
+                popt, pcov = fitter.fit_gauss(data["gain_sweep"], np.array(prods[iq]))
+                data[f"fit_q{q}_{data_name}"] = popt
+                data[f"fit_q{q}_err_{data_name}"] = pcov
+
+                fit_gain = popt[1]
+                print(f"Fit best gain (Q{q})", fit_gain)
+            best_fit, best_fit_err = fitter.get_best_fit(
+                data, prefixes=[f"fit_q{qA}", f"fit_q{qB}"], check_measures=[data_name]
+            )
+            data["best_gain"] = np.average([best_fit[1] for q in self.cfg.expt.qubits])
+            print(f"Best gain fitted", data["best_gain"])
+
+    def display(self, data=None, fit=True, scale=None):
+        if data is None:
+            data = self.data
+
+        qA, qB = self.cfg.expt.qubits
+        qSort = qA
+        if qA == 1:
+            qSort = qB
+        qDrive = 1
+        if "qDrive" in self.cfg.expt and self.cfg.expt.qDrive is not None:
+            qDrive = self.cfg.expt.qDrive
+
+        gain_sweep = data["gain_sweep"]
+        cycle_sweep = data["cycle_sweep"]
+        data_name = "avgi"
+
+        assert qDrive != 1
+        length = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort]
+        if self.cfg.expt.test_pi_half:
+            length = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qSort]
+        freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
+        if self.cfg.expt.test_pi_half:
+            freq = self.cfg.device.qubit.f_EgGf_Q_half[qSort]
+
+        label = "($X_{\pi}, X_{\pi})^N$"
+        if self.cfg.expt.test_pi_half:
+            label = "($X_{\pi/2}, X_{\pi/2})^{2N}$"
+        title = f"Pi Train Gain Error Q{qA}/Q{qB} {label}\n Drive Freq {freq:.3f}, Len {length:.3f}"
+
+        inner_sweep = gain_sweep
+        outer_sweep = cycle_sweep
+
+        y_sweep = outer_sweep
+        x_sweep = inner_sweep
+
+        plt.figure(figsize=(8, 9))
+        plt.suptitle(title, fontsize=20)
+        # data_name = "amps"
+        data_name = "avgi"
+
+        ax_qA = plt.subplot(211, title=f"QA ({qA})")
+        ax_qA.set_ylabel(f"N", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plot_data = data[data_name][0]
+        scaled_e = np.max(plot_data)
+        scaled_g = np.min(plot_data)
+        scale_ge = scaled_e - scaled_g
+        plt.pcolormesh(x_sweep, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
+        if fit:
+            plt.axvline(data["best_gain"], color="r", linestyle="--")
+        cbar = plt.colorbar()
+        cbar.ax.tick_params(labelsize=18)
+
+        ax_qB = plt.subplot(212, title=f"QB ({qB})")
+        ax_qB.set_ylabel(f"N", fontsize=18)
+        ax_qB.set_xlabel("Gain [DAC units]", fontsize=18)
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        plot_data = data[data_name][1]
+        scaled_e = np.max(plot_data)
+        scaled_g = np.min(plot_data)
+        scale_ge = scaled_e - scaled_g
+        plt.pcolormesh(x_sweep, y_sweep, (plot_data - scaled_g) / scale_ge, cmap="viridis", shading="auto")
+        if fit:
+            plt.axvline(data["best_gain"], color="r", linestyle="--")
+        cbar = plt.colorbar()
+        cbar.ax.tick_params(labelsize=18)
+
+        plt.tight_layout()
+        plt.show()
+
+        # ==== The product plot ====
+        prods = data["products"]
+        plt.figure(figsize=(8, 8))
+        plt.suptitle(title, fontsize=20)
+
+        ax_qA = plt.subplot(211, title=f"QA ({qA})")
+        ax_qA.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        ax_qA.tick_params(axis="both", which="major", labelsize=16)
+        plt.plot(data["gain_sweep"], prods[0], "o", label="Data")
+
+        ax_qB = plt.subplot(212, title=f"QB ({qB})")
+        ax_qB.tick_params(axis="both", which="major", labelsize=16)
+        ax_qB.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        plt.plot(data["gain_sweep"], prods[1], "o", label="Data")
+        ax_qB.set_xlabel("Gain [DAC units]", fontsize=18)
+
+        axs = [ax_qA, ax_qB]
+        if fit:
+            for iq, q in enumerate(self.cfg.expt.qubits):
+                popt = data[f"fit_q{q}_{data_name}"]
+                fit_gain = popt[1]
+                plt.sca(axs[iq])
+                plt.plot(data["gain_sweep"], fitter.gaussian(data["gain_sweep"], *popt), label="Fit")
+                plt.axvline(fit_gain, color="r", linestyle="--")
+                plt.legend(fontsize=18)
 
         plt.tight_layout()
         plt.show()

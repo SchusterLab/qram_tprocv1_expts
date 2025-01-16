@@ -995,12 +995,13 @@ class EgGfFreqGainChevronExperiment(Experiment):
 
         fit_xsweep_set = x_sweep[range_start:range_end]
         fit_freqs_set = fit_freqs[range_start:range_end]
+        # print(fit_xsweep_set, fit_freqs_set)
         fitparams = [
-            None,
+            0,
             None,
             (fit_freqs_set[-1] - fit_freqs_set[0]) / (fit_xsweep_set[-1] - fit_xsweep_set[0]) ** 2,
         ]
-        fitparams = None
+        # fitparams = None
         p, pCov = fitter.fitquadratic(fit_xsweep_set, fit_freqs_set, fitparams=fitparams)
         fit_freqs_fit = fitter.quadraticfunc(x_sweep, *p)
         print("fit_gain_sweep =", x_sweep.tolist())
