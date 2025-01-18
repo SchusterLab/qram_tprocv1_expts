@@ -90,6 +90,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles * 4
             )
 
+        self.test_pi_half = "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half
+
         # add second (calibrated) swap pulse
         if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
             assert "qDrive_simul" in self.cfg.expt
@@ -393,7 +395,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             else:
                 n_cycles = 1
                 n_pulse_per_cycle = 1  # (pi/2 or pi)^1
-            if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
+            if self.test_pi_half:
                 n_pulse_per_cycle = 2  # (pi/2, +/- pi/2)^N
 
             # set pulse regs to save memory for iteration
@@ -447,6 +449,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
             # loop over error amplification (if no amplification we just loop 1x)
             # ============
             # print("n_cycles", n_cycles, "n_pulse_per_cycle", n_pulse_per_cycle)
+            phase = 0
             for i in range(int(n_cycles)):
                 for j in range(n_pulse_per_cycle):
 
@@ -493,6 +496,11 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     if j % 2 == 1:
                         if self.pi_minuspi:
                             phase = -180
+                    # if self.pi_minuspi:
+                    #     phase -= 180
+
+                    # phase += 75
+                    # print("WARNING ADJUSTED Z BETWEEN EACH PI TO", phase)
 
                     # apply Eg -> Gf pulse on qDrive: expect to end in Gf
                     pulse_type = cfg.expt.pulse_type.lower()
@@ -505,6 +513,11 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     if pulse_type == "flat_top" and flat_length_cycles <= 3:
                         play_pulse = False
                     num_test_pulses = 1
+
+                    if self.pi_minuspi and self.test_pi_half:
+                        # (pi/2, pi/2, -pi/2, -pi/2)
+                        num_test_pulses = 2
+                    # print("WARNING, NUM_TEST_PULSES=2")
                     # print('play pulses', play_pulse, num_test_pulses)
 
                     self.safe_regwi(
@@ -512,17 +525,6 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     )
                     for k in range(num_test_pulses):
                         if play_pulse:
-                            # if j % 2 == 1:
-                            #     phase = 180
-                            # else:
-                            #     phase = 0
-                            # print("WARNING UPDATING PHASE OF PI/2 PULSE TO", phase)
-                            # self.safe_regwi(
-                            #     self.swap_rps[self.qSort],
-                            #     self.swap_rphase,
-                            #     self.deg2reg(phase, gen_ch=self.swap_chs[qSort]),
-                            # )
-
                             self.pulse(ch=self.swap_chs[qSort])
                             # print("pulse", i, j, k)
 
@@ -2853,7 +2855,7 @@ class PiMinusPiEgGfExperiment(Experiment):
 
         return data
 
-    def analyze(self, data=None, fit=True, scale=None):
+    def analyze(self, data=None, fit=True, scale=None, verbose=True):
         # scale should be [Ig, Qg, Ie, Qe] single shot experiment
         if data is None:
             data = self.data
@@ -2899,14 +2901,21 @@ class PiMinusPiEgGfExperiment(Experiment):
                     old_freq = self.cfg.device.qubit.f_EgGf[qSort]
                 else:
                     old_freq = self.cfg.device.qubit.f_EgGf_Q[qSort]
-                print(
-                    f"Fit best freq (Q{q})", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq
-                )
+                if verbose:
+                    print(
+                        f"Fit best freq (Q{q})",
+                        fit_freq,
+                        "which is",
+                        fit_freq - old_freq,
+                        "away from old freq",
+                        old_freq,
+                    )
             best_fit, best_fit_err = fitter.get_best_fit(
                 data, prefixes=[f"fit_q{qA}", f"fit_q{qB}"], check_measures=[data_name]
             )
             data["best_freq"] = np.average([best_fit[1] for q in self.cfg.expt.measure_qubits])
-            print(f"Best freq fitted", data["best_freq"])
+            if verbose:
+                print(f"Best freq fitted", data["best_freq"])
 
         return data
 
@@ -2923,7 +2932,8 @@ class PiMinusPiEgGfExperiment(Experiment):
 
         label = "($X_{\pi}, X_{-\pi})^N$"
         if self.cfg.expt.test_pi_half:
-            label = "($X_{\pi/2}, X_{-\pi/2})^N$"
+            # label = "($X_{\pi/2}, X_{-\pi/2})^N$"
+            label = "($X_{\pi/2}, X_{\pi/2}, X_{-\pi/2}, X_{-\pi/2})^N$"
         title = (
             f"Frequency Error Q{qA}/Q{qB} (Drive Gain {self.cfg.expt.gain}, Len {self.cfg.expt.length:.3f})\n {label}"
         )

@@ -197,7 +197,7 @@ def fit_gauss(xdata, ydata, fitparams=None):
     if fitparams[2] is None:
         fitparams[2] = (np.max(xdata) - np.min(xdata)) / 8
     if fitparams[3] is None:
-        fitparams[3] = np.min(ydata)
+        fitparams[3] = np.median(ydata)
     pOpt = fitparams
     # print('fitparams guess:', fitparams)
     pCov = np.full(shape=(len(fitparams), len(fitparams)), fill_value=np.inf)
