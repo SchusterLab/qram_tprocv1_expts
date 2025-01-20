@@ -441,12 +441,14 @@ def hist(
 ):
     Ig = data["Ig"]
     Qg = data["Qg"]
+    iqshots = [(Ig, Qg)]
+    state_labels = ["g"]
+    g_states = [0]
     if "Ie" in data.keys():
         Ie = data["Ie"]
         Qe = data["Qe"]
-        iqshots = [(Ig, Qg), (Ie, Qe)]
-        state_labels = ["g", "e"]
-        g_states = [0]
+        iqshots.append((Ie, Qe))
+        state_labels.append("e")
         e_states = [1]
 
         if "If" in data.keys():
@@ -459,10 +461,11 @@ def hist(
         if "If" in data.keys():
             If = data["If"]
             Qf = data["Qf"]
-            iqshots = [(Ig, Qg), (If, Qf)]
-            state_labels = ["g", "f"]
-            g_states = [0]
+            iqshots.append((If, Qf))
+            state_labels.append("f")
             e_states = [1]
+            
+    
 
     return general_hist(
         iqshots=iqshots,
