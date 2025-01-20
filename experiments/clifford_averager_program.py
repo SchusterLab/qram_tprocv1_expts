@@ -1508,6 +1508,7 @@ class CliffordAveragerProgram(AveragerProgram):
 
         # declare mux4 channel
         if "mux4" in self.res_ch_types:
+            # print("mux_gains", mux_gains)
             self.declare_gen(
                 ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch
             )
