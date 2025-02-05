@@ -1163,9 +1163,8 @@ class PiMinusPiExperiment(Experiment):
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
         else:
-            if self.cfg.expt.pulse_type != "robust":
-                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
-            else:
+            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            if self.cfg.expt.pulse_type == "robust" and not self.cfg.expt.sweep_phase:
                 old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
         if self.cfg.expt.sweep_phase:
             old_freq = 0
@@ -1225,9 +1224,8 @@ class PiMinusPiExperiment(Experiment):
         if self.checkEF:
             old_freq = self.cfg.device.qubit.f_ef[qTest * self.num_qubits_sample + qZZ]
         else:
-            if self.cfg.expt.pulse_type != "robust":
-                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
-            else:
+            old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
+            if self.cfg.expt.pulse_type == "robust" and not self.cfg.expt.sweep_phase:
                 old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
         if self.cfg.expt.sweep_phase:
             old_freq = 0
