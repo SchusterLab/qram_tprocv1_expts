@@ -2564,8 +2564,6 @@ class NPulseEgGfExperiment(Experiment):
             + (str(2) if self.cfg.expt.test_pi_half else "")
             + "N}$)"
         )
-        # label = "($X_{\pi/2}, X_{\pi}^{2n}$)"
-        # label = "($X_{\pi/2}, X_{\pi}^{n}$)"
         ax_qB = plt.subplot(212)
         ax_qB.tick_params(axis="both", which="major", labelsize=16)
         ax_qB.set_ylabel(f"QA ({self.cfg.expt.measure_qubits[1]}) (scaled)", fontsize=18)
@@ -3107,7 +3105,7 @@ class PiTrainEgGfGainSweepExperiment(Experiment):
         npulsecalib.cfg = deepcopy(self.cfg)
         npulsecalib.cfg.expt.update(
             dict(
-                start=2 * self.cfg.expt.start_N,  # number (pi, pi)^N, npulsecalib does (pi)^N
+                start=2 * self.cfg.expt.start_N + 1,  # set the n to do (pi, pi)^n, npulsecalib does (pi)^n
                 step=2 * self.cfg.expt.step_N,
                 expts=self.cfg.expt.expts_N,
                 skip_first_pi2=True,
@@ -3118,7 +3116,7 @@ class PiTrainEgGfGainSweepExperiment(Experiment):
             )
         )
 
-        for i_gain, gain in enumerate(tqdm(gain_sweep)):
+        for i_gain, gain in enumerate(tqdm(gain_sweep, disable=not progress)):
 
             npulsecalib.cfg.expt.update(
                 dict(
@@ -3172,12 +3170,12 @@ class PiTrainEgGfGainSweepExperiment(Experiment):
                 scale = np.max(data[data_name][iq, iN]) - np.min(data[data_name][iq, iN])
                 if q == qDrive:
                     scaled_data[iq, iN, :] = (
-                        scaled_e - data[data_name][iq, iN, :]
-                    ) / scale  # product over g population in all cycles
+                        data[data_name][iq, iN, :] - scaled_g
+                    ) / scale  # product over e population in all cycles
                 else:
                     scaled_data[iq, iN, :] = (
-                        data[data_name][iq, iN, :] - scaled_g
-                    ) / scale  # expect to end in e, so we compare relative to e
+                        scaled_e  - data[data_name][iq, iN, :]
+                    ) / scale  # expect to end in g, so we compare relative to e
             prods[iq] = np.sqrt(np.prod(scaled_data[iq], axis=0))
         data["products"] = prods
 
@@ -3221,7 +3219,7 @@ class PiTrainEgGfGainSweepExperiment(Experiment):
 
         label = "($X_{\pi}, X_{\pi})^N$"
         if self.cfg.expt.test_pi_half:
-            label = "($X_{\pi/2}, X_{\pi/2})^{2N}$"
+            label = "($X_{\pi/2}, X_{\pi/2})^{2N+1}$"
         title = f"Pi Train Gain Error Q{qA}/Q{qB} {label}\n Drive Freq {freq:.3f}, Len {length:.3f}"
 
         inner_sweep = gain_sweep

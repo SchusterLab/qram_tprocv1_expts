@@ -839,9 +839,15 @@ class EgGfFreqGainChevronExperiment(Experiment):
 
             # Scale the amplitude and add them together to increase SNR
             fit_data = np.zeros_like(data[data_name][0])
-            for q_index in range(len(self.cfg.expt.measure_qubits)):
+            for q_index, q in enumerate(self.cfg.expt.measure_qubits):
                 this_data = data[data_name][q_index]
-                fit_data += np.abs(this_data - np.median(this_data))  # / (np.max(this_data) - np.min(this_data))
+                # fit_data += np.abs(this_data - np.median(this_data))  # / (np.max(this_data) - np.min(this_data))
+
+                if q == self.cfg.expt.qDrive:
+                    sign = 1
+                else:
+                    sign = -1
+                fit_data += sign * (this_data - np.min(this_data)) / (np.max(this_data) - np.min(this_data))
 
                 # fit = [None] * len(x_sweep)
                 # fit_err = [None] * len(x_sweep)
@@ -867,6 +873,8 @@ class EgGfFreqGainChevronExperiment(Experiment):
                 idx_max = np.argmax(fit_data[:, idx])
                 freq_opt[idx] = y_sweep[idx_max]
                 amp_opt[idx] = fit_data[idx_max, idx]
+
+            data["fit_data"] = fit_data
             data["fit_freq"] = freq_opt
             data["metric_at_fit_freq"] = amp_opt
             idx_max_metric = np.argmax(amp_opt)
@@ -923,6 +931,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(max_freq, color="k", linestyle="--")
             plt.axvline(max_gain, color="k", linestyle="--")
+            print("QA: max at gain", max_gain, "freq", max_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -944,6 +953,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(max_freq, color="k", linestyle="--")
             plt.axvline(max_gain, color="k", linestyle="--")
+            print("QA: max at gain", max_gain, "freq", max_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -966,6 +976,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(min_freq, color="k", linestyle="--")
             plt.axvline(min_gain, color="k", linestyle="--")
+            print("QB: min at gain", min_gain, "freq", min_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -986,6 +997,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(max_freq, color="k", linestyle="--")
             plt.axvline(max_gain, color="k", linestyle="--")
+            print("QB: max at gain", max_gain, "freq", max_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -1034,6 +1046,8 @@ class EgGfFreqGainChevronExperiment(Experiment):
             ylabel="Pulse Frequency [MHz]",
         )
         plt.pcolormesh(x_sweep, y_sweep, data["amps"][0], cmap="viridis", shading="auto")
+        # print("WARNING PLOTTING SOMETHIGN DIFFERENT HERE")
+        # plt.pcolormesh(x_sweep, y_sweep, data["fit_data"], cmap="viridis", shading="auto")
         if fit:
             plt.plot(x_sweep, fit_freqs, color="k", linestyle="-.")
             plt.plot(x_sweep, fit_freqs_fit, color="r", linestyle="--")
