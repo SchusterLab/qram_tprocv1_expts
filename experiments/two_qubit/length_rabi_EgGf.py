@@ -11,7 +11,7 @@ from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
 from experiments.clifford_averager_program import (
-    QutritAveragerProgram,
+    CliffordEgGfAveragerProgram,
     post_select_shots,
     ps_threshold_adjust,
     rotate_and_threshold,
@@ -29,9 +29,8 @@ Measures Rabi oscillations by sweeping over the duration of the qubit drive puls
 """
 
 
-class LengthRabiEgGfProgram(QutritAveragerProgram):
+class LengthRabiEgGfProgram(CliffordEgGfAveragerProgram):
     def initialize(self):
-        super().initialize()
         self.qubits = self.cfg.expt.qubits
         qA, qB = self.qubits
 
@@ -50,117 +49,35 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
         self.qNotDrive = qNotDrive
         self.qSort = qSort
 
-        if qDrive == 1:
-            self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
-            self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-            mixer_freqs = self.cfg.hw.soc.dacs.swap.mixer_freq
-            self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf[qSort], gen_ch=self.swap_chs[qSort])
+        self.test_pi_half = "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half
+        self.tot_length_test_us = self.cfg.expt.sigma_test
+
+        # Override the default length parameters before initializing the clifford averager program
+        if self.test_pi_half:
+            if qDrive == 1:
+                self.cfg.device.qubit.pulses.pi_EgGf.half_sigma[qNotDrive] = self.tot_length_test_us
+                self.cfg.device.qubit.pulses.pi_EgGf.half_gain[qNotDrive] = self.cfg.expt.gain
+            else:
+                self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qDrive] = self.tot_length_test_us
+                self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qDrive] = self.cfg.expt.gain
         else:
-            self.swap_chs = self.cfg.hw.soc.dacs.swap_Q.ch
-            self.swap_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
-            mixer_freqs = self.cfg.hw.soc.dacs.swap_Q.mixer_freq
-            self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=self.swap_chs[qSort])
+            if qDrive == 1:
+                self.cfg.device.qubit.pulses.pi_EgGf.sigma[qNotDrive] = self.tot_length_test_us
+                self.cfg.device.qubit.pulses.pi_EgGf.gain[qDrive] = self.cfg.expt.gain
+            else:
+                self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qDrive] = self.tot_length_test_us
+                self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qDrive] = self.cfg.expt.gain
+            self.XEgGf_half_pulse(
+                qDrive=self.qDrive, qNotDrive=self.qNotDrive, set_reg=True, play=False, divide_len=False, reload=True
+            )
+
+        super().initialize()
 
         self.swap_rps = [
-            self.ch_page(ch) if ch != -1 else -1 for ch in self.swap_chs
+            self.ch_page(ch) if ch != -1 else -1 for ch in self.swap_Q_chs
         ]  # get register page for qubit_ch
 
-        mixer_freq = None
-        if self.swap_ch_types[qSort] == "int4":
-            mixer_freq = mixer_freqs[qSort]
-        if self.swap_chs[qSort] not in self.gen_chs:
-            self.declare_gen(
-                ch=self.swap_chs[qSort], nqz=self.cfg.hw.soc.dacs.swap.nyquist[qSort], mixer_freq=mixer_freq
-            )
-        # else: print(self.gen_chs[self.swap_chs[qSort]]['nqz'])
-
-        # update sigma in outer loop over averager program
-        self.sigma_test = self.us2cycles(self.cfg.expt.sigma_test, gen_ch=self.swap_chs[qSort])
-
-        # add swap pulse
-        if self.cfg.expt.pulse_type.lower() == "gauss" and self.cfg.expt.sigma_test > 0:
-            self.add_gauss(
-                ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=self.sigma_test, length=self.sigma_test * 4
-            )
-        elif self.cfg.expt.pulse_type.lower() == "flat_top" and self.cfg.expt.sigma_test > 0:
-            sigma_ramp_cycles = 3
-            if "sigma_ramp_cycles" in self.cfg.expt:
-                sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-            self.add_gauss(
-                ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=sigma_ramp_cycles, length=sigma_ramp_cycles * 4
-            )
-
-        self.test_pi_half = "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half
-
-        # add second (calibrated) swap pulse
-        if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
-            assert "qDrive_simul" in self.cfg.expt
-
-            qA, qB = self.cfg.expt.qubits_simul_swap
-
-            qSort_simul = qA
-            if qA == 1:
-                qSort_simul = qB
-            qDrive_simul = self.cfg.expt.qDrive_simul
-            qNotDrive_simul = -1
-            if qA == qDrive_simul:
-                qNotDrive_simul = qB
-            else:
-                qNotDrive_simul = qA
-            self.qDrive_simul = qDrive_simul
-            self.qNotDrive_simul = qNotDrive_simul
-            self.qSort_simul = qSort_simul
-
-            if qDrive_simul == 1:
-                self.swap_chs_simul = self.cfg.hw.soc.dacs.swap.ch
-                self.swap_ch_types_simul = self.cfg.hw.soc.dacs.swap.type
-                self.f_EgGf_reg_simul = self.freq2reg(
-                    self.cfg.device.qubit.f_EgGf[qSort_simul], gen_ch=self.swap_chs_simul[qSort_simul]
-                )
-                self.gain_EgGf_simul = self.cfg.device.qubit.pulses.pi_EgGf.gain[qSort_simul]
-                self.type_EgGf_simul = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort_simul]
-                self.sigma_EgGf_cycles_simul = self.us2cycles(
-                    self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort_simul], gen_ch=self.swap_chs_simul[qSort_simul]
-                )
-            else:
-                self.swap_chs_simul = self.cfg.hw.soc.dacs.swap_Q.ch
-                self.swap_ch_types_simul = self.cfg.hw.soc.dacs.swap_Q.type
-                self.f_EgGf_reg_simul = self.freq2reg(
-                    self.cfg.device.qubit.f_EgGf_Q[qSort_simul], gen_ch=self.swap_chs_simul[qSort_simul]
-                )
-                self.gain_EgGf_simul = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort_simul]
-                self.type_EgGf_simul = self.cfg.device.qubit.pulses.pi_EgGf_Q.type[qSort_simul]
-                self.sigma_EgGf_cycles_simul = self.us2cycles(
-                    self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort_simul], gen_ch=self.swap_chs_simul[qSort_simul]
-                )
-
-            if self.type_EgGf_simul.lower() == "gauss" and self.sigma_EgGf_cycles_simul > 0:
-                self.add_gauss(
-                    ch=self.swap_chs_simul[qSort_simul],
-                    name="pi_EgGf_swap_simul",
-                    sigma=self.sigma_EgGf_cycles_simul,
-                    length=self.sigma_EgGf_cycles_simul * 4,
-                )
-            elif self.type_EgGf_simul.lower() == "flat_top" and self.sigma_EgGf_cycles_simul > 0:
-                self.add_gauss(ch=self.swap_chs_simul[qSort_simul], name="pi_EgGf_swap_simul", sigma=3, length=3 * 4)
-
-        if (
-            "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None
-        ):  # add pihalf initialization pulse for error amplification
-            if self.cfg.expt.pulse_type.lower() == "gauss" and self.cfg.expt.sigma_test > 0:
-                sigma_test_half = self.sigma_test // 2
-                if self.test_pi_half:
-                    sigma_test_half = self.sigma_test
-                self.pi_half_sigma_test = sigma_test_half
-                self.add_gauss(
-                    ch=self.swap_chs[qSort],
-                    name="pi_EgGf_swap_half",
-                    sigma=self.pi_half_sigma_test,
-                    length=self.pi_half_sigma_test * 4,
-                )
-            # for flat top, use the same ramp gauss pulse for the pihalf pulse
-
-        self.swap_rphase = self.sreg(self.swap_chs[qSort], "phase")
+        self.swap_rphase = self.sreg(self.swap_Q_chs[qSort], "phase")
         self.sync_all(200)
 
     def body(self):
@@ -340,8 +257,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
         else:
             skip_first_pi2 = False
 
-        n_pulse_per_cycle = 1
-        if self.sigma_test > 0:
+        if self.tot_length_test_us > 0:
+            n_pulse_per_cycle = 1
             if "n_cycles" in self.cfg.expt and self.cfg.expt.n_cycles is not None:
                 n_cycles = self.cfg.expt.n_cycles
                 if self.pi_minuspi:
@@ -353,45 +270,8 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     if not skip_first_pi2:
                         # play the pihalf initialization for the error amplification
                         print("Playing pi/2 initialization")
-                        pulse_type = cfg.expt.pulse_type.lower()
-                        if pulse_type == "gauss":
-                            self.setup_and_pulse(
-                                ch=self.swap_chs[qSort],
-                                style="arb",
-                                freq=self.f_EgGf_reg,
-                                phase=0,
-                                gain=cfg.expt.gain,
-                                waveform="pi_EgGf_swap_half",
-                            )
-                        elif pulse_type == "flat_top":
-                            sigma_ramp_cycles = 3
-                            if "sigma_ramp_cycles" in self.cfg.expt:
-                                sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                            sigma_test_half = self.sigma_test // 2
-                            if self.test_pi_half:
-                                sigma_test_half = self.sigma_test
-                            flat_length_cycles = sigma_test_half - sigma_ramp_cycles * 4
-                            if flat_length_cycles >= 3:
-                                self.setup_and_pulse(
-                                    ch=self.swap_chs[qSort],
-                                    style="flat_top",
-                                    freq=self.f_EgGf_reg,
-                                    phase=0,
-                                    gain=cfg.expt.gain,
-                                    length=flat_length_cycles,
-                                    waveform="pi_EgGf_swap",
-                                )
-                        else:  # const
-                            self.setup_and_pulse(
-                                ch=self.swap_chs[qSort],
-                                style="const",
-                                freq=self.f_EgGf_reg,
-                                phase=0,
-                                gain=cfg.expt.gain,
-                                length=self.sigma_test // 2,
-                            )  # , phrst=1)
+                        self.XEgGf_half_pulse(qDrive=self.qDrive, qNotDrive=self.qNotDrive, play=True)
                         self.sync_all()
-
             else:
                 n_cycles = 1
                 n_pulse_per_cycle = 1  # (pi/2 or pi)^1
@@ -399,51 +279,9 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                 n_pulse_per_cycle = 2  # (pi/2, +/- pi/2)^N
 
             # set pulse regs to save memory for iteration
-            pulse_type = cfg.expt.pulse_type.lower()
-            # pulse_type = "const"
-            # print("WARNING OVERRIDING PULSE TYPE")
-            if pulse_type == "gauss":
-                self.set_pulse_registers(
-                    ch=self.swap_chs[qSort],
-                    style="arb",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=cfg.expt.gain,
-                    waveform="pi_EgGf_swap",
-                )  # , phrst=1)
-            elif pulse_type == "flat_top":
-                sigma_ramp_cycles = 3
-                if "sigma_ramp_cycles" in self.cfg.expt:
-                    sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
-                # print(
-                #     "gain",
-                #     cfg.expt.gain,
-                #     "len",
-                #     self.cycles2us(flat_length_cycles, gen_ch=self.swap_chs[qSort]),
-                #     "freq",
-                #     self.reg2freq(self.f_EgGf_reg, gen_ch=self.swap_chs[qSort]),
-                # )
-                if flat_length_cycles >= 3:
-                    self.set_pulse_registers(
-                        ch=self.swap_chs[qSort],
-                        style="flat_top",
-                        freq=self.f_EgGf_reg,
-                        phase=0,
-                        gain=cfg.expt.gain,
-                        length=flat_length_cycles,
-                        waveform="pi_EgGf_swap",
-                    )
-                    # phrst=1)
-            else:  # const
-                self.set_pulse_registers(
-                    ch=self.swap_chs[qSort],
-                    style="const",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=cfg.expt.gain,
-                    length=self.sigma_test,
-                )  # , phrst=1)
+            self.XEgGf_half_pulse(
+                qDrive=self.qDrive, qNotDrive=self.qNotDrive, set_reg=True, play=False, divide_len=self.test_pi_half
+            )
 
             # ============
             # loop over error amplification (if no amplification we just loop 1x)
@@ -456,40 +294,11 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     # do the simultaneous 2q swap
                     if "qubits_simul_swap" in self.cfg.expt and self.cfg.expt.qubits_simul_swap is not None:
                         assert (
-                            self.swap_chs_simul[self.qSort_simul] != self.swap_chs[self.qSort]
+                            self.swap_Q_chs_simul[self.qSort_simul] != self.swap_Q_chs[self.qSort]
                         ), "simultaneous swap should be on a different generator channel!"
-                        pulse_type = self.type_EgGf_simul.lower()
-                        if pulse_type == "gauss":
-                            self.setup_and_pulse(
-                                ch=self.swap_chs_simul[self.qSort_simul],
-                                style="arb",
-                                freq=self.f_EgGf_reg_simul,
-                                phase=0,
-                                gain=self.gain_EgGf_simul,
-                                waveform="pi_EgGf_swap_simul",
-                            )
-                        elif pulse_type == "flat_top":
-                            flat_length_cycles = self.sigma_EgGf_cycles_simul - sigma_ramp_cycles * 4
-                            if flat_length_cycles >= 3:
-                                self.pulse(ch=self.swap_chs_simul[self.qSort_simul])
-                                self.sync_all()
-                                self.setup_and_pulse(
-                                    style="flat_top",
-                                    freq=self.f_EgGf_reg_simul,
-                                    phase=0,
-                                    gain=self.gain_EgGf_simul,
-                                    length=flat_length_cycles,
-                                    waveform="pi_EgGf_swap_simul",
-                                )
-                        else:  # const
-                            self.setup_and_pulse(
-                                ch=self.swap_chs_simul[self.qSort_simul],
-                                style="const",
-                                freq=self.f_EgGf_reg_simul,
-                                phase=0,
-                                gain=self.gain_EgGf_simul,
-                                length=self.sigma_EgGf_cycles_simul,
-                            )
+                        self.XEgGf_pulse(
+                            qDrive=self.qSort_simul, qNotDrive=self.qNotDrive, play=True, sync_after=False
+                        )
                         # DO NOT SYNC FOR SIMULTANEOUS PULSE
 
                     phase = 0
@@ -503,15 +312,7 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     # print("WARNING ADJUSTED Z BETWEEN EACH PI TO", phase)
 
                     # apply Eg -> Gf pulse on qDrive: expect to end in Gf
-                    pulse_type = cfg.expt.pulse_type.lower()
-                    play_pulse = True
                     # print('pulse type', pulse_type, flat_length_cycles)
-                    sigma_ramp_cycles = 3
-                    if "sigma_ramp_cycles" in self.cfg.expt:
-                        sigma_ramp_cycles = self.cfg.expt.sigma_ramp_cycles
-                    flat_length_cycles = self.sigma_test - sigma_ramp_cycles * 4
-                    if pulse_type == "flat_top" and flat_length_cycles <= 3:
-                        play_pulse = False
                     num_test_pulses = 1
 
                     if self.pi_minuspi and self.test_pi_half:
@@ -521,16 +322,15 @@ class LengthRabiEgGfProgram(QutritAveragerProgram):
                     # print('play pulses', play_pulse, num_test_pulses)
 
                     self.safe_regwi(
-                        self.swap_rps[self.qSort], self.swap_rphase, self.deg2reg(phase, gen_ch=self.swap_chs[qSort])
+                        self.swap_rps[self.qSort], self.swap_rphase, self.deg2reg(phase, gen_ch=self.swap_Q_chs[qSort])
                     )
                     for k in range(num_test_pulses):
-                        if play_pulse:
-                            self.pulse(ch=self.swap_chs[qSort])
-                            # print("pulse", i, j, k)
+                        self.pulse(ch=self.swap_Q_chs[qSort])
+                        # print("pulse", i, j, k)
 
-                            # print("playing pulse with phase", phase)
-                            # print("WARNING ADDING WAIT TIME BEFORE SECOND PULSE")
-                            # self.sync_all(150)
+                        # print("playing pulse with phase", phase)
+                        # print("WARNING ADDING WAIT TIME BEFORE SECOND PULSE")
+                        # self.sync_all(150)
                     self.sync_all()
 
         setup_measure = None
@@ -718,10 +518,10 @@ class LengthRabiEgGfExperiment(Experiment):
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
         else:
-            if test_pi_half:
-                self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
-                    qSort
-                ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
+            # if test_pi_half:
+            #     self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
+            #         qSort
+            #     ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
                 if test_pi_half:
@@ -1895,10 +1695,6 @@ class EgGfFreqLenChevronExperiment(Experiment):
             if "pulse_type" not in self.cfg.expt:
                 self.cfg.expt.pulse_type = self.cfg.device.qubit.pulses.pi_EgGf.type[qSort]
         else:
-            if test_pi_half:
-                self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
-                    qSort
-                ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
                 if test_pi_half:
@@ -2429,9 +2225,6 @@ class NPulseEgGfExperiment(Experiment):
             self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort]
             if test_pi_half:
                 self.cfg.expt.length = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_sigma[qSort]
-                self.cfg.device.qubit.f_EgGf_Q[qSort] = self.cfg.device.qubit.f_EgGf_Q_half[
-                    qSort
-                ]  # you only want to do this for the NPulse experiment because you're not sweeping f_EgGf_Q
             if "gain" not in self.cfg.expt:
                 self.cfg.expt.gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qSort]
                 if test_pi_half:
@@ -2812,10 +2605,16 @@ class PiMinusPiEgGfExperiment(Experiment):
                         assert False, "more qubits not implemented for measure f"
                     cfg.expt.setup_measure = "qDrive_ef"  # measure g vs. f (e)
 
-                    if qDrive == 1:
-                        cfg.device.qubit.f_EgGf[qSort] = freq
+                    if test_pi_half:
+                        if qDrive == 1:
+                            cfg.device.qubit.f_EgGf_half[qSort] = freq
+                        else:
+                            cfg.device.qubit.f_EgGf_Q_half[qSort] = freq
                     else:
-                        cfg.device.qubit.f_EgGf_Q[qSort] = freq
+                        if qDrive == 1:
+                            cfg.device.qubit.f_EgGf[qSort] = freq
+                        else:
+                            cfg.device.qubit.f_EgGf_Q[qSort] = freq
                     cfg.expt.n_cycles = n_cycles
 
                     lengthrabi = LengthRabiEgGfProgram(soccfg=self.soccfg, cfg=cfg)
@@ -3174,7 +2973,7 @@ class PiTrainEgGfGainSweepExperiment(Experiment):
                     ) / scale  # product over e population in all cycles
                 else:
                     scaled_data[iq, iN, :] = (
-                        scaled_e  - data[data_name][iq, iN, :]
+                        scaled_e - data[data_name][iq, iN, :]
                     ) / scale  # expect to end in g, so we compare relative to e
             prods[iq] = np.sqrt(np.prod(scaled_data[iq], axis=0))
         data["products"] = prods
