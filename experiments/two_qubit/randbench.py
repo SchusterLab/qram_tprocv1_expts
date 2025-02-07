@@ -190,8 +190,24 @@ clifford_1q_names = list(clifford_1q.keys())
 assert (
     len(clifford_1q_names) == 24
 ), f"you have {len(clifford_1q_names)} elements in your Clifford group instead of 24!"
-print(len(clifford_1q_names), "elements in clifford_1q")
-print(clifford_1q_names)
+# print(len(clifford_1q_names), "elements in clifford_1q")
+# print(clifford_1q_names)
+
+# Get the average number of X/2 gates per Clifford gate
+count = 0
+for n in range(len(clifford_1q_names)):  # n is index in clifford_1q_names
+    gates = clifford_1q_names[n].split(",")
+    for gate in gates:
+        # print(gate)
+        if gate == "I" or "Z" in gate:
+            continue
+        if "/2" in gate:
+            count += 1
+            # print("added 1 to count")
+        else:
+            count += 2
+            # print("added 2 to count")
+# print("Average number of X/2 gates per Clifford gate:", count / len(clifford_1q_names))
 
 for name, matrix in clifford_1q.items():
     z_new = np.argmax(matrix[:, 0])  # +Z goes to row where col 0 is 1
@@ -1649,8 +1665,6 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
             self.X_pulse(q=0, play=True)  # ZZ qubit for the q3/q1 swap
             ZZ_qubit = 0
 
-        # print('CAREFULL NOT INITIATING Q1 IN E')
-
         self.X_pulse(
             q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
         )
@@ -1872,7 +1886,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 gate_list.append(total_gate)  # make sure to do the inverse gate
 
                 # gate_list = ["I"]
-                # gate_list = ["X"] * (501)
+                # gate_list = ["X", "I"]
                 # gate_list = ["X", "X", "X", "X", "I"]
                 # gate_list = ["X/2", "X/2", "-X/2", "-X/2", "I"]
 
@@ -1881,7 +1895,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 # gate_list = ["X/2", "X", "Z", "X", "-Z", "-X/2", "I"]
 
                 # gate_list.append("I")
-                # print("gate_list =", gate_list)
+
+                print("gate_list =", gate_list)
+
                 gate_list_variations[i_depth].append(gate_list)
 
                 if "validate_variations" in self.cfg.expt and self.cfg.expt.validate_variations:
@@ -1950,6 +1966,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                     g_prog = calib_prog_dict["gg"]
                     Ig, Qg = g_prog.get_shots(verbose=False)
+                    shot_calib = dict(Ig=Ig, Qg=Qg, Ie=[], Qe=[])
 
                     # Get readout angle + threshold for qubits
                     for qi, q in enumerate(sscfg.expt.tomo_qubits):
@@ -1957,6 +1974,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
                         calib_e_state = calib_e_state[:qi] + "e" + calib_e_state[qi + 1 :]
                         e_prog = calib_prog_dict[calib_e_state]
                         Ie, Qe = e_prog.get_shots(verbose=False)
+                        shot_calib["Ie"].append(Ie[q])
+                        shot_calib["Qe"].append(Qe[q])
                         shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=Ie[q], Qe=Qe[q])
                         print(f"Qubit ({q}) ge")
                         fid, threshold, angle = hist(
@@ -2031,7 +2050,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             self.cfg.expt.post_process == "threshold"
                         ), "Can only bin EgGf RB properly using threshold"
 
-                        if self.cfg.expt.post_process == "threshold":                            
+                        if self.cfg.expt.post_process == "threshold":
                             shots, _ = randbench.get_shots(
                                 angle=angles_q, threshold=thresholds_q, amplitude_mode=full_mux_expt
                             )
@@ -2040,6 +2059,74 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             data["counts_raw"][0, loop, i_depth, var, :] = counts
                             # print('variation', var, 'gate list', gate_list, 'counts', counts)
                             # print("variation", var, "counts", counts)
+
+                            # print("plotting shots")
+                            # I_shot, Q_shot = randbench.get_shots(verbose=False)
+                            # for qi, q in enumerate(sscfg.expt.tomo_qubits):
+                            #     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                            #     ax.scatter(
+                            #         I_shot[q],
+                            #         Q_shot[q],
+                            #         marker=".",
+                            #         edgecolor="None",
+                            #         alpha=0.3,
+                            #         color=default_colors[0],
+                            #         label="depth %i, var %i" % (depths[i_depth], var),
+                            #         zorder=1,
+                            #     )
+                            #     ax.scatter(
+                            #         np.average(I_shot[q]),
+                            #         np.average(Q_shot[q]),
+                            #         marker="o",
+                            #         facecolor=default_colors[0],
+                            #         s=50,
+                            #         edgecolor="black",
+                            #         linewidth=1,
+                            #         zorder=2,
+                            #     )
+                            #     ax.scatter(
+                            #         shot_calib[f"Ig"][q],
+                            #         shot_calib[f"Qg"][q],
+                            #         marker=".",
+                            #         edgecolor="None",
+                            #         alpha=0.3,
+                            #         color=default_colors[1],
+                            #         label="g",
+                            #         zorder=1,
+                            #     )
+                            #     ax.scatter(
+                            #         shot_calib[f"Ie"][qi],
+                            #         shot_calib[f"Qe"][qi],
+                            #         marker=".",
+                            #         edgecolor="None",
+                            #         alpha=0.3,
+                            #         color=default_colors[2],
+                            #         label="e",
+                            #         zorder=1,
+                            #     )
+                            #     ax.scatter(
+                            #         np.average(shot_calib[f"Ig"][q]),
+                            #         np.average(shot_calib[f"Qg"][q]),
+                            #         marker="o",
+                            #         facecolor=default_colors[1],
+                            #         s=50,
+                            #         edgecolor="black",
+                            #         linewidth=1,
+                            #         zorder=2,
+                            #     )
+                            #     ax.scatter(
+                            #         np.average(shot_calib[f"Ie"][qi]),
+                            #         np.average(shot_calib[f"Qe"][qi]),
+                            #         marker="o",
+                            #         facecolor=default_colors[2],
+                            #         s=50,
+                            #         edgecolor="black",
+                            #         linewidth=1,
+                            #         zorder=2,
+                            #     )
+                            #     ax.set_title(f"Qubit {q}")
+                            #     ax.legend()
+                            #     plt.show()
 
             # ================= #
             # Measure the same thing with g/f distinguishing
@@ -2090,6 +2177,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                 g_prog = calib_prog_dict["gg"]
                 Ig, Qg = g_prog.get_shots(verbose=False)
+                shot_calib = dict(Ig=Ig, Qg=Qg, If=[], Qf=[])
 
                 # Get readout angle + threshold for qubits to distinguish g/f on one of the qubits
                 for qi, q in enumerate(sscfg.expt.tomo_qubits):
@@ -2100,6 +2188,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     f_prog = calib_prog_dict[calib_f_state]
                     If, Qf = f_prog.get_shots(verbose=False)
                     shot_data = dict(Ig=Ig[q], Qg=Qg[q], Ie=If[q], Qe=Qf[q])
+                    shot_calib["If"].append(If[q])
+                    shot_calib["Qf"].append(Qf[q])
                     print(f'Qubit ({q}){f" gf" if q == q_measure_f else " ge"}')
                     fid, threshold, angle = hist(
                         data=shot_data, plot=debug, verbose=False, amplitude_mode=local_amplitude_mode
@@ -2192,6 +2282,75 @@ class SimultaneousRBEgGfExperiment(Experiment):
                                 amplitude_mode=local_amplitude_mode,
                                 flip_threshold_all_q=flip_threshold_all_q,
                             )
+
+                            # print("plotting shots")
+                            # I_shot, Q_shot = randbench.get_shots(verbose=False)
+                            # for qi, q in enumerate(sscfg.expt.tomo_qubits):
+                            #     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                            #     ax.scatter(
+                            #         I_shot[q],
+                            #         Q_shot[q],
+                            #         marker=".",
+                            #         edgecolor="None",
+                            #         alpha=0.3,
+                            #         color=default_colors[0],
+                            #         label="depth %i, var %i" % (depths[i_depth], var),
+                            #         zorder=1,
+                            #     )
+                            #     ax.scatter(
+                            #         np.average(I_shot[q]),
+                            #         np.average(Q_shot[q]),
+                            #         marker="o",
+                            #         facecolor=default_colors[0],
+                            #         s=50,
+                            #         edgecolor="black",
+                            #         linewidth=1,
+                            #         zorder=2,
+                            #     )
+                            #     ax.scatter(
+                            #         shot_calib[f"Ig"][q],
+                            #         shot_calib[f"Qg"][q],
+                            #         marker=".",
+                            #         edgecolor="None",
+                            #         alpha=0.3,
+                            #         color=default_colors[1],
+                            #         label="g",
+                            #         zorder=1,
+                            #     )
+                            #     ax.scatter(
+                            #         np.average(shot_calib[f"Ig"][q]),
+                            #         np.average(shot_calib[f"Qg"][q]),
+                            #         marker="o",
+                            #         facecolor=default_colors[1],
+                            #         s=50,
+                            #         edgecolor="black",
+                            #         linewidth=1,
+                            #         zorder=2,
+                            #     )
+                            #     ax.scatter(
+                            #         shot_calib[f"If"][qi],
+                            #         shot_calib[f"Qf"][qi],
+                            #         marker=".",
+                            #         edgecolor="None",
+                            #         alpha=0.3,
+                            #         color=default_colors[2],
+                            #         label="f",
+                            #         zorder=1,
+                            #     )
+                            #     ax.scatter(
+                            #         np.average(shot_calib[f"If"][qi]),
+                            #         np.average(shot_calib[f"Qf"][qi]),
+                            #         marker="o",
+                            #         facecolor=default_colors[2],
+                            #         s=50,
+                            #         edgecolor="black",
+                            #         linewidth=1,
+                            #         zorder=2,
+                            #     )
+                            #     ax.set_title(f"Qubit {q}")
+                            #     ax.legend()
+                            #     plt.show()
+
                             # 00, 02, 10, 12
                             counts = np.array([tomo_analysis.sort_counts([shots[adcNotDrive_ch], shots[adcDrive_ch]])])
                             data["counts_raw"][1, loop, i_depth, var, :] = counts
@@ -2470,7 +2629,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             probs_gf_subspace_avg,
             fmt="o",
             yerr=probs_gf_subspace_err,
-            color=default_colors[5],
+            color=default_colors[5 % len(default_colors)],
             elinewidth=0.75,
             label="gf/subspace probability",
         )
