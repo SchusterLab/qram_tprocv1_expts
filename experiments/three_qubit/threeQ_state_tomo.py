@@ -173,8 +173,14 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
         # pass in kwargs via cfg.expt.state_prep_kwargs
         prep_state = kwargs["prep_state"]  # should be xxx
 
-        num_in_e = np.sum([char == "e" for char in prep_state])  # number of qubits in e
-        # print(prep_state)
+        prep_state_ef = prep_state.replace("f", "e")
+        num_in_e = np.sum([char == "e" for char in prep_state_ef])  # number of qubits in e or f
+        num_in_f = np.sum([char == "f" for char in prep_state])  # number of qubits in f
+        assert num_in_f <= 1, "Multiple f states not implemented"
+        if num_in_f > 0:
+            i_f = prep_state.index("f")
+            freq_f = self.f_efs[qubits[i_f], qubits[i_f]]
+        print(prep_state)
 
         # Do all the calibrations with Q1 in 0+1
         setup_q1_e = False
@@ -194,19 +200,25 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
         else:
             if num_in_e == 0:
                 return
-            first_e = prep_state.index("e")
+            first_e = prep_state_ef.index("e")
             if num_in_e >= 1:
-                # print(prep_state, f'pulse {first_e}')
+                print(prep_state_ef, f"pulse {first_e}")
                 self.X_pulse(q=qubits[first_e], play=True)
+                if num_in_f > 0:
+                    assert self.f_efs[qubits[i_f], qubits[first_e]] > 0, f"uncalibrated ef freq for q {qubits[i_f]} ZZ {qubits[first_e]}"
+                    freq_f += self.f_efs[qubits[i_f], qubits[first_e]] - self.f_efs[qubits[i_f], qubits[i_f]]
         # print('first', first_e)
 
         if num_in_e >= 2:  # ee
-            second_e = prep_state[first_e + 1 :].index("e") + first_e + 1
+            second_e = prep_state_ef[first_e + 1 :].index("e") + first_e + 1
             self.X_pulse(q=qubits[second_e], ZZ_qubit=qubits[first_e], play=True)
-            # print('second', second_e)
+            if num_in_f > 0:
+                assert self.f_efs[qubits[i_f], qubits[second_e]] > 0, f"uncalibrated ef freq for q {qubits[i_f]} ZZ {qubits[second_e]}"
+                freq_f += self.f_efs[qubits[i_f], qubits[second_e]] - self.f_efs[qubits[i_f], qubits[i_f]]
+            print("second", second_e)
 
         if num_in_e >= 3:  # eee
-            third_e = prep_state[second_e + 1 :].index("e") + second_e + 1
+            third_e = prep_state_ef[second_e + 1 :].index("e") + second_e + 1
             if self.use_robust_pulses:
                 self.X_pulse(q=qubits[third_e], play=True)
             else:
@@ -218,15 +230,18 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 freq = self.freq2reg(freq, gen_ch=self.qubit_chs[qubits[third_e]])
                 waveform = f"pi_ge_q{qubits[third_e]}"
                 gain = self.pi_ge_gains[qubits[third_e], qubits[third_e]]
-                # print(prep_state, f'pulse {third_e}')
+                print(prep_state_ef, f"pulse {third_e}")
                 self.setup_and_pulse(
                     ch=self.qubit_chs[qubits[third_e]], style="arb", freq=freq, phase=0, gain=gain, waveform=waveform
                 )
                 self.sync_all()
+            if num_in_f > 0:
+                assert self.f_efs[qubits[i_f], qubits[third_e]] > 0, f"uncalibrated ef freq for q {qubits[i_f]} ZZ {qubits[third_e]}"
+                freq_f += self.f_efs[qubits[i_f], qubits[third_e]] - self.f_efs[qubits[i_f], qubits[i_f]]
             # print('third', third_e)
 
         if num_in_e >= 4:  # eeee
-            fourth_e = prep_state[second_e + 1 :].index("e") + second_e + 1
+            fourth_e = prep_state_ef[second_e + 1 :].index("e") + second_e + 1
             if self.use_robust_pulses:
                 self.X_pulse(q=qubits[third_e], play=True)
             else:
@@ -239,12 +254,27 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 freq = self.freq2reg(freq, gen_ch=self.qubit_chs[qubits[fourth_e]])
                 waveform = f"pi_ge_q{qubits[fourth_e]}"
                 gain = self.pi_ge_gains[qubits[fourth_e], qubits[fourth_e]]
-                # print(prep_state, f'pulse {fourth_e}')
+                print(prep_state_ef, f"pulse {fourth_e}")
                 self.setup_and_pulse(
                     ch=self.qubit_chs[qubits[fourth_e]], style="arb", freq=freq, phase=0, gain=gain, waveform=waveform
                 )
                 self.sync_all()
+            if num_in_f > 0:
+                assert self.f_efs[qubits[i_f], qubits[fourth_e]] > 0, f"uncalibrated ef freq for q {qubits[i_f]} ZZ {qubits[fourth_e]}"
+                freq_f += self.f_efs[qubits[i_f], qubits[fourth_e]] - self.f_efs[qubits[i_f], qubits[i_f]]
                 # print('fourth', fourth_e)
+
+        if num_in_f > 0:
+            freq = self.freq2reg(freq_f, gen_ch=self.qubit_chs[qubits[i_f]])
+            waveform = f"pi_ef_half_q{qubits[i_f]}"
+            gain = self.pi_ge_half_gains[qubits[i_f], qubits[i_f]]
+            print(prep_state_ef, f"pulse f {i_f} with freq", freq_f)
+            for i in range(2):
+                self.setup_and_pulse(
+                    ch=self.qubit_chs[qubits[i_f]], style="arb", freq=freq, phase=0, gain=gain, waveform=waveform
+                )
+            self.sync_all()
+            # print('f', f)
 
     def initialize(self):
         self.cfg.expt.basis = "ZZZ"

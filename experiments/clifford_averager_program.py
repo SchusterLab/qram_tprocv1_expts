@@ -217,15 +217,15 @@ def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles, amplitude_m
     return ps_thresholds
 
 
-def flat_top_pulse(total_length, sigma, sigma_n, npts=500):
+def flat_top_pulse(total_length, t_rise, sigma_n, npts=500):
     """
     total_length: total length of the pulse
-    sigma: sigma of the gaussian ramp up and ramp down
-    sigma_n: number of sigmas, so total time ramp up + ramp down is sigma_n * sigma
+    t_rise: total time of the ramp up and time of the ramp down
+    sigma_n: total number of sigmas for both the ramp up and ramp down added together
     """
     times = np.linspace(0, total_length, npts)
     output = np.ones_like(times)
-    t_rise = sigma_n * sigma / 2
+    sigma = 2 * t_rise / sigma_n
     output[times < t_rise] = fitter.gaussian(times, a=1, x0=t_rise, sigma=sigma, y0=0)[times < t_rise]
     output[times >= total_length - t_rise] = fitter.gaussian(times, a=1, x0=total_length - t_rise, sigma=sigma, y0=0)[
         times >= total_length - t_rise
@@ -397,7 +397,7 @@ class CliffordAveragerProgram(AveragerProgram):
         name,
         waveformname=None,
         ch=None,
-        sigma_ramp_us=0.003,  # us
+        t_rise_us=0.003,  # us
         sigma_n=4,
         tot_length_us=None,  # us
         freq_MHz=None,
@@ -418,12 +418,16 @@ class CliffordAveragerProgram(AveragerProgram):
         (i.e. sigma, sigma_n follow the slightly broken qick convention)
         """
         if name not in self.pulse_dict.keys() or reload:
-            assert None not in [sigma_ramp_us, sigma_n, tot_length_us]
-            times_us, I_mhz_vs_us = flat_top_pulse(
-                total_length=tot_length_us + sigma_n * sigma_ramp_us,
-                sigma=sigma_ramp_us / np.sqrt(2),
-                sigma_n=sigma_n * np.sqrt(2),
-            )
+            assert None not in [t_rise_us, sigma_n, tot_length_us]
+            if tot_length_us < 2*t_rise_us or tot_length_us < self.cycles2us(3):
+                times_us = np.linspace(0, max(tot_length_us, self.cycles2us(3)), 10)
+                I_mhz_vs_us = np.zeros_like(times_us)
+            else:
+                times_us, I_mhz_vs_us = flat_top_pulse(
+                    total_length=tot_length_us,
+                    t_rise=t_rise_us,
+                    sigma_n=sigma_n * np.sqrt(2),
+                )
         else:
             times_us, I_mhz_vs_us = None, None
 
@@ -2552,8 +2556,7 @@ class CliffordEgGfAveragerProgram(QutritAveragerProgram):
                 name=f"{name}_{qNotDrive}{qDrive}",
                 ch=ch,
                 waveformname=f"{waveformname}_{qNotDrive}{qDrive}",
-                # sigma_ramp_us=self.cycles2us(3, gen_ch=ch),
-                # sigma_ramp_us=sigma_ramp_us,
+                # t_rise_us=2*self.cycles2us(3, gen_ch=ch),
                 # sigma_n=sigma_n,
                 tot_length_us=sigma_us,
                 freq_MHz=f_EgGf_MHz,

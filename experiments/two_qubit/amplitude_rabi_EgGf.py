@@ -63,13 +63,13 @@ class AmplitudeRabiEgGfProgram(QutritRAveragerProgram):
         ch = self.swap_Q_chs[qDrive]
 
         name = f"{name}_{qNotDrive}{qDrive}"
-        # sigma_ramp_us = self.cycles2us(3, gen_ch=ch)
-        sigma_ramp_us = 0.002
+        # t_rise_us = self.cycles2us(3, gen_ch=ch)
+        # t_rise_us = 0.003
         self.handle_flat_top_pulse(
             name=name,
             ch=ch,
             waveformname=f"{waveformname}_{qNotDrive}{qDrive}",
-            sigma_ramp_us=sigma_ramp_us,
+            # t_rise_us=t_rise_us,
             # sigma_n=sigma_n,
             tot_length_us=self.tot_length_test_us,
             freq_MHz=f_EgGf_MHz,
