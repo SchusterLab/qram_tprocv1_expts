@@ -180,7 +180,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
         if num_in_f > 0:
             i_f = prep_state.index("f")
             freq_f = self.f_efs[qubits[i_f], qubits[i_f]]
-        print(prep_state)
+        # print(prep_state)
 
         # Do all the calibrations with Q1 in 0+1
         setup_q1_e = False
@@ -202,7 +202,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 return
             first_e = prep_state_ef.index("e")
             if num_in_e >= 1:
-                print(prep_state_ef, f"pulse {first_e}")
+                # print(prep_state_ef, f"pulse {first_e}")
                 self.X_pulse(q=qubits[first_e], play=True)
                 if num_in_f > 0:
                     assert self.f_efs[qubits[i_f], qubits[first_e]] > 0, f"uncalibrated ef freq for q {qubits[i_f]} ZZ {qubits[first_e]}"
@@ -215,7 +215,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
             if num_in_f > 0:
                 assert self.f_efs[qubits[i_f], qubits[second_e]] > 0, f"uncalibrated ef freq for q {qubits[i_f]} ZZ {qubits[second_e]}"
                 freq_f += self.f_efs[qubits[i_f], qubits[second_e]] - self.f_efs[qubits[i_f], qubits[i_f]]
-            print("second", second_e)
+            # print("second", second_e)
 
         if num_in_e >= 3:  # eee
             third_e = prep_state_ef[second_e + 1 :].index("e") + second_e + 1
@@ -230,7 +230,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 freq = self.freq2reg(freq, gen_ch=self.qubit_chs[qubits[third_e]])
                 waveform = f"pi_ge_q{qubits[third_e]}"
                 gain = self.pi_ge_gains[qubits[third_e], qubits[third_e]]
-                print(prep_state_ef, f"pulse {third_e}")
+                # print(prep_state_ef, f"pulse {third_e}")
                 self.setup_and_pulse(
                     ch=self.qubit_chs[qubits[third_e]], style="arb", freq=freq, phase=0, gain=gain, waveform=waveform
                 )
@@ -254,7 +254,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
                 freq = self.freq2reg(freq, gen_ch=self.qubit_chs[qubits[fourth_e]])
                 waveform = f"pi_ge_q{qubits[fourth_e]}"
                 gain = self.pi_ge_gains[qubits[fourth_e], qubits[fourth_e]]
-                print(prep_state_ef, f"pulse {fourth_e}")
+                # print(prep_state_ef, f"pulse {fourth_e}")
                 self.setup_and_pulse(
                     ch=self.qubit_chs[qubits[fourth_e]], style="arb", freq=freq, phase=0, gain=gain, waveform=waveform
                 )
@@ -268,7 +268,7 @@ class ErrorMitigationStateTomo3QProgram(AbstractStateTomo3QProgram):
             freq = self.freq2reg(freq_f, gen_ch=self.qubit_chs[qubits[i_f]])
             waveform = f"pi_ef_half_q{qubits[i_f]}"
             gain = self.pi_ge_half_gains[qubits[i_f], qubits[i_f]]
-            print(prep_state_ef, f"pulse f {i_f} with freq", freq_f)
+            # print(prep_state_ef, f"pulse f {i_f} with freq", freq_f)
             for i in range(2):
                 self.setup_and_pulse(
                     ch=self.qubit_chs[qubits[i_f]], style="arb", freq=freq, phase=0, gain=gain, waveform=waveform
