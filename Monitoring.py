@@ -65,12 +65,12 @@ class Monitoring:
             "time": [],
         },
         "t2": {
-            "reps_spectro": 1000,
+            "reps_spectro": 100,
             "span_spectro": 10,
             "npts_spectro": 100,
-            "rounds_spectro": 1,
+            "rounds_spectro": 10,
             "probe_length": 5,
-            "probe_gain": 50,
+            "probe_gain": 1500,
             "reps_ramsey": 1000,
             "step_ramsey": 75,
             "npts_ramsey": 100,
@@ -88,10 +88,10 @@ class Monitoring:
             "time": [],
         },
         "pi": {
-            "reps": 100,
+            "reps": 1000,
             "npts": 50,
             "freq_qb": None,
-            "rounds": 10,
+            "rounds": 1,
             "value": None,
             "value_half": None,
             "stored": [],
@@ -161,8 +161,11 @@ class Monitoring:
                  debug=False,
                  using_LO=False, 
                  live_plot=True, 
-                 resonator_reset=[0, 2, 3],
-                 full_mux_expt=True):
+                 resonator_reset=None,
+                 full_mux_expt=True, 
+                 use_robust_pulses=True, 
+                 test_pi_half = True,
+                 divide_len = True):
         
        
         self.debug = debug
@@ -207,6 +210,9 @@ class Monitoring:
         
         self.resonator_reset = resonator_reset
         self.full_mux_expt = full_mux_expt
+        self.use_robust_pulses = use_robust_pulses
+        self.test_pi_half = test_pi_half
+        self.divide_len = divide_len
 
         # update the length of the zz param
 
@@ -674,21 +680,20 @@ class Monitoring:
             qTest=qubit_test,
             qZZ=qZZ,
             checkEF=EF,
+            full_mux_expt=self.full_mux_expt,
+            resonator_reset=self.resonator_reset,
+            use_robust_pulses=self.use_robust_pulses,
         )
         
-        if self.full_mux_expt:
-            t1.cfg.expt.full_mux_expt = True
-            t1.cfg.expt.resonator_reset = self.resonator_reset
-
         t1.go(analyze=True, display=False, progress=debug, save=False)
-        # t1_fit, t1_fit_cov = meas.fitting.get_best_fit(t1.data)  # , fitter.expfunc)
-        # t1_fit_err = np.sqrt(t1_fit_cov[3][3])
+
+        
+        # t1_fit  = t1.data["fit_amps"][3]
+        # t1_fit_err = np.sqrt(t1.data["fit_err_amps"][3][3])
         
         
-        t1_fit  = t1.data["fit_amps"][3]
-        t1_fit_err = np.sqrt(t1.data["fit_err_amps"][3][3])
-        
-        
+        # take the best fit for the t1 time
+        t1_fit, t1_fit_err = meas.fitting.get_best_fit(t1.data) #, fitter.expfunc)
         
         if debug:
             print("T1: %i +/- %i" % (t1_fit, t1_fit_err))
@@ -842,25 +847,59 @@ class Monitoring:
             if gain_pulse is not None:
                 ramsey.cfg.device.qubit.pulses.pi_ge.gain[qubit_test] = gain_pulse
                 
-        print('EF', EF)
-
+                
+                
+                
+     ### STILL DEBUGGING 
+     
         ramsey.cfg.expt = dict(
-            start=0,
-            expts=npts,
-            step=self.rfsoc_config.cycles2us(step),
-            ramsey_freq=freq,
-            reps=reps,
-            rounds=rounds,
-            checkEF=EF,
-            qTest=qubit_test,
-            qZZ=qubit_ZZ,
+        start=0, # wait time tau [us]
+        # step=soc.cycles2us(10), # [us] make sure nyquist freq = 0.5 * (1/step) > ramsey (signal) freq!
+        step=self.rfsoc_config.cycles2us(4*2), # [us] make sure nyquist freq = 0.5 * (1/step) > ramsey (signal) freq!
+        # step=0.05, # [us]
+        expts=151,
+        # ramsey_freq=ramseyEF_freq, # [MHz]
+        ramsey_freq=3/2, # [MHz]
+        checkEF=True,
+        reps=100,
+        rounds=10,
+        qTest=qubit_test,
+        qZZ=None,
+
+        full_mux_expt=False,
+        resonator_reset=None,
+        use_robust_pulses=True,
+        
         )
         
-        if self.full_mux_expt:
-            ramsey.cfg.expt.full_mux_expt = True
-            ramsey.cfg.expt.resonator_reset = self.resonator_reset
+        print(ramsey.cfg.expt)
+    
+        
+     
+                
 
-        ramsey.go(analyze=True, display=False, progress=debug, save=False)
+        # ramsey.cfg.expt = dict(
+        #     start=0,
+        #     expts=npts,
+        #     step=self.rfsoc_config.cycles2us(step),
+        #     ramsey_freq=freq,
+        #     reps=reps,
+        #     rounds=rounds,
+        #     checkEF=EF,
+        #     qTest=qubit_test,
+        #     qZZ=qubit_ZZ,
+        #     use_robust_pulses=self.use_robust_pulses,
+        #     full_mux_expt=self.full_mux_expt,
+        #     resonator_reset=self.resonator_reset,
+        # )
+                
+        # ramsey.cfg.expt.test_pi_half = self.test_pi_half
+        # ramsey.cfg.expt.divide_len = self.divide_len
+        
+        # print('ramsey cfg', ramsey.cfg.expt)
+        
+
+        ramsey.go(analyze=True, display=True, progress=debug, save=False)
         t2r_fit, t2r_fit_err, t2r_adjust = meas.fitting.get_best_fit(
             ramsey.data, get_best_data_params=["f_adjust_ramsey"]
         )
@@ -1022,9 +1061,16 @@ class Monitoring:
                 gain_max = None
 
             if gain_max is None:
-                gain_max = self.config_file.device.qubit.pulses.pi_ef.gain[idx_qb]
+                if self.test_pi_half: 
+                    if self.divide_len: 
+                        gain_max = self.config_file.device.qubit.pulses.pi_ef.half_gain[idx_qb]
+                    else: 
+                        gain_max = self.config_file.device.qubit.pulses.pi_ef.half_gain_pi_sigma[idx_qb]
+                else:       
+                    gain_max = self.config_file.device.qubit.pulses.pi_ef.gain[idx_qb]
 
             pi_len = self.config_file.device.qubit.pulses.pi_ef.sigma[idx_qb]
+            
 
         else:
             idx_qb = (len(self.qubits) + 1) * qubit_test
@@ -1040,17 +1086,25 @@ class Monitoring:
                     gain_max = None
             else:
                 gain_max = None
+                
+            print('gain_max', gain_max)
 
             if gain_max is None:
-                gain_max = self.config_file.device.qubit.pulses.pi_ge.gain[idx_qb]
+                if self.use_robust_pulses: 
+                    print('use robust pulses')
+                    gain_max = self.config_file.device.qubit.pulses.pihalf_ge_robust.gain[idx_qb]
+                else:
+                    gain_max = self.config_file.device.qubit.pulses.pi_ge.gain[idx_qb]
+                
+            print('gain_max', gain_max)
 
             pi_len = self.config_file.device.qubit.pulses.pi_ge.sigma[idx_qb]
 
         if not temp:
-            gain_max = 1.5 * gain_max
+            gain_max = 2 * gain_max
 
         span = np.min([32000, gain_max])
-
+        
         # qubit_list = [qubit_test]
         # if qubit_ZZ is not None:
         #     qubit_list = [qubit_ZZ, qubit_test] # for the amp_rabi the qubits are inverted
@@ -1062,7 +1116,7 @@ class Monitoring:
             if gain_pulse_zz is not None:
                 amprabi.cfg.device.qubit.pulses.pi_ge.gain[idx_zz] = gain_pulse_zz
                 
-
+                
         amprabi.cfg.expt = dict(
             start=0,
             step=int(span / npts),
@@ -1073,13 +1127,19 @@ class Monitoring:
             qZZ=qubit_ZZ,
             checkEF=EF,
             sigma_test=pi_len,
-            pulse_type="gauss",
+            pulse_type='gauss' if not self.use_robust_pulses else 'robust',
             pulse_ge=pulse_ge,
+            full_mux_expt=self.full_mux_expt,
+            resonator_reset=self.resonator_reset,
+            use_robust_pulses=self.use_robust_pulses,
         )
-        
-        if self.full_mux_expt:
-            amprabi.cfg.expt.full_mux_expt = True
-            amprabi.cfg.expt.resonator_reset = self.resonator_reset
+         
+        if self.divide_len:
+            amprabi.cfg.expt.divide_len = True
+        if self.test_pi_half:
+            amprabi.cfg.expt.test_pi_half = True
+            
+        print('amprabi cfg', amprabi.cfg.expt)
             
 
         amprabi.go(analyze=False, display=False, progress=debug, save=False)
@@ -1233,6 +1293,7 @@ class Monitoring:
         if self.full_mux_expt:
             mixer = np.array(self.config_file.hw.soc.dacs.readout.mixer_freq)
             freq_qb_test = freq_qb_test - mixer[qubit_test]
+            
 
 
         qspec.cfg.expt = dict(
@@ -1241,17 +1302,15 @@ class Monitoring:
             expts=npts,  # Number of experiments stepping from start
             reps=reps,  # Number of averages per point
             rounds=rounds,  # Number of start to finish sweeps to average over
-            length=probe_length,  # qubit 0 probe constant pulse length [us]
+            # length=probe_length,  # qubit 0 probe constant pulse length [us]
+            length=1,
             gain=int(probe_gain),  # pulse gain for qubit we are measuring
-            pulse_type="const",
+            pulse_type="gauss",
             qTest=qubit_test,
             qZZ=qubit_zz,
             checkEF=EF,
         )
-        
-        # if self.full_mux_expt:
-        #     qspec.cfg.expt.full_mux_expt = True
-        #     qspec.cfg.expt.resonator_reset = self.resonator_reset
+
 
         qspec.go(analyze=True, display=False, progress=debug, save=False)
 
@@ -1433,16 +1492,18 @@ class Monitoring:
 
         dict_spectro = AttrDict(dict_spectro)
         
+        # print('full_mux_expt', self.full_mux_expt)
+        
         if self.full_mux_expt:
             freq_qb = self.config_file.device.qubit.f_ge[qubit_i]
             freq_qb_err = 0
         
         else: 
-            # freq_qb, freq_qb_err = self.measure_spectro(
-            #     qubit_test=qubit_i, debug=debug, save=False, EF=EF, param_exp=dict_spectro, expt=expt
-            # )
-            freq_qb = self.config_file.device.qubit.f_ge[qubit_i]
-            freq_qb_err = 0
+            freq_qb, freq_qb_err = self.measure_spectro(
+                qubit_test=qubit_i, debug=debug, save=False, EF=EF, param_exp=dict_spectro, expt=expt
+            )
+            # freq_qb = self.config_file.device.qubit.f_ge[qubit_i]
+            # freq_qb_err = 0
             
             
 
@@ -1474,20 +1535,38 @@ class Monitoring:
 
         else:
 
+            # ramsey_first = {
+            #     "reps_ramsey": int(reps_ramsey),
+            #     "step_ramsey": int(step_ramsey / 10),
+            #     "npts_ramsey": int(npts_ramsey),
+            #     "freq_ramsey": freq_ramsey * 8,
+            #     "ramsey_round": ramsey_round,
+            #     "gain_pulse": gain_pulse,
+            #     "freq_qb": freq_qb,
+            # }
+            
+            
             ramsey_first = {
-                "reps_ramsey": int(reps_ramsey//2),
-                "step_ramsey": int(step_ramsey / 10),
-                "npts_ramsey": int(npts_ramsey),
-                "freq_ramsey": freq_ramsey * 8,
-                "ramsey_round": ramsey_round,
+                "reps_ramsey": int(1000),
+                "step_ramsey": int(8),
+                "npts_ramsey": int(150),
+                "freq_ramsey": 3,
+                "ramsey_round": int(1),
                 "gain_pulse": gain_pulse,
                 "freq_qb": freq_qb,
             }
+            
+            if EF:
+                ramsey_first["freq_ramsey"] = 1.5
+            
+            
+            
+            
+            
+            print('ramsey_first', ramsey_first)
 
             ramsey_first = AttrDict(ramsey_first)
-            print('ef', EF)
 
-            print("EF", EF)
 
             freq_qb, freq_qb_err, t2r_fit, t2r_fit_err = self.measure_ramsey(
                 start_time=start_time,
@@ -1499,15 +1578,37 @@ class Monitoring:
                 save=save,
             )
 
+            # ramsey_second = {
+            #     "reps_ramsey": int(reps_ramsey*2//4),
+            #     "step_ramsey": int(step_ramsey*2/2),
+            #     "npts_ramsey": int(3 * npts_ramsey / 2),
+            #     "freq_ramsey": freq_ramsey,
+            #     "ramsey_round": ramsey_round,
+            #     "gain_pulse": gain_pulse,
+            #     "freq_qb": freq_qb,
+            # }
+            
             ramsey_second = {
-                "reps_ramsey": int(reps_ramsey),
-                "step_ramsey": int(step_ramsey * 2),
-                "npts_ramsey": int(6 * npts_ramsey / 2),
-                "freq_ramsey": freq_ramsey / 3,
-                "ramsey_round": ramsey_round,
+                "reps_ramsey": int(1000),
+                "step_ramsey": int(150),
+                "npts_ramsey": int(151),
+                "freq_ramsey": 0.2,
+                "ramsey_round": int(1),
                 "gain_pulse": gain_pulse,
                 "freq_qb": freq_qb,
             }
+            
+            # ramsey_second = {
+            #     "reps_ramsey": int(reps_ramsey//2),
+            #     "step_ramsey": int(step_ramsey*4),
+            #     "npts_ramsey": int(npts_ramsey),
+            #     "freq_ramsey": freq_ramsey/5,
+            #     "ramsey_round": ramsey_round,
+            #     "gain_pulse": gain_pulse,
+            #     "freq_qb": freq_qb,
+            # }
+            
+            print('ramsey_second', ramsey_second)
 
             if EF:
                 ramsey_second["step_ramsey"] = int(step_ramsey)
@@ -1988,25 +2089,25 @@ class Monitoring:
 
             if "pi" in self.param_dict[qubit_i].keys():
                 if "ge" in self.param_dict[qubit_i].pi.keys():
-                    try:
-                        pi_gain, constrast = self.measure_pi_pulse(
-                            start_time, qubit_test=qubit_i, EF=False, debug=debug, save=save
-                        )
+                    # try:
+                    pi_gain, constrast = self.measure_pi_pulse(
+                        start_time, qubit_test=qubit_i, EF=False, debug=debug, save=save
+                    )
 
-                        self.param_dict[qubit_i].pi.ge.value = pi_gain
-                        if "t2" in self.param_dict[qubit_i].keys():
-                            if "ge" in self.param_dict[qubit_i].t2.keys():
-                                self.param_dict[qubit_i].t2.ge.pi_gain = pi_gain
-                        if "t1" in self.param_dict[qubit_i].keys():
-                            if "ge" in self.param_dict[qubit_i].t1.keys():
-                                self.param_dict[qubit_i].t1.ge.pi_gain = pi_gain
+                    self.param_dict[qubit_i].pi.ge.value = pi_gain
+                    if "t2" in self.param_dict[qubit_i].keys():
+                        if "ge" in self.param_dict[qubit_i].t2.keys():
+                            self.param_dict[qubit_i].t2.ge.pi_gain = pi_gain
+                    if "t1" in self.param_dict[qubit_i].keys():
+                        if "ge" in self.param_dict[qubit_i].t1.keys():
+                            self.param_dict[qubit_i].t1.ge.pi_gain = pi_gain
 
-                        if live_plotting:
-                            self.param_dict[qubit_i].pi.ge.stored.append(pi_gain)
-                            self.param_dict[qubit_i].pi.ge.time.append(time.time() - start_time)
+                    if live_plotting:
+                        self.param_dict[qubit_i].pi.ge.stored.append(pi_gain)
+                        self.param_dict[qubit_i].pi.ge.time.append(time.time() - start_time)
 
-                    except Exception as e:
-                        print(f"Error in pi pulse GE: {e}")
+                    # except Exception as e:
+                    #     print(f"Error in pi pulse GE: {e}")
 
                 if "ef" in self.param_dict[qubit_i].pi.keys():
                     try:

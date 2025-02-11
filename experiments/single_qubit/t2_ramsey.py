@@ -235,6 +235,9 @@ class RamseyExperiment(Experiment):
         amps = np.average(np.abs(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the magnitude
         phases = np.average(np.angle(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the phase
 
+
+        amps 
+
         data = {"xpts": x_pts, "avgi": avgi, "avgq": avgq, "amps": amps, "phases": phases}
         self.data = data
         return data

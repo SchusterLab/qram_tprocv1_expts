@@ -226,9 +226,9 @@ class LengthRabiProgram(QutritAveragerProgram):
                     for k in range(num_test_pulses):
                         # print(i, j, k, "phase", self.overall_phase[qTest] + phase)
                         self.pulse(ch=self.qubit_chs[qTest])
-                        if k == 0:
-                            print('CAREFUll I am adding a delay')
-                        self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
+                        # if k == 0:
+                        #     print('CAREFUll I am adding a delay')
+                        # self.sync_all(20) # MAY NEED TO ADD DELAY IF PULSE IS SHORT!!
 
                         if self.pi_minuspi and np.abs(self.Z_phase) > 0:
                             self.overall_phase[qTest] += self.Z_phase
@@ -1168,7 +1168,7 @@ class PiMinusPiExperiment(Experiment):
             if self.cfg.expt.pulse_type != "robust":
                 old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
             else:
-                old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
+                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
         if self.cfg.expt.sweep_phase:
             old_freq = 0
         print("Fit best freq", fit_freq, "which is", fit_freq - old_freq, "away from old freq", old_freq)
@@ -1230,7 +1230,7 @@ class PiMinusPiExperiment(Experiment):
             if self.cfg.expt.pulse_type != "robust":
                 old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
             else:
-                old_freq = self.cfg.device.qubit.f_ge_robust[qTest * self.num_qubits_sample + qZZ]
+                old_freq = self.cfg.device.qubit.f_ge[qTest * self.num_qubits_sample + qZZ]
         if self.cfg.expt.sweep_phase:
             old_freq = 0
 

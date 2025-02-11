@@ -2060,6 +2060,8 @@ class QutritAveragerProgram(CliffordAveragerProgram):
             gain = self.pi_ef_half_gains[q, ZZ_qubit]
         else:
             gain = self.pi_ef_half_gain_pi_sigmas[q, ZZ_qubit]
+            
+        print('gain', gain)
         name += "_half"
         assert (
             f_ef_MHz > 0
