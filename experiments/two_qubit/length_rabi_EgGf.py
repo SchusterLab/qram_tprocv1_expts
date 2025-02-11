@@ -2788,7 +2788,7 @@ class PiMinusPiEgGfExperiment(Experiment):
 
         ax_qB = plt.subplot(212, title=f"QB ({qB})")
         ax_qB.tick_params(axis="both", which="major", labelsize=16)
-        ax_qB.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        ax_qB.set_ylabel("$\sqrt{\Pi_n (P(e))}$", fontsize=18)
         plt.plot(data["freq_sweep"], prods[1], "o", label="Data")
         ax_qB.set_xlabel("Frequency [MHz]", fontsize=18)
 
@@ -3068,7 +3068,7 @@ class PiTrainEgGfGainSweepExperiment(Experiment):
         plt.suptitle(title, fontsize=20)
 
         ax_qA = plt.subplot(211, title=f"QA ({qA})")
-        ax_qA.set_ylabel("$\sqrt{\Pi_n (1-P(e))}$", fontsize=18)
+        ax_qA.set_ylabel("$\sqrt{\Pi_n (P(e))}$", fontsize=18)
         ax_qA.tick_params(axis="both", which="major", labelsize=16)
         plt.plot(data["gain_sweep"], prods[0], "o", label="Data")
 

@@ -2522,7 +2522,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         plt.figure(figsize=(8, 6))
         irb = "gate_char" in self.cfg.expt and self.cfg.expt.gate_char is not None
-        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf RB on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}'
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf RB on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}, Q{self.cfg.expt.qubits[2]}'
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
         depths = data["xpts"]
@@ -2582,7 +2582,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             yerr=probs_eg_err,
             color=default_colors[0],
             elinewidth=0.75,
-            label="eg probability",
+            label=f"{'(e)' if self.qDrive == 3 else '(g)'}eg probability",
         )
         plt.errorbar(
             unique_depths,
@@ -2600,7 +2600,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             yerr=probs_eg_subspace_err,
             color=default_colors[2],
             elinewidth=0.75,
-            label="eg/subspace probability",
+            label=f"{'(e)' if self.qDrive == 3 else '(g)'}eg/subspace probability",
         )
 
         plt.errorbar(
@@ -2610,7 +2610,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             yerr=probs_gf_subspace_err,
             color=default_colors[5 % len(default_colors)],
             elinewidth=0.75,
-            label="gf/subspace probability",
+            label=f"{'(e)' if self.qDrive == 3 else '(g)'}gf/subspace probability",
         )
 
         plt.errorbar(
@@ -2620,7 +2620,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             yerr=probs_gg_err,
             color=default_colors[3],
             elinewidth=0.75,
-            label="gg probability",
+            label=f"{'(e)' if self.qDrive == 3 else '(g)'}gg probability",
         )
 
         plt.errorbar(
@@ -2630,7 +2630,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             yerr=probs_gf_err,
             color=default_colors[4],
             elinewidth=0.75,
-            label="gf probability",
+            label=f"{'(e)' if self.qDrive == 3 else '(g)'}gf probability",
         )
 
         plt.errorbar(
@@ -2640,7 +2640,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
             yerr=probs_ef_err,
             color=default_colors[0],
             elinewidth=0.75,
-            label="ef probability",
+            label=f"{'(e)' if self.qDrive == 3 else '(g)'}ef probability",
         )
 
         if not self.measure_f_only:
@@ -2652,7 +2652,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 yerr=probs_ge_err,
                 color=default_colors[6 % len(default_colors)],
                 elinewidth=0.75,
-                label="ge probability",
+                label=f"{'(e)' if self.qDrive == 3 else '(g)'}ge probability",
             )
 
             plt.errorbar(
@@ -2662,7 +2662,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 yerr=probs_ee_err,
                 color=default_colors[7 % len(default_colors)],
                 elinewidth=0.75,
-                label="ee probability",
+                label=f"{'(e)' if self.qDrive == 3 else '(g)'}ee probability",
             )
 
         if fit:
