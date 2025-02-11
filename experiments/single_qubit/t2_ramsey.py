@@ -109,6 +109,9 @@ class RamseyProgram(QutritRAveragerProgram):
             assert "echo_type" in self.cfg.expt
             assert self.cfg.expt.echo_type in ["cp", "cpmg"]
             echo_type = self.cfg.expt.echo_type
+        if "echo_type" in self.cfg.expt and self.cfg.expt.echo_type in ["cp", "cpmg"]:
+            assert "num_pi" in self.cfg.expt
+            assert self.cfg.expt.num_pi >= 1
         for i in range(num_pi):
             self.sync(self.q_rps[qTest], self.r_wait)
             if echo_type == "cp":

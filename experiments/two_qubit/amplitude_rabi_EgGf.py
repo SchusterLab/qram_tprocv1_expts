@@ -8,43 +8,13 @@ from slab import AttrDict, Experiment, dsfit
 from tqdm import tqdm_notebook as tqdm
 
 import experiments.fitting as fitter
+from experiments.clifford_averager_program import QutritRAveragerProgram, flat_top_pulse
 
 
-class AmplitudeRabiEgGfProgram(RAveragerProgram):
-    def __init__(self, soccfg, cfg):
-        self.cfg = AttrDict(cfg)
-        self.cfg.update(self.cfg.expt)
-        self.gen_delays = [0] * len(soccfg["gens"])  # need to calibrate via oscilloscope
-
-        # copy over parameters for the acquire method
-        self.cfg.reps = cfg.expt.reps
-        self.cfg.rounds = cfg.expt.rounds
-
-        super().__init__(soccfg, self.cfg)
-
-    def reset_and_sync(self):
-        # Phase reset all channels except readout DACs (since mux ADCs can't be phase reset)
-        for ch in self.gen_chs.keys():
-            if ch not in self.measure_chs:  # doesn't work for the mux ADCs
-                # print('resetting', ch)
-                self.setup_and_pulse(ch=ch, style="const", freq=100, phase=0, gain=100, length=10, phrst=1)
-        self.sync_all(10)
-
-    def set_gen_delays(self):
-        for ch in self.gen_chs:
-            delay_ns = self.cfg.hw.soc.dacs.delay_chs.delay_ns[
-                np.argwhere(np.array(self.cfg.hw.soc.dacs.delay_chs.ch) == ch)[0][0]
-            ]
-            delay_cycles = self.us2cycles(delay_ns * 1e-3, gen_ch=ch)
-            self.gen_delays[ch] = delay_cycles
-
-    def sync_all(self, t=0):
-        super().sync_all(t=t, gen_t0=self.gen_delays)
-
+class AmplitudeRabiEgGfProgram(QutritRAveragerProgram):
     def initialize(self):
         cfg = AttrDict(self.cfg)
         self.cfg.update(cfg.expt)
-
         self.num_qubits_sample = len(self.cfg.device.readout.frequency)
         self.qubits = self.cfg.expt.qubits
         qA, qB = self.qubits
@@ -68,278 +38,111 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         # print('qNotDrive', qNotDrive)
         # print('qSort', qSort)
 
-        if qDrive == 1:
-            self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
-            self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
-            mixer_freqs = self.cfg.hw.soc.dacs.swap.mixer_freq
-            self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf[qSort], gen_ch=self.swap_chs[qSort])
+        self.test_pi_half = "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half
+        self.tot_length_test_us = self.cfg.expt.pi_EgGf_sigma
+
+        super().initialize()
+
+        # self.swap_chs = self.cfg.hw.soc.dacs.swap.ch
+        # self.swap_ch_types = self.cfg.hw.soc.dacs.swap.type
+        self.swap_Q_chs = self.cfg.hw.soc.dacs.swap_Q.ch
+        self.swap_Q_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
+
+        name = "X_EgGf"
+        waveformname = "pi_EgGf_Q"
+        assert qDrive != 1
+        if self.test_pi_half:
+            f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q_half[qDrive]
+            gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.half_gain[qDrive]
+            name += "_half"
+            waveformname = "_half"
         else:
-            self.swap_chs = self.cfg.hw.soc.dacs.swap_Q.ch
-            self.swap_ch_types = self.cfg.hw.soc.dacs.swap_Q.type
-            mixer_freqs = self.cfg.hw.soc.dacs.swap_Q.mixer_freq
-            self.f_EgGf_reg = self.freq2reg(self.cfg.device.qubit.f_EgGf_Q[qSort], gen_ch=self.swap_chs[qSort])
+            f_EgGf_MHz = self.cfg.device.qubit.f_EgGf_Q[qDrive]
+            gain = self.cfg.device.qubit.pulses.pi_EgGf_Q.gain[qDrive]
+        phase_deg = 0
+        ch = self.swap_Q_chs[qDrive]
 
-        mixer_freq = None
-        if self.swap_ch_types[qSort] == "int4":
-            mixer_freq = mixer_freqs[qSort]
-
-        # all of these saved self.whatever instance variables should be indexed by the actual qubit number as opposed to qubits_i. this means that more values are saved as instance variables than is strictly necessary, but this is overall less confusing
-        self.adc_chs = self.cfg.hw.soc.adcs.readout.ch
-        self.res_chs = self.cfg.hw.soc.dacs.readout.ch
-        self.res_ch_types = self.cfg.hw.soc.dacs.readout.type
-        self.qubit_chs = self.cfg.hw.soc.dacs.qubit.ch
-        self.qubit_ch_types = self.cfg.hw.soc.dacs.qubit.type
-
-        self.q_rps = [self.ch_page(ch) for ch in self.qubit_chs]  # get register page for qubit_chs
-
-        self.f_ges = np.reshape(self.cfg.device.qubit.f_ge, (4, 4))
-        self.f_efs = np.reshape(self.cfg.device.qubit.f_ef, (4, 4))
-        self.pi_ge_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.gain, (4, 4))
-        self.pi_ge_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.sigma, (4, 4))
-        self.pi_ge_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain, (4, 4))
-        self.pi_ge_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ge.half_gain_pi_sigma, (4, 4))
-        self.pi_ef_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.gain, (4, 4))
-        self.pi_ef_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.sigma, (4, 4))
-        self.pi_ef_half_gains = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain, (4, 4))
-        self.pi_ef_half_gain_pi_sigmas = np.reshape(self.cfg.device.qubit.pulses.pi_ef.half_gain_pi_sigma, (4, 4))
-
-        self.f_res_regs = [
-            self.freq2reg(f, gen_ch=gen_ch, ro_ch=adc_ch)
-            for f, gen_ch, adc_ch in zip(cfg.device.readout.frequency, self.res_chs, self.adc_chs)
-        ]
-        self.readout_lengths_dac = [
-            self.us2cycles(length, gen_ch=gen_ch)
-            for length, gen_ch in zip(self.cfg.device.readout.readout_length, self.res_chs)
-        ]
-        self.readout_lengths_adc = [
-            1 + self.us2cycles(length, ro_ch=ro_ch)
-            for length, ro_ch in zip(self.cfg.device.readout.readout_length, self.adc_chs)
-        ]
-
-        # declare all res dacs
-        self.measure_chs = []
-        mask = []  # indices of mux_freqs, mux_gains list to play
-        mux_mixer_freq = None
-        mux_freqs = [0] * 4  # MHz
-        mux_gains = [0] * 4
-        mux_ro_ch = None
-        mux_nqz = None
-        for q in range(self.num_qubits_sample):
-            assert self.res_ch_types[q] in ["full", "mux4"]
-            if self.res_ch_types[q] == "full":
-                if self.res_chs[q] not in self.measure_chs:
-                    self.declare_gen(ch=self.res_chs[q], nqz=cfg.hw.soc.dacs.readout.nyquist[q])
-                    self.measure_chs.append(self.res_chs[q])
-
-            elif self.res_ch_types[q] == "mux4":
-                assert self.res_chs[q] == 6
-                mask.append(q)
-                if mux_mixer_freq is None:
-                    mux_mixer_freq = cfg.hw.soc.dacs.readout.mixer_freq[q]
-                else:
-                    assert (
-                        mux_mixer_freq == cfg.hw.soc.dacs.readout.mixer_freq[q]
-                    )  # ensure all mux channels have specified the same mixer freq
-                mux_freqs[q] = cfg.device.readout.frequency[q]
-                mux_gains[q] = cfg.device.readout.gain[q]
-                mux_ro_ch = self.adc_chs[q]
-                mux_nqz = cfg.hw.soc.dacs.readout.nyquist[q]
-                if self.res_chs[q] not in self.measure_chs:
-                    self.measure_chs.append(self.res_chs[q])
-        if "mux4" in self.res_ch_types:  # declare mux4 channel
-            self.declare_gen(
-                ch=6, nqz=mux_nqz, mixer_freq=mux_mixer_freq, mux_freqs=mux_freqs, mux_gains=mux_gains, ro_ch=mux_ro_ch
-            )
-
-        # declare qubit dacs
-        for q in self.qubits:
-            if self.qubit_chs[q] not in self.gen_chs:
-                if self.qubit_ch_types[q] == "full":
-                    self.declare_gen(ch=self.qubit_chs[q], nqz=cfg.hw.soc.dacs.qubit.nyquist[q])
-                else:
-                    assert False, "qubit gen type not supported"
-
-        # declare swap dac indexed by qSort
-        if self.swap_chs[qSort] not in self.gen_chs:
-            self.declare_gen(ch=self.swap_chs[qSort], nqz=cfg.hw.soc.dacs.swap.nyquist[qSort])
-
-        # declare adcs - readout for all qubits everytime, defines number of buffers returned regardless of number of adcs triggered
-        for q in range(self.num_qubits_sample):
-            self.declare_readout(
-                ch=self.adc_chs[q],
-                length=self.readout_lengths_adc[q],
-                freq=cfg.device.readout.frequency[q],
-                gen_ch=self.res_chs[q],
-            )
+        name = f"{name}_{qNotDrive}{qDrive}"
+        # t_rise_us = self.cycles2us(3, gen_ch=ch)
+        # t_rise_us = 0.003
+        self.handle_flat_top_pulse(
+            name=name,
+            ch=ch,
+            waveformname=f"{waveformname}_{qNotDrive}{qDrive}",
+            # t_rise_us=t_rise_us,
+            # sigma_n=sigma_n,
+            tot_length_us=self.tot_length_test_us,
+            freq_MHz=f_EgGf_MHz,
+            phase_deg=phase_deg,
+            gain=gain,
+            play=False,
+            set_reg=True,
+            # plot_IQ=True,
+        )
+        self.swap_name = name
 
         # get gain register for swap ch
-        # if self.swap_ch_types[qSort] == 'int4':
-        #     self.r_gain_swap = self.sreg(self.swap_chs[qSort], "addr")
-        # else: self.r_gain_swap = self.sreg(self.swap_chs[qSort], "gain")
-        assert self.swap_ch_types[qSort] == "full"
-        self.r_gain_swap = self.sreg(self.swap_chs[qSort], "gain")
+        assert self.swap_Q_ch_types[qSort] == "full"
+        self.r_gain_swap = self.sreg(self.swap_Q_chs[qSort], "gain")
         # register to hold the current sweep gain
         self.r_gain_swap_update = 4
         # initialize gain
-        self.safe_regwi(self.ch_page(self.swap_chs[qSort]), self.r_gain_swap_update, self.cfg.expt.start)
-        if (
-            cfg.expt.pulse_type.lower() == "flat_top"
-        ):  # the gain for the const section of a flat top pulse needs to be set to 2*the ramp gain
-            self.r_gain_swap_const = self.sreg(self.swap_chs[qSort], "gain2")
-            self.r_gain_swap_update_const = 5
-            self.safe_regwi(
-                self.ch_page(self.swap_chs[qSort]), self.r_gain_swap_update_const, self.cfg.expt.start // 2
-            )
+        self.safe_regwi(self.ch_page(self.swap_Q_chs[qSort]), self.r_gain_swap_update, self.cfg.expt.start)
+        # if (
+        #     cfg.expt.pulse_type.lower() == "flat_top"
+        # ):  # the gain for the const section of a flat top pulse needs to be set to 2*the ramp gain
+        #     self.r_gain_swap_const = self.sreg(self.swap_Q_chs[qSort], "gain2")
+        #     self.r_gain_swap_update_const = 5
+        #     self.safe_regwi(
+        #         self.ch_page(self.swap_Q_chs[qSort]), self.r_gain_swap_update_const, self.cfg.expt.start // 2
+        #     )
 
-        # add pulses for qNotDrive with ZZ from ZZ qubit (if needed)
-        assert qNotDrive == 1, "this is currently set up assuming we are initializing q1 with qZZ and driving qx"
-        setup_ZZ = self.cfg.expt.setup_ZZ
-        assert setup_ZZ in [None, 0]
-        if setup_ZZ is None:
-            setup_ZZ = qNotDrive
-        if setup_ZZ != qNotDrive:
-            pi_sigma_QZZ = self.us2cycles(self.pi_ge_sigmas[setup_ZZ, setup_ZZ], gen_ch=self.qubit_chs[setup_ZZ])
-            self.add_gauss(
-                ch=self.qubit_chs[setup_ZZ], name=f"pi_qubit{setup_ZZ}", sigma=pi_sigma_QZZ, length=pi_sigma_QZZ * 4
-            )
-
-        self.pi_sigma_qNotDrive = self.us2cycles(
-            self.pi_ge_sigmas[qNotDrive, setup_ZZ], gen_ch=self.qubit_chs[qNotDrive]
-        )
-        self.add_gauss(
-            ch=self.qubit_chs[qNotDrive],
-            name=f"qNotDrive_init",
-            sigma=self.pi_sigma_qNotDrive,
-            length=self.pi_sigma_qNotDrive * 4,
-        )
-
-        self.pi_ef_sigma_qDrive = self.us2cycles(self.pi_ef_sigmas[qDrive, qDrive], gen_ch=self.qubit_chs[qDrive])
-        self.add_gauss(
-            ch=self.qubit_chs[qDrive],
-            name="pi_ef_qDrive",
-            sigma=self.pi_ef_sigma_qDrive,
-            length=self.pi_ef_sigma_qDrive * 4,
-        )
-
-        self.pi_EgGf_sigma = self.us2cycles(
-            cfg.expt.pi_EgGf_sigma, gen_ch=self.swap_chs[qSort]
-        )  # defaults to eg-gf sigma in config
-        if cfg.expt.pulse_type.lower() == "gauss" and cfg.expt.pi_EgGf_sigma > 0:
-            self.add_gauss(
-                ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=self.pi_EgGf_sigma, length=self.pi_EgGf_sigma * 4
-            )
-        elif cfg.expt.pulse_type.lower() == "flat_top" and cfg.expt.pi_EgGf_sigma > 0:
-            self.add_gauss(ch=self.swap_chs[qSort], name="pi_EgGf_swap", sigma=3, length=3 * 4)
-
-        # add readout pulses to respective channels
-        if "mux4" in self.res_ch_types:
-            self.set_pulse_registers(ch=6, style="const", length=max(self.readout_lengths_dac), mask=mask)
-        for q in range(self.num_qubits_sample):
-            if self.res_ch_types[q] != "mux4":
-                if cfg.device.readout.gain[q] < 1:
-                    gain = int(cfg.device.readout.gain[q] * 2**15)
-                self.set_pulse_registers(
-                    ch=self.res_chs[q],
-                    style="const",
-                    freq=self.f_res_regs[q],
-                    phase=0,
-                    gain=gain,
-                    length=max(self.readout_lengths_dac),
-                )
-
-        self.set_gen_delays()
         self.sync_all(200)
 
     def body(self):
         cfg = AttrDict(self.cfg)
-        qA, qB = self.qubits
         qDrive = self.qDrive
         qNotDrive = self.qNotDrive
         qSort = self.qSort
 
         self.reset_and_sync()
 
+        if "cool_qubits" in self.cfg.expt and self.cfg.expt.cool_qubits is not None:
+            cool_idle = [self.cfg.device.qubit.pulses.pi_f0g1.idle[q] for q in self.cfg.expt.cool_qubits]
+            if "cool_idle" in self.cfg.expt and self.cfg.expt.cool_idle is not None:
+                cool_idle = self.cfg.expt.cool_idle
+            self.active_cool(cool_qubits=self.cfg.expt.cool_qubits, cool_idle=cool_idle)
+
+        self.use_gf_readout = None
+        if "use_gf_readout" in self.cfg.expt and self.cfg.expt.use_gf_readout:
+            self.use_gf_readout = self.cfg.expt.use_gf_readout
+
+        if self.readout_cool:
+            self.measure_readout_cool()
+
         setup_ZZ = self.cfg.expt.setup_ZZ
         assert setup_ZZ in [None, 0]
         if setup_ZZ is None:
             setup_ZZ = qNotDrive
 
         if setup_ZZ != qNotDrive:
-            self.setup_and_pulse(
-                ch=self.qubit_chs[setup_ZZ],
-                style="arb",
-                phase=0,
-                freq=self.freq2reg(self.f_ges[setup_ZZ, setup_ZZ], gen_ch=self.qubit_chs[setup_ZZ]),
-                gain=self.pi_ge_gains[setup_ZZ, setup_ZZ],
-                waveform=f"pi_qubit{setup_ZZ}",
-            )
-            self.sync_all()
-        self.setup_and_pulse(
-            ch=self.qubit_chs[qNotDrive],
-            style="arb",
-            freq=self.freq2reg(self.f_ges[qNotDrive, setup_ZZ], gen_ch=self.qubit_chs[qNotDrive]),
-            phase=0,
-            gain=self.pi_ge_gains[qNotDrive, setup_ZZ],
-            waveform=f"qNotDrive_init",
-        )
-        # print(f'setup init state 11 on Q{setup_ZZ}, Q{qNotDrive}')
+            self.X_pulse(q=setup_ZZ, play=True)
+        self.X_pulse(q=qNotDrive, ZZ_qubit=setup_ZZ, play=True)
         self.sync_all()
 
         # apply Eg -> Gf pulse on B: expect to end in Gf
-        if cfg.expt.pi_EgGf_sigma > 0:
-            pulse_type = cfg.expt.pulse_type.lower()
-            if pulse_type == "gauss":
-                self.set_pulse_registers(
-                    ch=self.swap_chs[qSort],
-                    style="arb",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=0,  # gain set by update
-                    waveform="pi_EgGf_swap",
-                )
-            elif pulse_type == "flat_top":
-                length = self.us2cycles(cfg.expt.pi_EgGf_sigma, gen_ch=self.swap_chs[qSort]) - 3 * 4
-                if length > 0:
-                    self.set_pulse_registers(
-                        ch=self.swap_chs[qSort],
-                        style="flat_top",
-                        freq=self.f_EgGf_reg,
-                        phase=0,
-                        gain=0,  # gain set by update
-                        length=length,
-                        waveform="pi_EgGf_swap",
-                    )
-                self.mathi(
-                    self.ch_page(self.swap_chs[qSort]), self.r_gain_swap_const, self.r_gain_swap_update_const, "+", 0
-                )
-            else:  # const
-                self.set_pulse_registers(
-                    ch=self.swap_chs[qSort],
-                    style="const",
-                    freq=self.f_EgGf_reg,
-                    phase=0,
-                    gain=0,  # gain set by update
-                    length=self.pi_EgGf_sigma,
-                )
-            self.mathi(self.ch_page(self.swap_chs[qSort]), self.r_gain_swap, self.r_gain_swap_update, "+", 0)
-            # print('driving', self.swap_chs[qSort])
+        if self.tot_length_test_us > 0:
+            self.handle_flat_top_pulse(name=self.swap_name, play=False, set_reg=True)
+            self.mathi(self.ch_page(self.swap_Q_chs[qSort]), self.r_gain_swap, self.r_gain_swap_update, "+", 0)
             n_pulse = 1
             if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
                 n_pulse = 2
             for i in range(n_pulse):
-                if pulse_type != "flat_top" or length > 0:
-                    self.pulse(ch=self.swap_chs[qSort])
-        self.sync_all(5)
+                self.pulse(ch=self.swap_Q_chs[qSort])
+        self.sync_all()
 
         # take qubit B f->e: expect to end in Ge (or Eg if incomplete Eg-Gf)
-        self.setup_and_pulse(
-            ch=self.qubit_chs[qDrive],
-            style="arb",
-            freq=self.freq2reg(self.f_efs[qDrive, qDrive], gen_ch=self.qubit_chs[qDrive]),
-            phase=0,
-            gain=self.pi_ef_gains[qDrive, qDrive],
-            waveform="pi_ef_qDrive",
-        )
+        self.Xef_pulse(q=qDrive, play=True)
 
         self.sync_all()
         self.measure(
@@ -356,21 +159,21 @@ class AmplitudeRabiEgGfProgram(RAveragerProgram):
         qNotDrive = self.qNotDrive
         qSort = self.qSort
         step = self.cfg.expt.step
-        if self.swap_ch_types[qSort] == "int4":
+        if self.swap_Q_ch_types[qSort] == "int4":
             step = step << 16
         self.mathi(
-            self.ch_page(self.swap_chs[qSort]), self.r_gain_swap_update, self.r_gain_swap_update, "+", step
+            self.ch_page(self.swap_Q_chs[qSort]), self.r_gain_swap_update, self.r_gain_swap_update, "+", step
         )  # update test gain
-        if (
-            self.cfg.expt.pulse_type.lower() == "flat_top"
-        ):  # the gain for the const section of a flat top pulse needs to be set to 2*the ramp gain
-            self.mathi(
-                self.ch_page(self.swap_chs[qSort]),
-                self.r_gain_swap_update_const,
-                self.r_gain_swap_update_const,
-                "+",
-                step // 2,
-            )  # update test gain
+        # if (
+        #     self.cfg.expt.pulse_type.lower() == "flat_top"
+        # ):  # the gain for the const section of a flat top pulse needs to be set to 2*the ramp gain
+        #     self.mathi(
+        #         self.ch_page(self.swap_Q_chs[qSort]),
+        #         self.r_gain_swap_update_const,
+        #         self.r_gain_swap_update_const,
+        #         "+",
+        #         step // 2,
+        #     )  # update test gain
 
 
 class AmplitudeRabiEgGfExperiment(Experiment):
@@ -419,9 +222,14 @@ class AmplitudeRabiEgGfExperiment(Experiment):
         adcA_ch = self.cfg.hw.soc.adcs.readout.ch[qA]
         adcB_ch = self.cfg.hw.soc.adcs.readout.ch[qB]
 
+        test_pi_half = False
+        if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
+            test_pi_half = self.cfg.expt.test_pi_half
+        assert qDrive != 1
+
         if "pi_EgGf_sigma" not in self.cfg.expt:
-            if qDrive == 1:
-                self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort]
+            if test_pi_half:
+                self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf_Q_half.sigma[qSort]
             else:
                 self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort]
 
@@ -433,9 +241,7 @@ class AmplitudeRabiEgGfExperiment(Experiment):
                 # angle = self.cfg.device.readout.phase
 
         amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-        x_pts, avgi, avgq = amprabi.acquire(
-            self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=progress
-        )
+        x_pts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=progress)
         self.prog = amprabi
 
         data = dict(
@@ -665,9 +471,7 @@ class EgGfLenGainChevronExperiment(Experiment):
             self.cfg.expt.pi_EgGf_sigma = float(length)
 
             amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-            gainpts, avgi, avgq = amprabi.acquire(
-                self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False
-            )
+            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
 
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data["avgi"][q_ind].append(avgi[adc_chs[q], 0])
@@ -786,25 +590,25 @@ class EgGfFreqGainChevronExperiment(Experiment):
         self.cfg.expt.step = self.cfg.expt.step_gain
         self.cfg.expt.expts = self.cfg.expt.expts_gain
 
+        test_pi_half = False
+        if "test_pi_half" in self.cfg.expt and self.cfg.expt.test_pi_half:
+            test_pi_half = self.cfg.expt.test_pi_half
+        assert qDrive != 1
+
         if "pi_EgGf_sigma" not in self.cfg.expt:
-            if qDrive == 1:
-                self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf.sigma[qSort]
+            if test_pi_half:
+                self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf_Q_half.sigma[qSort]
             else:
                 self.cfg.expt.pi_EgGf_sigma = self.cfg.device.qubit.pulses.pi_EgGf_Q.sigma[qSort]
 
-        threshold = None
-        angle = None
-
         for freq in tqdm(freqpts, disable=not progress):
-            if qDrive == 1:
-                self.cfg.device.qubit.f_EgGf[qSort] = float(freq)
+            if test_pi_half:
+                self.cfg.device.qubit.f_EgGf_Q_half[qSort] = float(freq)
             else:
                 self.cfg.device.qubit.f_EgGf_Q[qSort] = float(freq)
 
             amprabi = AmplitudeRabiEgGfProgram(soccfg=self.soccfg, cfg=self.cfg)
-            gainpts, avgi, avgq = amprabi.acquire(
-                self.im[self.cfg.aliases.soc], threshold=threshold, angle=angle, load_pulses=True, progress=False
-            )
+            gainpts, avgi, avgq = amprabi.acquire(self.im[self.cfg.aliases.soc], load_pulses=True, progress=False)
 
             for q_ind, q in enumerate(self.cfg.expt.qubits):
                 data["avgi"][q_ind].append(avgi[adc_chs[q]][0])
@@ -839,9 +643,15 @@ class EgGfFreqGainChevronExperiment(Experiment):
 
             # Scale the amplitude and add them together to increase SNR
             fit_data = np.zeros_like(data[data_name][0])
-            for q_index in range(len(self.cfg.expt.measure_qubits)):
+            for q_index, q in enumerate(self.cfg.expt.measure_qubits):
                 this_data = data[data_name][q_index]
-                fit_data += np.abs(this_data - np.median(this_data))  # / (np.max(this_data) - np.min(this_data))
+                # fit_data += np.abs(this_data - np.median(this_data))  # / (np.max(this_data) - np.min(this_data))
+
+                if q == self.cfg.expt.qDrive:
+                    sign = 1
+                else:
+                    sign = -1
+                fit_data += sign * (this_data - np.min(this_data)) / (np.max(this_data) - np.min(this_data))
 
                 # fit = [None] * len(x_sweep)
                 # fit_err = [None] * len(x_sweep)
@@ -867,6 +677,8 @@ class EgGfFreqGainChevronExperiment(Experiment):
                 idx_max = np.argmax(fit_data[:, idx])
                 freq_opt[idx] = y_sweep[idx_max]
                 amp_opt[idx] = fit_data[idx_max, idx]
+
+            data["fit_data"] = fit_data
             data["fit_freq"] = freq_opt
             data["metric_at_fit_freq"] = amp_opt
             idx_max_metric = np.argmax(amp_opt)
@@ -923,6 +735,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(max_freq, color="k", linestyle="--")
             plt.axvline(max_gain, color="k", linestyle="--")
+            print("QA: max at gain", max_gain, "freq", max_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -944,6 +757,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(max_freq, color="k", linestyle="--")
             plt.axvline(max_gain, color="k", linestyle="--")
+            print("QA: max at gain", max_gain, "freq", max_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -966,6 +780,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(min_freq, color="k", linestyle="--")
             plt.axvline(min_gain, color="k", linestyle="--")
+            print("QB: min at gain", min_gain, "freq", min_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -986,6 +801,7 @@ class EgGfFreqGainChevronExperiment(Experiment):
         if fit:
             plt.axhline(max_freq, color="k", linestyle="--")
             plt.axvline(max_gain, color="k", linestyle="--")
+            print("QB: max at gain", max_gain, "freq", max_freq)
         if saveplot:
             plt.colorbar().set_label(label="$S_{21}$ [arb. units]", size=15)
         else:
@@ -1012,13 +828,14 @@ class EgGfFreqGainChevronExperiment(Experiment):
         # fit_freqs = np.array([f[2] if f is not None else np.nan for f in data["fitamps"][0]])
         fit_freqs = data["fit_freq"]
         fit_freqs_set = fit_freqs[range_start:range_end]
-        # print(fit_xsweep_set, fit_freqs_set)
-        # fitparams = [
-        #     0,
-        #     None,
-        #     (fit_freqs_set[-1] - fit_freqs_set[0]) / (fit_xsweep_set[-1] - fit_xsweep_set[0]) ** 2,
-        # ]
-        fitparams = None
+        print("fit gains set", fit_xsweep_set)
+        print("fit freqs set", fit_freqs_set)
+        fitparams = [
+            fit_xsweep_set[0],
+            fit_freqs_set[0],
+            (fit_freqs_set[-1] - fit_freqs_set[0]) / (fit_xsweep_set[-1] - fit_xsweep_set[0]) ** 2,
+        ]
+        # fitparams = None
         p, pCov = fitter.fitquadratic(fit_xsweep_set, fit_freqs_set, fitparams=fitparams)
         fit_freqs_fit = fitter.quadraticfunc(x_sweep, *p)
         print(f"fit_gain_sweep =", x_sweep.tolist())
@@ -1034,6 +851,8 @@ class EgGfFreqGainChevronExperiment(Experiment):
             ylabel="Pulse Frequency [MHz]",
         )
         plt.pcolormesh(x_sweep, y_sweep, data["amps"][0], cmap="viridis", shading="auto")
+        # print("WARNING PLOTTING SOMETHIGN DIFFERENT HERE")
+        # plt.pcolormesh(x_sweep, y_sweep, data["fit_data"], cmap="viridis", shading="auto")
         if fit:
             plt.plot(x_sweep, fit_freqs, color="k", linestyle="-.")
             plt.plot(x_sweep, fit_freqs_fit, color="r", linestyle="--")

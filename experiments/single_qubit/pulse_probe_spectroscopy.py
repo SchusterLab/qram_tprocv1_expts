@@ -43,10 +43,13 @@ class PulseProbeSpectroscopyProgram(RAveragerProgram):
         self.cfg.update(cfg.expt)
 
         qTest = self.cfg.expt.qTest
-        qZZ = self.cfg.expt.qZZ
         self.checkZZ = False
-        if qZZ is not None: self.checkZZ = True
-        else: qZZ = qTest
+        if "qZZ" in self.cfg.expt:
+            qZZ = self.cfg.expt.qZZ
+        if qZZ is None:
+            qZZ = qTest
+        if qZZ != qTest:
+            self.checkZZ = True
         self.checkEF = self.cfg.expt.checkEF
 
         self.num_qubits_sample = len(self.cfg.device.readout.frequency)

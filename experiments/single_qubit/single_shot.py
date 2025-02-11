@@ -594,7 +594,6 @@ class HistogramProgram(QutritAveragerProgram):
         qTest = self.cfg.expt.qTest
         qZZ = None
         self.checkZZ = False
-        qZZ = None
         if "qZZ" in self.cfg.expt:
             qZZ = self.cfg.expt.qZZ
         if qZZ is None:

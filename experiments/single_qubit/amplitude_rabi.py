@@ -116,6 +116,9 @@ class AmplitudeRabiProgram(QutritRAveragerProgram):
             if "pulse_type" != "gauss" and "pulse_type" != "const":
                 special = self.cfg.expt.pulse_type
 
+        if self.cfg.expt.pulse_type == "robust":
+            print("Calibrating robust pulse")
+
         # play the test pulse
         # setup pulse regs, gain set by update
         if self.checkEF:
@@ -419,7 +422,9 @@ class AmplitudeRabiExperiment(Experiment):
         n_pulses = 1
         if "n_pulses" in self.cfg.expt:
             n_pulses = self.cfg.expt.n_pulses
-        title = f"Amplitude Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Pulse Length {self.cfg.expt.sigma_test}{(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}, {n_pulses} pulse)"
+
+        # Robust pulse calibration is only for ge, if use_robust_pulses is true but doing checkEF, only the ge pulse is using the robust pulse
+        title = f"Amplitude Rabi {'EF ' if self.cfg.expt.checkEF else ''}on Q{qTest} (Pulse Length {self.cfg.expt.sigma_test if (self.cfg.expt.pulse_type != 'robust' or self.cfg.expt.checkEF) else 'Robust'}{(', ZZ Q'+str(qZZ)) if self.checkZZ else ''}, {n_pulses} pulse)"
         plt.subplot(111, title=title, xlabel="Gain [DAC units]", ylabel="Amplitude [ADC units]")
         plt.plot(data["xpts"], data["amps"], ".-")
         if fit:
