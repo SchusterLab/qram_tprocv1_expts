@@ -2794,12 +2794,13 @@ class PiMinusPiEgGfExperiment(Experiment):
 
         axs = [ax_qA, ax_qB]
         if fit:
+            x_sweep_fit = np.linspace(data["freq_sweep"][0], data["freq_sweep"][-1], 300)
             for iq, q in enumerate(self.cfg.expt.measure_qubits):
                 data_name = "amps"
                 popt = data[f"fit_q{q}_{data_name}"]
                 fit_freq = popt[1]
                 plt.sca(axs[iq])
-                plt.plot(data["freq_sweep"], fitter.gaussian(data["freq_sweep"], *popt), label="Fit")
+                plt.plot(x_sweep_fit, fitter.gaussian(x_sweep_fit, *popt), label="Fit")
                 plt.axvline(fit_freq, color="r", linestyle="--")
                 plt.legend(fontsize=18)
 
