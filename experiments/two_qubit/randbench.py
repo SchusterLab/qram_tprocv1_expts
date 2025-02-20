@@ -1558,6 +1558,10 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         self.qNotDrive = qNotDrive
         self.qSort = qSort
 
+        self.test_leakage = False
+        if "test_leakage" in self.cfg.expt:
+            self.test_leakage = self.cfg.expt.test_leakage
+
         assert qNotDrive == 1, "none of this class will work for driving Q1"
         super().__init__(soccfg, cfg)
 
@@ -1661,8 +1665,13 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
 
         # Get into the Eg-Gf subspace
         ZZ_qubit = None
-        if self.qDrive == 3:
+        use_q3_init_switch = False
+        if (self.qDrive == 3 and not self.test_leakage) or (self.qDrive == 2 and self.test_leakage):
+            use_q3_init_switch = True
+
+        if use_q3_init_switch:
             # print("WARNING: not initiating q0 in e for the q3/q1 swap")
+            print("initializing q0 in e")
             self.X_pulse(q=0, play=True)  # ZZ qubit for the q3/q1 swap
             ZZ_qubit = 0
 
@@ -1761,6 +1770,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
         thresholds: (optional) don't rerun singleshot and instead use this
         ge_avgs: (optional) don't rerun singleshot and instead use this
         angles: (optional) don't rerun singleshot and instead use this
+
+        test_leakage: True/False: if True, replaces all gates in gate list with pi*depth, initializes in the wrong state, to test the transfer into gf when switch is in the wrong state
     )
     """
 
@@ -1858,6 +1869,10 @@ class SimultaneousRBEgGfExperiment(Experiment):
             self.cfg.expt.loops = 1
         print("running", self.cfg.expt.loops, "loops")
 
+        self.test_leakage = False
+        if "test_leakage" in self.cfg.expt:
+            self.test_leakage = self.cfg.expt.test_leakage
+
         # ================= #
         # Make sure the variations picked can run
         # ================= #
@@ -1887,7 +1902,10 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
                 # gate_list.append("I")
 
-                print("gate_list =", gate_list)
+                if self.test_leakage:
+                    gate_list = ["X"] * depth + ["I"]
+
+                # print("gate_list =", gate_list)
 
                 gate_list_variations[i_depth].append(gate_list)
 
@@ -2371,6 +2389,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
 
         q0, qNotDrive, qDrive = self.cfg.expt.qubits
 
+        self.qDrive = qDrive
+        self.qNotDrive = 1
+
         unique_depths = np.average(data["xpts"], axis=0)
         print(unique_depths)
 
@@ -2400,9 +2421,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
             data["counts_calib_total"] = data["counts_calib_f_loops"]
             data["counts_raw_total"] = data["counts_raw"][1] / self.cfg.expt.reps_f
 
-        print("counts calib total shape", np.shape(data["counts_calib_total"]))
-        print(data["counts_calib_total"])
-        print("counts raw shape", np.shape(data["counts_raw_total"]))
+        # print("counts calib total shape", np.shape(data["counts_calib_total"]))
+        # print(data["counts_calib_total"])
+        # print("counts raw shape", np.shape(data["counts_raw_total"]))
         # print(data['counts_raw'])
 
         for loop in range(self.cfg.expt.loops):
@@ -2415,18 +2436,18 @@ class SimultaneousRBEgGfExperiment(Experiment):
                     # or if measure_f_only, [gg, gf, eg, ef] (the calib_order, which = raw counts order)
                     tomo_analysis = TomoAnalysis(nb_qubits=3)
                     counts_corrected = tomo_analysis.correct_readout_err(
-                        [data["counts_raw_total"][loop, idepth, ivar]], data["counts_calib_total"][loop], verbose=True
+                        [data["counts_raw_total"][loop, idepth, ivar]], data["counts_calib_total"][loop], verbose=False
                     )
-                    print("counts raw", data["counts_raw_total"][loop, idepth, ivar])
-                    print("counts_corrected", counts_corrected)
+                    # print("counts raw", data["counts_raw_total"][loop, idepth, ivar])
+                    # print("counts_corrected", counts_corrected)
                     # print(data["counts_calib_total"][loop])
                     # counts_corrected = tomo_analysis.fix_neg_counts(counts_corrected)
                     data["poplns_2q_loops"][loop, idepth, ivar, :] = counts_corrected / np.sum(counts_corrected)
 
         data["poplns_2q"] = np.average(data["poplns_2q_loops"], axis=0)
 
-        print("poplns_2q_loops shape", np.shape(data["poplns_2q_loops"]))
-        print("poplns_2q shape", np.shape(data["poplns_2q"]))
+        # print("poplns_2q_loops shape", np.shape(data["poplns_2q_loops"]))
+        # print("poplns_2q shape", np.shape(data["poplns_2q"]))
 
         probs_eg = data["poplns_2q"][:, :, self.calib_index("eg")]
         probs_gf = data["poplns_2q"][:, :, self.calib_index("gf")]
@@ -2481,13 +2502,13 @@ class SimultaneousRBEgGfExperiment(Experiment):
             np.shape(probs_gf / sum_prob_subspace)[1]
         )
 
-        print("shape sum prob_eg + prob_gf", np.shape(sum_prob_subspace))
-        print(
-            "shape average sum over each depth",
-            np.shape(data["popln_subspace_avg"]),
-            "should equal",
-            np.shape(unique_depths),
-        )
+        # print("shape sum prob_eg + prob_gf", np.shape(sum_prob_subspace))
+        # print(
+        #     "shape average sum over each depth",
+        #     np.shape(data["popln_subspace_avg"]),
+        #     "should equal",
+        #     np.shape(unique_depths),
+        # )
 
         if not fit:
             return data
@@ -2708,3 +2729,107 @@ class SimultaneousRBEgGfExperiment(Experiment):
         with self.datafile() as f:
             f.attrs["calib_order"] = json.dumps(self.calib_order, cls=NpEncoder)
         return self.fname
+
+
+class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
+    def acquire(self, progress=False, debug=False):
+        if "test_leakage" not in self.cfg.expt:
+            self.cfg.expt.test_leakage = True
+
+        assert self.cfg.expt.test_leakage
+        self.cfg.expt.variations = 1
+        super().acquire(progress=progress, debug=debug)
+
+    def calib_index(self, str_stateABC):
+        assert len(str_stateABC) == 3 or len(str_stateABC) == 2
+        if len(str_stateABC) == 2:  # pick the wrong switch state by default
+            if self.qDrive == 2:
+                stateA = "e"
+            elif self.qDrive == 3:
+                stateA = "g"
+            else:
+                assert False
+            str_stateABC = f"{stateA}{str_stateABC}"
+        assert f"{str_stateABC}" in self.calib_order
+        return self.calib_order.index(f"{str_stateABC}")
+
+    def analyze(self, data=None, fit=True, **kwargs):
+        super().analyze(data=data, fit=fit, **kwargs)
+        if data is None:
+            data = self.data
+
+        # G/B: good/bad switch state
+        bad = "g" if self.qDrive == 3 else "e"
+        good = "e" if self.qDrive == 3 else "g"
+
+        self.prob_names_index_dict = dict(
+            Beg=f"{bad}eg",
+            Bgf=f"{bad}gf",
+            Bge=f"{bad}ge",
+            Bgg=f"{bad}gg",
+            Geg=f"{good}eg",
+            Ggf=f"{good}gf",
+            Ggg=f"{good}gg",
+        )
+        self.probs_dict = dict()
+
+        for probs_name in self.prob_names_index_dict.keys():
+            # print(probs_name, self.prob_names_index_dict[probs_name])
+            probs = data[f"poplns_2q"][:, :, self.calib_index(self.prob_names_index_dict[probs_name])]
+            # print("hello???", probs)
+            self.probs_dict[probs_name] = probs
+        self.probs_dict["bad_subspace"] = self.probs_dict["Beg"] + self.probs_dict["Bgf"]
+        self.probs_dict["Bgf_bad_subspace"] = self.probs_dict["Bgf"] / self.probs_dict["bad_subspace"]
+        self.probs_dict["Beg_bad_subspace"] = self.probs_dict["Beg"] / self.probs_dict["bad_subspace"]
+
+        for probs_name in self.probs_dict.keys():
+            probs = self.probs_dict[probs_name]
+            data[f"popln_{probs_name}_std"] = np.std(probs, axis=1)
+            data[f"popln_{probs_name}_avg"] = np.average(probs, axis=1)
+            data[f"popln_{probs_name}_err"] = np.std(probs, axis=1) / np.sqrt(np.shape(probs)[1])
+            # print(probs_name, data[f"popln_{probs_name}_avg"])
+
+    def display(self, data=None, fit=False, show_all_vars=False):
+        if data is None:
+            data = self.data
+
+        plt.figure(figsize=(8, 6))
+        irb = "gate_char" in self.cfg.expt and self.cfg.expt.gate_char is not None
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf $\\times$ depth on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}, Q{self.cfg.expt.qubits[2]} From Wrong Switch State'
+
+        plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
+        depths = data["xpts"]
+        unique_depths = np.average(depths, axis=0)
+        flat_depths = np.concatenate(depths)
+        print(flat_depths)
+        flat_probs_eg = np.concatenate(data["poplns_2q"][:, :, self.calib_index("eg")])
+
+        # print("flat_probs_eg", flat_probs_eg)
+        # print("all poplns_2q\n", np.round(data["poplns_2q"], 3))
+        flat_probs_subspace = np.concatenate(data["popln_subspace"])
+        if show_all_vars:
+            plt.plot(flat_depths, flat_probs_eg, "x", color="tab:grey")
+            plt.plot(flat_depths, flat_probs_subspace, "v", color="tab:grey")
+
+        markers = ["x", "v", "o"]
+
+        plot_names = ["Beg", "Bgf", "Bgg", "Geg", "bad_subspace", "Bgf_bad_subspace", "Beg_bad_subspace"]
+        # plot_names = ["Bgf"]
+        # for i, probs_name in enumerate(self.probs_dict.keys()):
+        for i, probs_name in enumerate(plot_names):
+            plt.errorbar(
+                unique_depths,
+                data[f"popln_{probs_name}_avg"],
+                fmt=markers[i % len(markers)] + "-",
+                yerr=data[f"popln_{probs_name}_err"],
+                color=default_colors[i % len(default_colors)],
+                elinewidth=0.75,
+                label=probs_name,
+            )
+
+        plt.grid(linewidth=0.3)
+        # plt.ylim(-0.05, 1.05)
+        plt.ylim(-0.01, 0.2)
+        # plt.ylim(0.8, 1.01)
+        plt.legend()
+        plt.show()
