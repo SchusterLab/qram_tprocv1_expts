@@ -235,8 +235,13 @@ class RamseyExperiment(Experiment):
 
         avgi = idata[qTest][0]
         avgq = qdata[qTest][0]
-        amps = np.average(np.abs(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the magnitude
-        phases = np.average(np.angle(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the phase
+
+        if "full_mux_expt" in self.cfg.expt and self.cfg.expt.full_mux_expt:
+            amps = np.average(np.abs(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the magnitude
+            phases = np.average(np.angle(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the phase
+        else:
+            amps = np.abs(avgi + 1j * avgq)
+            phases = np.angle(avgi + 1j * avgq)
 
         data = {"xpts": x_pts, "avgi": avgi, "avgq": avgq, "amps": amps, "phases": phases}
         self.data = data
