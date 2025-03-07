@@ -1558,9 +1558,13 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         self.qNotDrive = qNotDrive
         self.qSort = qSort
 
-        self.test_leakage = False
-        if "test_leakage" in self.cfg.expt:
-            self.test_leakage = self.cfg.expt.test_leakage
+        self.wrong_init = False
+        if "wrong_init" in self.cfg.expt:
+            self.wrong_init = self.cfg.expt.wrong_init
+
+        self.ground_state_init = False
+        if "ground_state_init" in self.cfg.expt:
+            self.ground_state_init = self.cfg.expt.ground_state_init
 
         assert qNotDrive == 1, "none of this class will work for driving Q1"
         super().__init__(soccfg, cfg)
@@ -1666,18 +1670,19 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
         # Get into the Eg-Gf subspace
         ZZ_qubit = None
         use_q3_init_switch = False
-        if (self.qDrive == 3 and not self.test_leakage) or (self.qDrive == 2 and self.test_leakage):
+        if (self.qDrive == 3 and not self.wrong_init) or (self.qDrive == 2 and self.wrong_init):
             use_q3_init_switch = True
 
         if use_q3_init_switch:
             # print("WARNING: not initiating q0 in e for the q3/q1 swap")
-            print("initializing q0 in e")
+            # print("initializing q0 in e")
             self.X_pulse(q=0, play=True)  # ZZ qubit for the q3/q1 swap
             ZZ_qubit = 0
 
-        self.X_pulse(
-            q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
-        )
+        if not self.ground_state_init:
+            self.X_pulse(
+                q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
+            )
 
         # print("WARNING INITIATING IN GF")
         # self.X_pulse(
@@ -1771,7 +1776,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
         ge_avgs: (optional) don't rerun singleshot and instead use this
         angles: (optional) don't rerun singleshot and instead use this
 
-        test_leakage: True/False: if True, replaces all gates in gate list with pi*depth, initializes in the wrong state, to test the transfer into gf when switch is in the wrong state
+        test_leakage: True/False: if True, replaces all gates in gate list with pi*depth
+        wrong_init: initializes in the wrong state, to test the transfer into gf when switch is in the wrong state
+        ground_state_init: initializes input/output in gg instead of eg
     )
     """
 
@@ -1872,6 +1879,9 @@ class SimultaneousRBEgGfExperiment(Experiment):
         self.test_leakage = False
         if "test_leakage" in self.cfg.expt:
             self.test_leakage = self.cfg.expt.test_leakage
+        self.wrong_init = False
+        if "wrong_init" in self.cfg.expt:
+            self.wrong_init = self.cfg.expt.wrong_init
 
         # ================= #
         # Make sure the variations picked can run
@@ -2041,6 +2051,7 @@ class SimultaneousRBEgGfExperiment(Experiment):
                             qubits=[qNotDrive, qDrive],
                             qDrive=self.cfg.expt.qDrive,
                         )
+                        # print(gate_list)
                         # print(randbench)
                         # # from qick.helpers import progs2json
                         # # print(progs2json([randbench.dump_prog()]))
@@ -2735,8 +2746,11 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
     def acquire(self, progress=False, debug=False):
         if "test_leakage" not in self.cfg.expt:
             self.cfg.expt.test_leakage = True
-
         assert self.cfg.expt.test_leakage
+
+        if "ground_state_init" not in self.cfg.expt:
+            self.cfg.expt.ground_state_init = False
+
         self.cfg.expt.variations = 1
         super().acquire(progress=progress, debug=debug)
 
@@ -2753,7 +2767,7 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
         assert f"{str_stateABC}" in self.calib_order
         return self.calib_order.index(f"{str_stateABC}")
 
-    def analyze(self, data=None, fit=True, **kwargs):
+    def analyze(self, data=None, fit=False, **kwargs):
         super().analyze(data=data, fit=fit, **kwargs)
         if data is None:
             data = self.data
@@ -2789,13 +2803,15 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
             data[f"popln_{probs_name}_err"] = np.std(probs, axis=1) / np.sqrt(np.shape(probs)[1])
             # print(probs_name, data[f"popln_{probs_name}_avg"])
 
+        return data
+
     def display(self, data=None, fit=False, show_all_vars=False):
         if data is None:
             data = self.data
 
         plt.figure(figsize=(8, 6))
         irb = "gate_char" in self.cfg.expt and self.cfg.expt.gate_char is not None
-        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf $\\times$ depth on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}, Q{self.cfg.expt.qubits[2]} From Wrong Switch State'
+        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf $\\times$ depth on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}, Q{self.cfg.expt.qubits[2]} From {"Wrong" if self.cfg.expt.wrong_init else "Right"} Switch State' + (' gg' if self.cfg.expt.ground_state_init else '')
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
         depths = data["xpts"]
@@ -2813,7 +2829,10 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
 
         markers = ["x", "v", "o"]
 
-        plot_names = ["Beg", "Bgf", "Bgg", "Geg", "bad_subspace", "Bgf_bad_subspace", "Beg_bad_subspace"]
+        if self.cfg.expt.wrong_init:
+            plot_names = ["Beg", "Bgf", "Bgg", "Geg", "Ggf", "bad_subspace", "Bgf_bad_subspace", "Beg_bad_subspace"]
+        else:
+            plot_names = ["Geg", "Ggf"]
         # plot_names = ["Bgf"]
         # for i, probs_name in enumerate(self.probs_dict.keys()):
         for i, probs_name in enumerate(plot_names):
@@ -2829,7 +2848,7 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
 
         plt.grid(linewidth=0.3)
         # plt.ylim(-0.05, 1.05)
-        plt.ylim(-0.01, 0.2)
+        # plt.ylim(-0.01, 0.2)
         # plt.ylim(0.8, 1.01)
         plt.legend()
         plt.show()

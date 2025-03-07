@@ -942,7 +942,7 @@ class TomoAnalysis:
                     ax.set_title(f"{basis} start from {init_state}")
                     # plt.show()
 
-            evol_mats[basis] = np.hstack(evol_mats[basis])
+            evol_mats[basis] = np.hstack(evol_mats[basis])  # each evolved ket along a column
 
             if debug:
                 print()
@@ -1212,7 +1212,7 @@ class TomoAnalysis:
         stop_i = dim  # 1 indexed
         check = u_evals[stop_i - 1] + a / stop_i
         while check < 0:
-            rho_evals[stop_i - 1] = 0
+            # rho_evals[stop_i - 1] = 0
             a += u_evals[stop_i - 1]
             stop_i -= 1
             check = u_evals[stop_i - 1] + a / stop_i
@@ -1261,7 +1261,17 @@ class TomoAnalysis:
 
     # =========================== PLOTTING FUNCTIONS =========================== #
     def show_mat_2d(
-        self, mat, ax, title, labels, cmax=1, show_cbar=True, show_xticks=True, show_yticks=True, show=True
+        self,
+        mat,
+        ax,
+        title,
+        labels,
+        cmax=1,
+        show_cbar=True,
+        show_xticks=True,
+        show_yticks=True,
+        show=True,
+        tick_rotation=45,
     ):
         """
         Plot an arbitrary 2D matrix with labels
@@ -1270,14 +1280,16 @@ class TomoAnalysis:
         plt.title(title, fontsize=18)
         plt.imshow(np.real(mat), cmap="RdBu")
         # hinton(np.real(mat), xlabels=labels, ylabels=labels)
+        ax.tick_params(axis="both", which="minor", left=False, bottom=False, right=False, top=False)
         if show_xticks:
-            plt.xticks(np.arange(len(mat)), labels, fontsize=14, rotation=45)
+            plt.xticks(np.arange(len(mat)), labels, fontsize=17, rotation=tick_rotation)
         else:
             plt.xticks([])
         if show_yticks:
-            plt.yticks(np.arange(len(mat)), labels, fontsize=14)
+            plt.yticks(np.arange(len(mat)), labels, fontsize=17)
         else:
-            plt.yticks([])
+            ax.set_yticks(np.arange(len(mat)), labels=[""] * len(mat))
+            ax.tick_params(axis="y", which="minor", labelleft=False, left=False)
         # Loop over data dimensions and create text annotations.
         for ii in range(len(mat)):
             for jj in range(len(mat)):
@@ -1288,20 +1300,30 @@ class TomoAnalysis:
                     ha="center",
                     va="center",
                     color="w",
-                    size=9 + 6 / self.nb_qubits,
+                    size=13 + 6 / self.nb_qubits,
                     rotation=45,
                 )
         if show_cbar:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             cbar = plt.colorbar(cax=cax, ticks=[-cmax, 0, cmax])
-            cbar.ax.tick_params(labelsize=14)
+            cbar.ax.tick_params(labelsize=17)
         plt.clim(vmin=-cmax, vmax=cmax)
         if show:
             plt.tight_layout()
             plt.show()
 
-    def show_plot_rho_2d(self, rho_test, rho_id=None, title=None, cmax=None, savetitle=None, size=None):
+    def show_plot_rho_2d(
+        self,
+        rho_test,
+        rho_id=None,
+        title=None,
+        cmax=None,
+        state_num=True,
+        savetitle=None,
+        size=None,
+        ideal_name="ideal",
+    ):
         """
         Plot real and imag parts of rho, optionally also with a comparison ideal rho
         """
@@ -1310,73 +1332,94 @@ class TomoAnalysis:
         # else:
         #     plt.style.use("dark_background")
 
-        labels = self.calib_order_numeric
+        if not state_num:
+            labels = [f"$|{state}\\rangle$" for state in self.calib_order]
+            tick_rotation = 90
+        else:
+            labels = [f"$|{state}\\rangle$" for state in self.calib_order_numeric]
+            tick_rotation = 60
 
         if size is None:
             if rho_id is None:
-                size = (9.5, 5)
+                width = 10
+                height = 5
             else:
-                size = (9.5, 10)
+                width = 10
+                height = 10
+                # if self.nb_qubits == 2:
+                #     width = 5.5
+                #     height = 6
+                # if self.nb_qubits == 1:
+                #     width = 3
+                #     height = 3.5
+            size = (width, height)
 
         if rho_id is None:
-            fig = plt.figure(figsize=size)
-            ax1 = fig.add_subplot(121)
-            ax2 = fig.add_subplot(122)
+            fig, axes = plt.subplots(1, 2, figsize=size)
+            ax1 = axes[0]
+            ax2 = axes[1]
         else:
-            fig = plt.figure(figsize=size)
-            ax1 = fig.add_subplot(221)
-            ax2 = fig.add_subplot(222)
-            ax3 = fig.add_subplot(223)
-            ax4 = fig.add_subplot(224)
+            fig, axes = plt.subplots(2, 2, gridspec_kw={"height_ratios": [1, 1]}, figsize=size)
+            ax1 = axes[0, 0]
+            ax2 = axes[0, 1]
+            ax3 = axes[1, 0]
+            ax4 = axes[1, 1]
         plt.suptitle(title, fontsize=18)
         if cmax is None:
             cmax = np.max(np.abs(np.array([np.real(rho_test), np.imag(rho_test), np.real(rho_id), np.imag(rho_id)])))
         self.show_mat_2d(
             np.real(rho_test),
             ax=ax1,
-            title="Re[$\\rho_{MLE}$]",
+            title="Re[$\\rho_{\\mathrm{MLE}}$]",
             labels=labels,
             cmax=cmax,
             show_cbar=False,
             show_yticks=True,
             show=False,
+            tick_rotation=tick_rotation,
         )
         self.show_mat_2d(
             np.imag(rho_test),
             ax=ax2,
-            title="Im[$\\rho_{MLE}$]",
+            title="Im[$\\rho_{\\mathrm{MLE}}$]",
             labels=labels,
             cmax=cmax,
             show_cbar=True,
             show_yticks=False,
             show=False,
+            tick_rotation=tick_rotation,
         )
         if rho_id is not None:
             self.show_mat_2d(
                 np.real(rho_id),
                 ax=ax3,
-                title="Re[$\\rho_{Ideal}$]",
+                title="Re[$\\rho_{\\mathrm{" + ideal_name + "}}$]",
                 labels=labels,
                 cmax=cmax,
                 show_cbar=False,
                 show_yticks=True,
                 show=False,
+                tick_rotation=tick_rotation,
             )
             self.show_mat_2d(
                 np.imag(rho_id),
                 ax=ax4,
-                title="Im[$\\rho_{Ideal}$]",
+                title="Im[$\\rho_{\\mathrm{" + ideal_name + "}}$]",
                 labels=labels,
                 cmax=cmax,
                 show_cbar=True,
                 show_yticks=False,
                 show=False,
+                tick_rotation=tick_rotation,
             )
         plt.tight_layout()
 
         if savetitle is not None:
-            plt.savefig(savetitle, format="svg", bbox_inches="tight", transparent=True)
+            plt.savefig(savetitle, bbox_inches="tight", transparent=True)
+            print("Saved", savetitle)
         plt.show()
+
+        return fig
 
     def show_plot_rho_3d(
         self, rho_test, rho_id=None, title="", zmin=None, zmax=None, width=0.75, elev=30, azim=-20, savetitle=None

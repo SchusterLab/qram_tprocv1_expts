@@ -419,7 +419,7 @@ class CliffordAveragerProgram(AveragerProgram):
         """
         if name not in self.pulse_dict.keys() or reload:
             assert None not in [t_rise_us, sigma_n, tot_length_us]
-            if tot_length_us < 2*t_rise_us or tot_length_us < self.cycles2us(3):
+            if tot_length_us < 2 * t_rise_us or tot_length_us < self.cycles2us(3):
                 times_us = np.linspace(0, max(tot_length_us, self.cycles2us(3)), 10)
                 I_mhz_vs_us = np.zeros_like(times_us)
             else:
