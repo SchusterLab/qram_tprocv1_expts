@@ -255,10 +255,7 @@ def gate_sequence(rb_depth, pulse_n_seq=None, debug=False):
     assert total_clifford is not None, f"Failed to invert gate sequence! {pulse_name_seq} which brings +Z to {psi_nz}"
 
     if debug:
-        if total_clifford == "I":
-            total_clifford_mat = identity
-        else:
-            total_clifford_mat = clifford_1q[total_clifford][0]
+        total_clifford_mat = clifford_1q[total_clifford][0]
         print("Total gate matrix:\n", total_clifford_mat)
 
     return pulse_name_seq, total_clifford
@@ -1681,7 +1678,11 @@ class RBEgGfProgram(CliffordEgGfAveragerProgram):
 
         if not self.ground_state_init:
             self.X_pulse(
-                q=self.qNotDrive, ZZ_qubit=ZZ_qubit, extra_phase=-self.overall_phase[self.qSort], pihalf=False, play=True
+                q=self.qNotDrive,
+                ZZ_qubit=ZZ_qubit,
+                extra_phase=-self.overall_phase[self.qSort],
+                pihalf=False,
+                play=True,
             )
 
         # print("WARNING INITIATING IN GF")
@@ -1920,6 +1921,8 @@ class SimultaneousRBEgGfExperiment(Experiment):
                 gate_list_variations[i_depth].append(gate_list)
 
                 if "validate_variations" in self.cfg.expt and self.cfg.expt.validate_variations:
+                    if i_depth != len(depths) - 1:  # only validate for the last variation
+                        continue
                     cfg_test = AttrDict(deepcopy(self.cfg))
                     cfg_test.reps = 10
 
@@ -2792,9 +2795,17 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
             probs = data[f"poplns_2q"][:, :, self.calib_index(self.prob_names_index_dict[probs_name])]
             # print("hello???", probs)
             self.probs_dict[probs_name] = probs
+        for probs_name in self.calib_order:
+            # print(probs_name, self.prob_names_index_dict[probs_name])
+            probs = data[f"poplns_2q"][:, :, self.calib_index(probs_name)]
+            # print("hello???", probs)
+            self.probs_dict[probs_name] = probs
         self.probs_dict["bad_subspace"] = self.probs_dict["Beg"] + self.probs_dict["Bgf"]
+        self.probs_dict["good_subspace"] = self.probs_dict["Geg"] + self.probs_dict["Ggf"]
         self.probs_dict["Bgf_bad_subspace"] = self.probs_dict["Bgf"] / self.probs_dict["bad_subspace"]
         self.probs_dict["Beg_bad_subspace"] = self.probs_dict["Beg"] / self.probs_dict["bad_subspace"]
+        self.probs_dict["Ggf_good_subspace"] = self.probs_dict["Ggf"] / self.probs_dict["good_subspace"]
+        self.probs_dict["Geg_good_subspace"] = self.probs_dict["Geg"] / self.probs_dict["good_subspace"]
 
         for probs_name in self.probs_dict.keys():
             probs = self.probs_dict[probs_name]
@@ -2811,7 +2822,10 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
 
         plt.figure(figsize=(8, 6))
         irb = "gate_char" in self.cfg.expt and self.cfg.expt.gate_char is not None
-        title = f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf $\\times$ depth on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}, Q{self.cfg.expt.qubits[2]} From {"Wrong" if self.cfg.expt.wrong_init else "Right"} Switch State' + (' gg' if self.cfg.expt.ground_state_init else '')
+        title = (
+            f'{"Interleaved " + self.cfg.expt.gate_char + " Gate" if irb else ""} EgGf $\\times$ depth on Q{self.cfg.expt.qubits[0]}, Q{self.cfg.expt.qubits[1]}, Q{self.cfg.expt.qubits[2]} From {"Wrong" if self.cfg.expt.wrong_init else "Right"} Switch State'
+            + (" gg" if self.cfg.expt.ground_state_init else "")
+        )
 
         plt.subplot(111, title=title, xlabel="Sequence Depth", ylabel="Population")
         depths = data["xpts"]
@@ -2831,8 +2845,12 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
 
         if self.cfg.expt.wrong_init:
             plot_names = ["Beg", "Bgf", "Bgg", "Geg", "Ggf", "bad_subspace", "Bgf_bad_subspace", "Beg_bad_subspace"]
+            if self.cfg.expt.ground_state_init:
+                plot_names = ["Bgf", "Bgg", "Bge", "ggg", "gge", "ggf"]
         else:
-            plot_names = ["Geg", "Ggf"]
+            plot_names = ["Geg", "Ggf", "ggg", "gge", "good_subspace", "Geg_good_subspace"]
+            if self.cfg.expt.ground_state_init:
+                plot_names.append("gge")
         # plot_names = ["Bgf"]
         # for i, probs_name in enumerate(self.probs_dict.keys()):
         for i, probs_name in enumerate(plot_names):
@@ -2845,6 +2863,9 @@ class EgGfLeakageExperiment(SimultaneousRBEgGfExperiment):
                 elinewidth=0.75,
                 label=probs_name,
             )
+
+        for plot_name in self.probs_dict.keys():
+            print(plot_name, data[f"popln_{plot_name}_avg"][-1])
 
         plt.grid(linewidth=0.3)
         # plt.ylim(-0.05, 1.05)

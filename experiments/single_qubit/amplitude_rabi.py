@@ -307,8 +307,12 @@ class AmplitudeRabiExperiment(Experiment):
         if not readout_cool:
             avgi = idata[qTest][0]
             avgq = qdata[qTest][0]
-            amps = np.average(np.abs(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the magnitude
-            phases = np.average(np.angle(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the phase
+            if full_mux_expt:
+                amps = np.average(np.abs(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the magnitude
+                phases = np.average(np.angle(ishots + 1j * qshots), axis=2)[qTest]  # Calculating the phase
+            else:
+                amps = np.abs(avgi + 1j * avgq)
+                phases = np.angle(avgi + 1j * avgq)
             data.update({"xpts": xpts, "avgi": avgi, "avgq": avgq, "amps": amps, "phases": phases})
         else:
             data.update({"xpts": xpts, "idata": ishots, "qdata": qshots})

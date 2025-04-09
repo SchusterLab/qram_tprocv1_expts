@@ -523,6 +523,13 @@ class QramProtocolProgram(AbstractStateTomo2QProgram, CliffordEgGfAveragerProgra
                 if count_us < self.timestep_us:
                     self.end_times_us.append(count_us)
                 # self.sync_all(5)
+            
+            if pulse_num == 5:
+                self.sync_all()
+                self.X_pulse(q=1, play=True)
+            if pulse_num == 6:
+                self.sync_all()
+                self.Xef_pulse(q=1, play=True)
 
             prev_pulse = pulse_num
 
