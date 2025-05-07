@@ -1494,6 +1494,35 @@ class TomoAnalysis:
             plt.savefig(savetitle, format="svg", bbox_inches="tight", transparent=True)
         plt.show()
 
+    def show_n_tomo_distributions(self, n_tomo_list, title_label=None, bins=25):
+        """
+        For each element in the n_tomo, plot the distribution
+        """
+        n_tomo_avg = np.average(n_tomo_list, axis=0)
+        n_tomo_std = np.std(n_tomo_list, axis=0)
+        n_tomo_shape = n_tomo_avg.shape
+
+        fig, axs = plt.subplots(n_tomo_shape[0], n_tomo_shape[1], figsize=(6, 9), sharex="all", sharey="all")
+
+        for r in range(n_tomo_shape[0]):
+            for c in range(n_tomo_shape[1]):
+                counts_label = f"{self.meas_order[r]}: {self.calib_order_numeric[c]}"
+                plt.sca(axs[r, c])
+                # print(counts_label, n_tomo_list[:, r, c])
+                plt.hist(n_tomo_list[:, r, c], bins=bins + 2, range=(-1 / bins, 1 + 1 / bins))
+                plt.axvline(n_tomo_avg[r, c], color="red", linestyle="--", linewidth=0.5)
+                plt.axvline(0, color="k", alpha=0.5, linestyle="-", linewidth=0.5)
+                plt.axvline(1, color="k", alpha=0.5, linestyle="-", linewidth=0.5)
+                if c == 0:
+                    plt.ylabel("Counts")
+                if r == n_tomo_shape[0] - 1:
+                    plt.xlabel("Tomo Value")
+                plt.ylim(0, len(n_tomo_list))
+                plt.text(x=0.6, y=len(n_tomo_list) - 3, s=counts_label, fontsize=8)
+        plt.suptitle(f"Tomo Counts {title_label} Distribution", fontsize=10)
+        # plt.tight_layout()
+        plt.show()
+
     # =========================== VIRTUAL ROTATIONS =========================== #
     def z_gate_nq(self, phis):  # expects phis in deg
         gates = []
