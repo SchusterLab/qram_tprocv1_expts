@@ -1,10 +1,9 @@
 import numpy as np
 import os
 import yaml
+import matplotlib.pyplot as plt
 from slab.instruments import *
-from slab.experiment import Experiment
-from slab.datamanagement import SlabFile
-from slab import get_next_filename, AttrDict
+from slab import AttrDict
 import qutip as qt
 import time 
 # import matplotlib.pyplot as plt
@@ -12,14 +11,16 @@ import time
 # from TomoAnalysis import TomoAnalysis
 from TomoILC import TomoILC 
 
+experiment_path = "s:\Connie\experiments\qram_tprocv1_expts"
 config_file = 'config_q3diamond_full688and638_reset.yml'
-config_path = os.path.join(os.getcwd(), config_file)
+config_path = os.path.join(experiment_path, "configs", config_file)
 with open(config_path, 'r') as cfg_file:
     yaml_cfg = yaml.safe_load(cfg_file)
 yaml_cfg = AttrDict(yaml_cfg)
 
+waveforms_path = "S:\QRAM\qram_4QR2\optctrl_pulses"
 pulse_filename = yaml_cfg.device.qubit.pulses.pulse_pp.filename
-pulse_filepath = os.path.join(os.getcwd(), pulse_filename + '.npz')
+pulse_filepath = os.path.join(waveforms_path, pulse_filename + '.npz')
 pulse_IQ = dict() # open file
 with np.load(pulse_filepath) as npzfile:
     for key in npzfile.keys():
@@ -68,6 +69,12 @@ def get_result(pulse, times, shot_factor=1):
 
     pulse *= 1e9
     times *= 1e-9
+    plt.figure()
+    plt.plot(times, pulse[0])
+    plt.plot(times, pulse[1])
+    plt.plot(times, pulse[2])
+    plt.plot(times, pulse[3])
+    plt.show()
 
     # create pulse dictionary
     pulse_IQ = dict()

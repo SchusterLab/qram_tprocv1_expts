@@ -6,7 +6,6 @@ import numpy as np
 import yaml
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from qick import *
-from qick.helpers import gauss
 from scipy.optimize import minimize
 
 logger = logging.getLogger("qick.qick_asm")
@@ -23,15 +22,11 @@ import json
 import sys
 
 import qutip as qt
-import qutip.visualization as qplt
 import scipy as sp
 from qutip_qip.operations import rz
-from slab import AttrDict, get_next_filename
-from slab.datamanagement import SlabFile
-from slab.experiment import Experiment
-from slab.instruments import InstrumentManager
+from slab import AttrDict
 
-sys.path.append(os.getcwd() + "/../../qutip_sims")
+sys.path.append("S:\Connie\qutip_sims")
 from PulseSequence import PulseSequence
 from QSwitch import QSwitch
 from scipy.optimize import minimize

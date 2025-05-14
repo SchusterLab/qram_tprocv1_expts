@@ -9,25 +9,19 @@ from qick import *
 from qick.helpers import gauss
 from tqdm import tqdm_notebook as tqdm
 
+from slab.instruments import *
+
 expt_path = os.getcwd() + "/data"
 import json
 import sys
 
 import Pyro4.util
 import qutip as qt
-import qutip.visualization as qplt
 import scipy as sp
 import yaml
-from slab import AttrDict, get_next_filename
-from slab.datamanagement import SlabFile
-from slab.experiment import Experiment
-from slab.instruments import *
 
 import experiments as meas
 
-sys.path.append(os.getcwd() + "/../../qutip_sims")
-from PulseSequence import PulseSequence
-from QSwitch import QSwitch
 from TomoAnalysis import TomoAnalysis
 
 
@@ -44,8 +38,9 @@ class TomoILC:
         time_calib=60 * 10,
         gains=None,
         tomo_qubits=None,
-        ip_address="10.108.30.56",
-        config_file="config_q3diamond_full688and638_reset.yml",
+        ip_address="10.108.30.75", # Vibranium
+        # ip_address="10.108.30.56", # Fermium
+        config_path="s:\Connie\experiments\qram_tprocv1_expts\configs\config_q3diamond_full688and638_reset.yml",
         save_path="data_241007",
         evolv_path="evol_mats/evol_mats",
         debug=False,
@@ -63,7 +58,6 @@ class TomoILC:
         self.time = time.time()
         # load experiment config and rfsoc config
         self.im = InstrumentManager(ns_address=ip_address)
-        config_path = os.path.join(os.getcwd(), config_file)
         with open(config_path, "r") as cfg_file:
             yaml_cfg = yaml.safe_load(cfg_file)
         self.config_file = AttrDict(yaml_cfg)
@@ -164,7 +158,7 @@ class TomoILC:
 
         return IQ_scaled
 
-    def tomo_experiment(self, IQ_pulse):
+    def tomo_experiment(self, IQ_pulse, full_mux_expt=False, resonator_reset=None, use_robust_pulses=True):
 
         # take the gain that are none zero
         gains = self.gains
@@ -214,10 +208,13 @@ class TomoILC:
             # cool_qubits=self.qubit_drive,
             # use_IQ_pulse=True,
             # plot_IQ=False,
+            full_mux_expt=full_mux_expt,
+            resonator_rest=resonator_reset,
+            use_robust_pulses=use_robust_pulses, # use robust pulses for state prep + tomo
         )
 
         try:
-            self.tomoExpt.go(analyze=False, display=False, progress=self.debug, save=False)
+            self.tomoExpt.acquire(progress=self.debug, debug=False) # debug turns on plotting of single shot
         except Exception:
             print("Pyro traceback:")
             print("".join(Pyro4.util.getPyroTraceback()))
@@ -260,6 +257,10 @@ class TomoILC:
             meas_order=self.tomoExpt.meas_order,
             calib_order=self.tomoExpt.calib_order,
         )
+
+        print("tomo counts")
+        for i, basis in enumerate(self.tomoExpt.meas_order):
+            print(basis, n_tomo_raw[i])
 
         rho = tomo_analysis.get_rho_from_counts(
             n_tomo_raw=n_tomo_raw,
