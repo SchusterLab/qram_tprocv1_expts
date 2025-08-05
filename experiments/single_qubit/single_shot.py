@@ -358,7 +358,7 @@ def general_hist(
     """Compute the fidelity using overlap of the histograms"""
     fids = []
     thresholds = []
-    # this method calculates fidelity as 1-2(Neg + Nge)/N
+    # this method calculates fidelity as 1-2(Neg + Nge)/N, or 1 - P(e|g) - P(g|e), giving 0% fidelity when P(e|g) + P(g|e) = 0.5
     contrast = np.abs(((np.cumsum(n_tot_g) - np.cumsum(n_tot_e)) / (0.5 * n_tot_g.sum() + 0.5 * n_tot_e.sum())))
     tind = contrast.argmax()
     thresholds.append(bins[tind])
@@ -367,7 +367,9 @@ def general_hist(
         fids.append(contrast[tind])
     else:
         # this method calculates fidelity as
-        # (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
+        # (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N, where N is the total number of shots from both the g and e preps.
+        # This is equivalent to (P(e|e) + P(g|g))/2 since there are the same number of g prep and e prep shots.
+        # This is wrong I guess, since when P(e|g) + P(g|e) = 0.5, this gives 0.5, which is not what we want.
         fids.append(0.5 * (1 - n_tot_g[tind:].sum() / n_tot_g.sum() + 1 - n_tot_e[:tind].sum() / n_tot_e.sum()))
 
     if check_temp:

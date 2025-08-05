@@ -1,5 +1,7 @@
 import logging
 
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.style as style
 import numpy as np
@@ -66,6 +68,59 @@ def ge_label_to_numeric_str(ge_label):
         elif char == "e":
             label_numeric += "1"
     return label_numeric
+
+# Calculating colors for best contrast in tomo plotting
+# Thanks chatgpt
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i+2], 16)/255.0 for i in (0, 2, 4))
+
+def luminance(r, g, b):
+    def linearize(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r_lin, g_lin, b_lin = map(linearize, (r, g, b))
+    return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+def contrast_ratio(l1, l2):
+    return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+
+def colormap_hex(value, clim, cmap_name="RdBu"):
+    vmin, vmax = clim
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = cm.get_cmap(cmap_name)
+    rgba = cmap(norm(value))
+    return mcolors.to_hex(rgba)
+
+
+def best_greyscale_for_contrast(value, clim, cmap_name="RdBu", reduce_crowded=True):
+    """
+    Given a matplotlib colormap and a value, return the 
+    hex value for a gresyscale color with best contrast against the value on this colormap.
+    If reduce_crowded, values that are close to 0 are scaled to lighter colors to avoid overcrowding.
+    """
+    bg_hex = colormap_hex(value, clim, cmap_name=cmap_name)
+    bg_rgb = hex_to_rgb(bg_hex)
+    bg_lum = luminance(*bg_rgb)
+
+    best_contrast = 0
+    best_gray = None
+
+    for i in range(0, 256):
+        gray = i / 255
+        lum = luminance(gray, gray, gray)
+        contrast = contrast_ratio(bg_lum, lum)
+        hex_gray = "#{:02x}{:02x}{:02x}".format(i, i, i)
+        if contrast > best_contrast:
+            best_contrast = contrast
+            best_gray = i
+
+    if reduce_crowded:
+        if abs(value) < 0.1 * (clim[1] - clim[0]):
+            best_gray += (255 - best_gray) / 2
+        best_gray = int(best_gray)
+
+    hex_gray = "#{:02x}{:02x}{:02x}".format(best_gray, best_gray, best_gray)
+    return hex_gray
 
 
 class TomoAnalysis:
@@ -1285,17 +1340,21 @@ class TomoAnalysis:
         else:
             ax.set_yticks(np.arange(len(mat)), labels=[""] * len(mat))
             ax.tick_params(axis="y", which="minor", labelleft=False, left=False)
+        
+        clim = (-cmax, cmax)
         # Loop over data dimensions and create text annotations.
         for ii in range(len(mat)):
             for jj in range(len(mat)):
+                value = mat[jj, ii]
+                text_color = best_greyscale_for_contrast(value, clim, cmap_name="RdBu")
                 plt.text(
                     ii,
                     jj,
-                    round(mat[jj, ii], 3),
+                    round(value, 2),
                     ha="center",
                     va="center",
-                    color="w",
-                    size=13 + 6 / self.nb_qubits,
+                    color=text_color,
+                    size=13 + 6 / self.nb_qubits - (1 if abs(value) < 0.1 else 0),
                     rotation=45,
                 )
         if show_cbar:
@@ -1303,7 +1362,7 @@ class TomoAnalysis:
             cax = divider.append_axes("right", size="5%", pad=0.05)
             cbar = plt.colorbar(cax=cax, ticks=[-cmax, 0, cmax])
             cbar.ax.tick_params(labelsize=17)
-        plt.clim(vmin=-cmax, vmax=cmax)
+        plt.clim(vmin=clim[0], vmax=clim[1])
         if show:
             plt.tight_layout()
             plt.show()
