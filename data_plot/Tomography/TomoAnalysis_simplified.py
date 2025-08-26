@@ -100,7 +100,6 @@ class TomoAnalysis:
         self,
         nb_qubits=3,
         nb_qubits_tot=4,
-        rfsoc_config=None,
         meas_order=None,
         calib_order=None,
     ):
@@ -140,8 +139,6 @@ class TomoAnalysis:
 
         self.psi_basis = psi_basis
         self.psi_basis_flat = psi_basis_flat
-
-        self.rfsoc_config = rfsoc_config
 
     def pauli(self, i):
         return [qt.qeye(2), qt.sigmax(), qt.sigmay(), qt.sigmaz()][i]
