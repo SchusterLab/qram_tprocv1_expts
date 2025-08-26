@@ -5,3 +5,7 @@ qram-control/
 .ipynb_checkpoints/
 *.jpg
 *.history
+*.svg
+*.pdf
+*.npz
+*prx.mplstyle
