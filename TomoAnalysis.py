@@ -862,7 +862,7 @@ class TomoAnalysis:
                             drive_qubit=drive_qubit,
                             wd=wd,
                             phase=phase,
-                            type=pulse_type,
+                            pulse_type=pulse_type,
                             t_pulse=pi2_sigma,
                             sigma_n=sigma_n,
                         )

@@ -219,15 +219,16 @@ def ps_threshold_adjust(ps_thresholds_init, adjust, ge_avgs, angles, amplitude_m
 
 def flat_top_pulse(total_length, t_rise, sigma_n, npts=500):
     """
+    Generate a flat top pulse with a Gaussian ramp up and down.
     total_length: total length of the pulse
-    t_rise: total time of the ramp up and time of the ramp down
+    t_rise: time of the ramp up = time of the ramp down
     sigma_n: total number of sigmas for both the ramp up and ramp down added together
     """
     times = np.linspace(0, total_length, npts)
     output = np.ones_like(times)
-    sigma = 2 * t_rise / sigma_n
-    output[times < t_rise] = fitter.gaussian(times, a=1, x0=t_rise, sigma=sigma, y0=0)[times < t_rise]
-    output[times >= total_length - t_rise] = fitter.gaussian(times, a=1, x0=total_length - t_rise, sigma=sigma, y0=0)[
+    sigma_ns = 2 * t_rise / sigma_n
+    output[times < t_rise] = fitter.gaussian(times, a=1, x0=t_rise, sigma=sigma_ns, y0=0)[times < t_rise]
+    output[times >= total_length - t_rise] = fitter.gaussian(times, a=1, x0=total_length - t_rise, sigma=sigma_ns, y0=0)[
         times >= total_length - t_rise
     ]
     return times, output
